@@ -1,0 +1,32 @@
+app:
+  name: SmartOps
+  environment: development
+  host: 127.0.0.1
+  port: 8765
+
+storage:
+  sqlite_path: data/smartops.db
+  raw_data_dir: data/raw
+  incidents_dir: incidents
+  logs_dir: logs
+
+browser:
+  engine: playwright
+  headless: true
+  default_viewport:
+    width: 1440
+    height: 900
+  max_concurrency: 4
+
+agents:
+  codex:
+    enabled: false
+    mode: read_only
+  claude:
+    enabled: false
+    mode: read_only
+
+safety:
+  allow_production_code_changes: false
+  allow_destructive_actions: false
+  require_approval_for_sensitive_actions: true
