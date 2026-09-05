@@ -82,6 +82,10 @@ def test_bad_file_fails_run_and_records_rejection(services) -> None:
 
 
 def test_missing_adapter_is_configuration_error(services) -> None:
+    # منذ قرار التركيب (services.browser مركّب افتراضيًا)، نحاكي هنا صراحةً
+    # حالة عدم تركيب أي محوّل متصفح، للتأكد أن الحماية الدفاعية في
+    # download_report ما زالت تعمل.
+    services.browser = None
     run = services.runner.create_run(
         "collect.report", params={"system": "erp", "report": "daily_sales"}
     )

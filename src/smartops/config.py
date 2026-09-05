@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,7 @@ class StorageSettings:
     raw_data_dir: Path = Path("data/raw")
     incidents_dir: Path = Path("incidents")
     logs_dir: Path = Path("logs")
+    history_dir: Path = Path("data/history")  # أرشيف Parquet التحليلي (S-06)
 
 
 @dataclass(frozen=True)
@@ -46,11 +47,34 @@ class SafetySettings:
 
 
 @dataclass(frozen=True)
+class AgentSettings:
+    """إعداد وكيل واحد (codex أو claude). mode غير read_only غير مدعوم بعد
+    في هذه المرحلة من التركيب — راجع Services._build_agent_runner."""
+
+    enabled: bool = False
+    mode: str = "read_only"
+    executable: str = ""  # فاضي = استخدم اسم الوكيل نفسه كأمر تشغيل (codex/claude)
+
+
+@dataclass(frozen=True)
+class AgentsSettings:
+    codex: AgentSettings = field(default_factory=AgentSettings)
+    claude: AgentSettings = field(default_factory=AgentSettings)
+
+
+@dataclass(frozen=True)
+class NotifySettings:
+    webhook_url: str = ""  # فاضي = بدون قناة Webhook، السجل المحلي دايمًا شغّال
+
+
+@dataclass(frozen=True)
 class Settings:
     app: AppSettings
     storage: StorageSettings
     browser: BrowserSettings
     safety: SafetySettings
+    agents: AgentsSettings = field(default_factory=AgentsSettings)
+    notify: NotifySettings = field(default_factory=NotifySettings)
     source: Path | None = None
 
 
@@ -86,6 +110,8 @@ def load_settings(path: Path | str | None = None) -> Settings:
     browser_raw = _section(raw, "browser")
     viewport_raw = browser_raw.get("default_viewport") or {}
     safety_raw = _section(raw, "safety")
+    agents_raw = _section(raw, "agents")
+    notify_raw = _section(raw, "notify")
 
     app = AppSettings(
         name=app_raw.get("name", "SmartOps"),
@@ -98,6 +124,7 @@ def load_settings(path: Path | str | None = None) -> Settings:
         raw_data_dir=Path(storage_raw.get("raw_data_dir", "data/raw")),
         incidents_dir=Path(storage_raw.get("incidents_dir", "incidents")),
         logs_dir=Path(storage_raw.get("logs_dir", "logs")),
+        history_dir=Path(storage_raw.get("history_dir", "data/history")),
     )
     browser = BrowserSettings(
         engine=browser_raw.get("engine", "playwright"),
@@ -113,7 +140,29 @@ def load_settings(path: Path | str | None = None) -> Settings:
             safety_raw.get("require_approval_for_sensitive_actions", True)
         ),
     )
-    return Settings(app=app, storage=storage, browser=browser, safety=safety, source=config_path)
+
+    def _agent_settings(name: str) -> AgentSettings:
+        section = agents_raw.get(name) or {}
+        return AgentSettings(
+            enabled=bool(section.get("enabled", False)),
+            mode=str(section.get("mode", "read_only")),
+            executable=str(section.get("executable", "")),
+        )
+
+    agents = AgentsSettings(codex=_agent_settings("codex"), claude=_agent_settings("claude"))
+    notify = NotifySettings(
+        webhook_url=os.getenv("SMARTOPS_WEBHOOK_URL", notify_raw.get("webhook_url", "")),
+    )
+
+    return Settings(
+        app=app,
+        storage=storage,
+        browser=browser,
+        safety=safety,
+        agents=agents,
+        notify=notify,
+        source=config_path,
+    )
 
 
 def ensure_directories(settings: Settings) -> None:
@@ -123,5 +172,6 @@ def ensure_directories(settings: Settings) -> None:
         settings.storage.raw_data_dir,
         settings.storage.incidents_dir,
         settings.storage.logs_dir,
+        settings.storage.history_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)

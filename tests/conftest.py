@@ -17,6 +17,7 @@ def settings(tmp_path) -> Settings:
             raw_data_dir=tmp_path / "raw",
             incidents_dir=tmp_path / "incidents",
             logs_dir=tmp_path / "logs",
+            history_dir=tmp_path / "history",
         ),
         browser=BrowserSettings(),
         safety=SafetySettings(),
