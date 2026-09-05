@@ -1,17 +1,18 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>غرفة القيادة — SmartOps</title>
+<title>Overview — SmartOps</title>
 <link rel="stylesheet" href="static/style.css" />
 </head>
-<body>
+<body data-page="overview" data-title="Overview">
 <header class="top">
   <h1>غرفة القيادة</h1>
   <nav class="main">
     <a href="index.html" class="active">لوحة الحالة</a>
     <a href="runs.html">التشغيلات</a>
+    <a href="recordings.html">التسجيلات</a>
     <a href="incidents.html">الحوادث</a>
     <a href="files.html">الملفات</a>
   </nav>
@@ -21,53 +22,53 @@
 
   <div class="grid">
     <div class="card">
-      <h3>تشغيلات نشطة الآن</h3>
+      <h3>Active runs</h3>
       <div class="value" id="active-count">—</div>
     </div>
     <div class="card">
-      <h3>حوادث مفتوحة</h3>
+      <h3>Open incidents</h3>
       <div class="value" id="open-incidents-count">—</div>
     </div>
     <div class="card">
-      <h3>آخر نتيجة للفحص الذاتي</h3>
+      <h3>Latest health check</h3>
       <div class="value" id="selfcheck-status">—</div>
     </div>
   </div>
 
   <section class="panel">
-    <h2>فحص سريع لصحة المنصة</h2>
-    <p class="muted">يتأكد هذا الفحص أن مساحات التخزين جاهزة، ويسجّل نبضة صحة في السجل.</p>
+    <h2>Platform health check</h2>
+    <p class="muted">Confirm local storage is ready and write a health pulse to the event log.</p>
     <div class="toolbar">
-      <button id="run-selfcheck">تشغيل الفحص الذاتي الآن</button>
+      <button id="run-selfcheck">Run health check</button>
       <span class="muted" id="selfcheck-hint"></span>
     </div>
   </section>
 
   <section class="panel">
-    <h2>الأنظمة</h2>
-    <p class="muted">حالة الجلسة لكل نظام، وإمكانية جمع تقرير الآن يدويًا.</p>
+    <h2>Connected systems</h2>
+    <p class="muted">Review each system session and collect a report on demand.</p>
     <table>
       <thead>
-        <tr><th>النظام</th><th>الجلسة</th><th>التقرير</th><th></th></tr>
+        <tr><th>System</th><th>Session</th><th>Report</th><th></th></tr>
       </thead>
-      <tbody id="systems-body"><tr><td colspan="4" class="empty">جارٍ التحميل…</td></tr></tbody>
+      <tbody id="systems-body"><tr><td colspan="4" class="empty">Loading systems…</td></tr></tbody>
     </table>
   </section>
 
   <section class="panel">
-    <h2>آخر التشغيلات</h2>
+    <h2>Recent runs</h2>
     <table>
       <thead>
-        <tr><th>سير العمل</th><th>الحالة</th><th>بدأ في</th><th></th></tr>
+        <tr><th>Workflow</th><th>Status</th><th>Started</th><th></th></tr>
       </thead>
-      <tbody id="recent-runs"><tr><td colspan="4" class="empty">جارٍ التحميل…</td></tr></tbody>
+      <tbody id="recent-runs"><tr><td colspan="4" class="empty">Loading runs…</td></tr></tbody>
     </table>
   </section>
 
   <section class="panel">
-    <h2>آخر الأحداث <span id="live-dot" class="live-dot"></span></h2>
+    <h2>Live activity <span id="live-dot" class="live-dot"></span></h2>
     <ul class="timeline" id="live-events">
-      <li class="empty">لا توجد أحداث بعد</li>
+      <li class="empty">No events yet</li>
     </ul>
   </section>
 </main>
@@ -93,20 +94,20 @@ async function loadDashboard() {
     if (lastSelfcheck) {
       statusEl.appendChild(statusBadge(RUN_STATUS_LABELS, lastSelfcheck.status));
     } else {
-      statusEl.textContent = "لم يُشغَّل بعد";
+      statusEl.textContent = "Not run yet";
     }
 
     const tbody = document.getElementById("recent-runs");
     tbody.innerHTML = "";
     if (runs.items.length === 0) {
-      tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["لا توجد تشغيلات بعد"])]));
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["No runs yet"])]));
     }
     for (const run of runs.items) {
       const tr = el("tr", {}, [
         el("td", {}, [run.workflow_key]),
         el("td", {}, [statusBadge(RUN_STATUS_LABELS, run.status)]),
         el("td", {}, [formatDate(run.started_at || run.created_at)]),
-        el("td", {}, [link("التفاصيل", `run.html?id=${encodeURIComponent(run.id)}`)]),
+        el("td", {}, [link("View", `run.html?id=${encodeURIComponent(run.id)}`)]),
       ]);
       tbody.appendChild(tr);
     }
@@ -121,22 +122,22 @@ async function loadSystems() {
     const systems = await getJSON("/api/systems");
     tbody.innerHTML = "";
     if (systems.items.length === 0) {
-      tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["لا توجد أنظمة معرّفة بعد"])]));
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["No systems configured yet"])]));
       return;
     }
     for (const system of systems.items) {
       for (const [index, report] of system.reports.entries()) {
-        const button = el("button", {}, ["جمع الآن"]);
+        const button = el("button", {}, ["Collect now"]);
         button.addEventListener("click", async () => {
           button.disabled = true;
-          button.textContent = "جارٍ الجمع…";
+          button.textContent = "Collecting…";
           try {
             await postJSON(`/api/systems/${encodeURIComponent(system.key)}/${encodeURIComponent(report.key)}/collect`, {});
             await loadDashboard();
-            button.textContent = "تم ✅";
+            button.textContent = "Collected";
           } catch (err) {
             showError(document.getElementById("error"), err);
-            button.textContent = "جمع الآن";
+            button.textContent = "Collect now";
           } finally {
             button.disabled = false;
           }
@@ -160,29 +161,29 @@ async function loadSystems() {
 
 function sessionStatusCell(system) {
   if (system.auth_mode !== "session") {
-    return el("td", {}, [badge("بلا مصادقة", "gray")]);
+    return el("td", {}, [badge("No authentication", "gray")]);
   }
   if (!system.session_exists) {
     return el("td", {}, [
-      badge("الجلسة منتهية", "red"),
-      el("div", { class: "muted hint" }, [`سجّل الدخول من الطرفية: python -m smartops login ${system.key}`]),
+      badge("Session expired", "red"),
+      el("div", { class: "muted hint" }, [`Sign in from the terminal: python -m smartops login ${system.key}`]),
     ]);
   }
   const hours = system.session_age_hours != null ? system.session_age_hours.toFixed(1) : "؟";
   return el("td", {}, [
-    badge("متصل", "green"),
-    el("div", { class: "muted hint" }, [`عمر الجلسة: ${hours} ساعة`]),
+    badge("Connected", "green"),
+    el("div", { class: "muted hint" }, [`Session age: ${hours} hours`]),
   ]);
 }
 
 document.getElementById("run-selfcheck").addEventListener("click", async (event) => {
   const button = event.target;
   button.disabled = true;
-  document.getElementById("selfcheck-hint").textContent = "جارٍ التشغيل…";
+  document.getElementById("selfcheck-hint").textContent = "Running…";
   try {
     const run = await postJSON("/api/runs", { workflow: "platform.selfcheck", start: true });
     document.getElementById("selfcheck-hint").textContent =
-      run.status === "succeeded" ? "تم بنجاح ✅" : `الحالة: ${run.status}`;
+      run.status === "succeeded" ? "Completed" : `Status: ${run.status}`;
     await loadDashboard();
   } catch (err) {
     showError(document.getElementById("error"), err);
@@ -204,7 +205,7 @@ function renderLiveEvents() {
     })
     .slice(0, 15);
   if (events.length === 0) {
-    list.appendChild(el("li", { class: "empty" }, ["لا توجد أحداث بعد"]));
+    list.appendChild(el("li", { class: "empty" }, ["No events yet"]));
     return;
   }
   for (const evt of events) {

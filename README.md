@@ -75,6 +75,15 @@
 
 ## التشغيل المحلي
 
+### تشغيل بنقرة واحدة على Windows
+
+اعمل double-click على `START.cmd` في جذر المشروع. الملف يفحص Python والمتطلبات،
+يشغّل خادم SmartOps مرة واحدة فقط، ينتظر نجاح `/health`، ثم يفتح غرفة القيادة
+في Google Chrome. سجلات التشغيل وملف PID محفوظة خارج المستودع في
+`%LOCALAPPDATA%\SmartOps\launcher`.
+
+للتشغيل اليدوي أو التطوير:
+
 ```bash
 pip install -e ".[dev]"
 pytest -q

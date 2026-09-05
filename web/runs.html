@@ -1,17 +1,18 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>التشغيلات — SmartOps</title>
+<title>Runs — SmartOps</title>
 <link rel="stylesheet" href="static/style.css" />
 </head>
-<body>
+<body data-page="runs" data-title="Runs">
 <header class="top">
   <h1>غرفة القيادة</h1>
   <nav class="main">
     <a href="index.html">لوحة الحالة</a>
     <a href="runs.html" class="active">التشغيلات</a>
+    <a href="recordings.html">التسجيلات</a>
     <a href="incidents.html">الحوادث</a>
     <a href="files.html">الملفات</a>
   </nav>
@@ -20,38 +21,31 @@
   <div id="error"></div>
 
   <section class="panel">
-    <h2>تشغيل سير عمل جديد</h2>
-    <p class="muted">مثال جاهز: <code>platform.selfcheck</code> (فحص صحة المنصة، لا يحتاج أي إعداد إضافي).</p>
+    <h2>Start a workflow</h2>
+    <p class="muted">Ready to use: <code>platform.selfcheck</code> verifies the local platform without any extra configuration.</p>
     <div class="toolbar">
-      <input type="text" id="workflow-key" placeholder="مفتاح سير العمل" value="platform.selfcheck" />
-      <button id="start-run">تشغيل</button>
+      <input type="text" id="workflow-key" placeholder="Workflow key" value="platform.selfcheck" />
+      <button id="start-run">Start run</button>
     </div>
     <details>
-      <summary class="muted">معطيات إضافية (اختياري)</summary>
-      <textarea id="workflow-params" placeholder='مثال: {"system": "erp_demo", "report": "daily_sales"}'></textarea>
+      <summary class="muted">Optional parameters</summary>
+      <textarea id="workflow-params" placeholder='Example: {"system": "erp_demo", "report": "daily_sales"}'></textarea>
     </details>
   </section>
 
   <section class="panel">
-    <h2>كل التشغيلات</h2>
+    <h2>All runs</h2>
     <div class="toolbar">
-      <label class="muted" for="status-filter">فلترة بالحالة:</label>
+      <label class="muted" for="status-filter">Status:</label>
       <select id="status-filter">
-        <option value="">كل الحالات</option>
-        <option value="queued">في الانتظار</option>
-        <option value="running">قيد التنفيذ</option>
-        <option value="waiting">معلّق مؤقتًا</option>
-        <option value="retrying">يعيد المحاولة</option>
-        <option value="succeeded">نجح</option>
-        <option value="failed">فشل</option>
-        <option value="cancelled">أُلغي</option>
+        <option value="">All statuses</option><option value="queued">Queued</option><option value="running">Running</option><option value="waiting">Waiting</option><option value="retrying">Retrying</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option>
       </select>
     </div>
     <table>
       <thead>
-        <tr><th>سير العمل</th><th>الحالة</th><th>أُنشئ في</th><th>انتهى في</th><th></th></tr>
+        <tr><th>Workflow</th><th>Status</th><th>Created</th><th>Finished</th><th></th></tr>
       </thead>
-      <tbody id="runs-body"><tr><td colspan="5" class="empty">جارٍ التحميل…</td></tr></tbody>
+      <tbody id="runs-body"><tr><td colspan="5" class="empty">Loading runs…</td></tr></tbody>
     </table>
   </section>
 </main>
@@ -69,7 +63,7 @@ async function loadRuns() {
     const tbody = document.getElementById("runs-body");
     tbody.innerHTML = "";
     if (data.items.length === 0) {
-      tbody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "empty" }, ["لا توجد تشغيلات مطابقة"])]));
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "empty" }, ["No matching runs"])]));
       return;
     }
     for (const run of data.items) {
@@ -78,7 +72,7 @@ async function loadRuns() {
         el("td", {}, [statusBadge(RUN_STATUS_LABELS, run.status)]),
         el("td", {}, [formatDate(run.created_at)]),
         el("td", {}, [formatDate(run.finished_at)]),
-        el("td", {}, [link("التفاصيل", `run.html?id=${encodeURIComponent(run.id)}`)]),
+        el("td", {}, [link("View", `run.html?id=${encodeURIComponent(run.id)}`)]),
       ]));
     }
   } catch (err) {
@@ -98,7 +92,7 @@ document.getElementById("start-run").addEventListener("click", async (event) => 
     try {
       params = JSON.parse(raw);
     } catch (_) {
-      showError(errorBox, new Error("المعطيات الإضافية يجب أن تكون بصيغة صحيحة، راجعها من فضلك"));
+      showError(errorBox, new Error("Optional parameters must be valid JSON."));
       return;
     }
   }

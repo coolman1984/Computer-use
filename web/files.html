@@ -1,17 +1,18 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>الملفات — SmartOps</title>
+<title>Files — SmartOps</title>
 <link rel="stylesheet" href="static/style.css" />
 </head>
-<body>
+<body data-page="files" data-title="Files">
 <header class="top">
   <h1>غرفة القيادة</h1>
   <nav class="main">
     <a href="index.html">لوحة الحالة</a>
     <a href="runs.html">التشغيلات</a>
+    <a href="recordings.html">التسجيلات</a>
     <a href="incidents.html">الحوادث</a>
     <a href="files.html" class="active">الملفات</a>
   </nav>
@@ -20,18 +21,18 @@
   <div id="error"></div>
 
   <section class="panel">
-    <h2>الملفات المنزَّلة</h2>
-    <p class="muted">كل ملف تم تنزيله من أي نظام، مع نتيجة التحقق منه قبل اعتماده.</p>
+    <h2>Downloaded files</h2>
+    <p class="muted">Every file collected from every system, with its validation result before approval.</p>
     <div class="toolbar">
-      <label class="muted" for="run-filter">فلترة حسب معرّف تشغيل معيّن (اختياري):</label>
-      <input type="text" id="run-filter" placeholder="مثال: run_01ABC…" />
-      <button id="apply-filter">تطبيق</button>
+      <label class="muted" for="run-filter">Filter by run ID (optional):</label>
+      <input type="text" id="run-filter" placeholder="Example: run_01ABC…" />
+      <button id="apply-filter">Apply</button>
     </div>
     <table>
       <thead>
-        <tr><th>النظام</th><th>التقرير</th><th>الحالة</th><th>الحجم</th><th>عدد الصفوف</th><th>وقت التنزيل</th></tr>
+        <tr><th>System</th><th>Report</th><th>Status</th><th>Size</th><th>Rows</th><th>Downloaded</th></tr>
       </thead>
-      <tbody id="files-body"><tr><td colspan="6" class="empty">جارٍ التحميل…</td></tr></tbody>
+      <tbody id="files-body"><tr><td colspan="6" class="empty">Loading files…</td></tr></tbody>
     </table>
   </section>
 </main>
@@ -42,10 +43,10 @@ const { getJSON, formatDate, statusBadge, VALIDATION_STATUS_LABELS, showError, e
 const errorBox = document.getElementById("error");
 
 function formatSize(bytes) {
-  if (!bytes) return "0 بايت";
-  if (bytes < 1024) return `${bytes} بايت`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} ك.بايت`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} م.بايت`;
+  if (!bytes) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 async function loadFiles() {
@@ -56,7 +57,7 @@ async function loadFiles() {
     const tbody = document.getElementById("files-body");
     tbody.innerHTML = "";
     if (data.items.length === 0) {
-      tbody.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "empty" }, ["لا توجد ملفات مطابقة"])]));
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "empty" }, ["No matching files"])]));
       return;
     }
     for (const file of data.items) {

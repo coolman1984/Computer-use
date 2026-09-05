@@ -36,6 +36,9 @@ class StorageSettings:
     systems_dir: Path = Path("config/systems")
     # تسجيلات المتصفح قد تضم لقطات وtrace وHAR؛ الإنتاج يضعها خارج المستودع.
     recordings_dir: Path = Path("data/recordings")
+    recordings_backup_dir: Path = Path("data/recording-backups")
+    # صفر = لا حذف دائم تلقائيًا. لا يُنفذ purge إلا مع إعداد الأمان الصريح.
+    recordings_retention_days: int = 0
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,7 @@ class SafetySettings:
     allow_production_code_changes: bool = False
     allow_destructive_actions: bool = False
     require_approval_for_sensitive_actions: bool = True
+    allow_recording_purge: bool = False
 
 
 @dataclass(frozen=True)
@@ -142,6 +146,8 @@ def load_settings(path: Path | str | None = None) -> Settings:
         recordings_dir=Path(
             os.getenv("SMARTOPS_RECORDINGS_DIR", storage_raw.get("recordings_dir", "data/recordings"))
         ),
+        recordings_backup_dir=Path(os.getenv("SMARTOPS_RECORDINGS_BACKUP_DIR", storage_raw.get("recordings_backup_dir", "data/recording-backups"))),
+        recordings_retention_days=int(storage_raw.get("recordings_retention_days", 0)),
     )
     browser = BrowserSettings(
         engine=browser_raw.get("engine", "playwright"),
@@ -156,6 +162,7 @@ def load_settings(path: Path | str | None = None) -> Settings:
         require_approval_for_sensitive_actions=bool(
             safety_raw.get("require_approval_for_sensitive_actions", True)
         ),
+        allow_recording_purge=bool(safety_raw.get("allow_recording_purge", False)),
     )
 
     def _agent_settings(name: str) -> AgentSettings:
@@ -192,6 +199,7 @@ def ensure_directories(settings: Settings) -> None:
         settings.storage.history_dir,
         settings.storage.sessions_dir,
         settings.storage.recordings_dir,
+        settings.storage.recordings_backup_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
     try:

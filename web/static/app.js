@@ -1,4 +1,37 @@
-/* دوال مشتركة لكل صفحات غرفة القيادة: نداءات API، تحويل الحالات لعربي، وبناء عناصر HTML بسيطة. */
+/* Shared UI utilities and the English SmartOps application shell. */
+
+function mountAppShell() {
+  const page = document.body.dataset.page || "overview";
+  const title = document.body.dataset.title || "Overview";
+  const nav = [
+    ["overview", "Overview", "index.html", "⌂"],
+    ["runs", "Runs", "runs.html", "↗"],
+    ["recordings", "Recordings", "recordings.html", "●"],
+    ["incidents", "Incidents", "incidents.html", "!"],
+    ["files", "Files", "files.html", "□"],
+  ];
+  const links = nav.map(([key, label, href, icon]) =>
+    `<a class="side-nav-link${key === page ? " active" : ""}" href="${href}"${key === page ? ' aria-current="page"' : ""}><span class="nav-icon" aria-hidden="true">${icon}</span>${label}</a>`
+  ).join("");
+  const sidebar = document.createElement("aside");
+  sidebar.className = "app-sidebar";
+  sidebar.innerHTML = `<a class="brand" href="index.html" aria-label="SmartOps home"><span class="brand-mark">S</span><span><strong>SmartOps</strong><small>OPERATIONS OS</small></span></a><nav class="side-nav" aria-label="Primary navigation">${links}</nav><div class="sidebar-footer"><span class="status-dot" aria-hidden="true"></span><span>Local workspace</span></div>`;
+  const main = document.querySelector("main");
+  if (!main) return;
+  const topbar = document.createElement("div");
+  topbar.className = "app-topbar";
+  topbar.innerHTML = `<div><p class="eyebrow">OPERATIONS CENTER</p><h1>${title}</h1></div><div class="topbar-actions"><span class="workspace-status"><span class="status-dot" aria-hidden="true"></span>System online</span><button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">☰</button></div>`;
+  main.prepend(topbar);
+  document.body.prepend(sidebar);
+  document.querySelector("header.top")?.remove();
+  const toggle = topbar.querySelector(".menu-toggle");
+  toggle?.addEventListener("click", () => {
+    const open = document.body.classList.toggle("sidebar-open");
+    toggle.setAttribute("aria-expanded", String(open));
+  });
+}
+
+mountAppShell();
 
 const SmartOps = (() => {
   async function getJSON(url) {
@@ -11,7 +44,7 @@ const SmartOps = (() => {
       } catch (_) {
         /* تجاهل: مفيش تفاصيل إضافية */
       }
-      throw new Error(detail || "تعذّر الاتصال بالمنصة");
+      throw new Error(detail || "Could not connect to SmartOps.");
     }
     return res.json();
   }
@@ -29,85 +62,49 @@ const SmartOps = (() => {
       /* بلا محتوى */
     }
     if (!res.ok) {
-      const message = body?.detail?.message || body?.detail || "فشل الطلب";
+      const message = body?.detail?.message || body?.detail || "Request failed.";
       throw new Error(message);
     }
     return body;
   }
 
   const RUN_STATUS_LABELS = {
-    queued: ["في الانتظار", "gray"],
-    running: ["قيد التنفيذ", "blue"],
-    waiting: ["معلّق مؤقتًا", "yellow"],
-    retrying: ["يعيد المحاولة", "orange"],
-    succeeded: ["نجح", "green"],
-    failed: ["فشل", "red"],
-    cancelled: ["أُلغي", "gray"],
+    queued: ["Queued", "gray"], running: ["Running", "blue"], waiting: ["Waiting", "yellow"],
+    retrying: ["Retrying", "orange"], succeeded: ["Succeeded", "green"], failed: ["Failed", "red"], cancelled: ["Cancelled", "gray"],
   };
 
   const STEP_STATUS_LABELS = {
-    pending: ["في الانتظار", "gray"],
-    running: ["قيد التنفيذ", "blue"],
-    waiting: ["معلّق", "yellow"],
-    retrying: ["يعيد المحاولة", "orange"],
-    succeeded: ["نجحت", "green"],
-    failed: ["فشلت", "red"],
-    skipped: ["تم تخطّيها", "gray"],
+    pending: ["Pending", "gray"], running: ["Running", "blue"], waiting: ["Waiting", "yellow"],
+    retrying: ["Retrying", "orange"], succeeded: ["Succeeded", "green"], failed: ["Failed", "red"], skipped: ["Skipped", "gray"],
   };
 
   const VALIDATION_STATUS_LABELS = {
-    pending: ["قيد التحقق", "yellow"],
-    passed: ["سليم", "green"],
-    failed: ["مرفوض", "red"],
+    pending: ["Pending", "yellow"], passed: ["Valid", "green"], failed: ["Rejected", "red"],
   };
 
   const INCIDENT_STATUS_LABELS = {
-    open: ["مفتوحة", "red"],
-    diagnosing: ["قيد التشخيص", "orange"],
-    fixing: ["قيد الإصلاح", "yellow"],
-    resolved: ["تم الحل", "green"],
-    escalated: ["مُصعَّدة لشخص", "blue"],
+    open: ["Open", "red"], diagnosing: ["Diagnosing", "orange"], fixing: ["Fixing", "yellow"],
+    resolved: ["Resolved", "green"], escalated: ["Escalated", "blue"],
   };
 
   const SEVERITY_LABELS = {
-    debug: ["تفاصيل", "gray"],
-    info: ["معلومة", "blue"],
-    warning: ["تنبيه", "yellow"],
-    error: ["خطأ", "red"],
-    critical: ["حرج", "red"],
+    debug: ["Debug", "gray"], info: ["Info", "blue"], warning: ["Warning", "yellow"],
+    error: ["Error", "red"], critical: ["Critical", "red"],
   };
 
   const EVENT_TYPE_LABELS = {
-    run_created: "تم إنشاء التشغيل",
-    run_started: "بدأ التشغيل",
-    run_waiting: "التشغيل معلّق مؤقتًا",
-    run_resumed: "استؤنف التشغيل",
-    run_succeeded: "اكتمل التشغيل بنجاح",
-    run_failed: "فشل التشغيل",
-    run_cancelled: "أُلغي التشغيل",
-    step_started: "بدأت خطوة",
-    step_succeeded: "نجحت خطوة",
-    step_failed: "فشلت خطوة",
-    step_retry_scheduled: "تمت جدولة إعادة محاولة",
-    file_downloaded: "تم تنزيل ملف",
-    file_validated: "تم التحقق من ملف",
-    file_rejected: "تم رفض ملف",
-    alert_raised: "تنبيه من المنصة",
-    incident_opened: "تم فتح حادثة",
-    incident_closed: "تم إغلاق حادثة",
-    agent_run_started: "بدأ وكيل الذكاء الاصطناعي",
-    agent_run_finished: "انتهى وكيل الذكاء الاصطناعي",
-    escalated: "تم التصعيد",
+    run_created: "Run created", run_started: "Run started", run_waiting: "Run waiting", run_resumed: "Run resumed",
+    run_succeeded: "Run completed", run_failed: "Run failed", run_cancelled: "Run cancelled",
+    step_started: "Step started", step_succeeded: "Step completed", step_failed: "Step failed", step_retry_scheduled: "Retry scheduled",
+    file_downloaded: "File downloaded", file_validated: "File validated", file_rejected: "File rejected", alert_raised: "Platform alert",
+    incident_opened: "Incident opened", incident_closed: "Incident closed", agent_run_started: "AI agent started", agent_run_finished: "AI agent finished", escalated: "Escalated",
+    recording_created: "Recording created", recording_started: "Browser recording started", recording_paused: "Recording paused", recording_resumed: "Recording resumed", recording_stopped: "Recording completed", recording_failed: "Recording failed", recording_deleted: "Recording moved to trash", recording_restored: "Recording restored", recording_draft_created: "Automation draft created",
   };
 
   const ERROR_CLASS_LABELS = {
-    transient: "عطل مؤقت",
-    rate_limit: "تم تجاوز الحد المسموح مؤقتًا",
-    auth: "انتهت صلاحية الجلسة",
-    target_not_found: "العنصر المطلوب غير موجود",
-    data_quality: "مشكلة في جودة الملف",
-    permanent: "خطأ في الإعداد يحتاج تصحيحًا يدويًا",
-    internal: "خطأ غير متوقع داخل المنصة",
+    transient: "Temporary failure", rate_limit: "Rate limited", auth: "Session expired",
+    target_not_found: "Target not found", data_quality: "File quality issue",
+    permanent: "Configuration error", internal: "Internal platform error",
   };
 
   function badge(label, color) {
@@ -126,7 +123,7 @@ const SmartOps = (() => {
     if (!iso) return "—";
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return iso;
-    return date.toLocaleString("ar-EG", {
+    return date.toLocaleString("en-US", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",

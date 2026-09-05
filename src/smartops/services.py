@@ -27,6 +27,7 @@ from .storage.repositories import (
     IncidentRepository,
     RunRepository,
     StepRepository,
+    RecordingRepository,
 )
 from .workflows.profiles import SystemRegistry
 
@@ -60,6 +61,7 @@ class Services:
         self.files = FileRepository(self.db, self.clock)
         self.incidents = IncidentRepository(self.db, self.clock)
         self.agent_runs = AgentRunRepository(self.db, self.clock)
+        self.recordings = RecordingRepository(self.db, self.clock)
 
         self.bus = EventBus()
         self.events = EventLog(EventRepository(self.db, self.clock), self.bus, self.clock)
@@ -77,6 +79,12 @@ class Services:
         # settings.storage.systems_dir، أو فاضي لو المجلد غير موجود. التعريفات
         # الحقيقية تعيش خارج المستودع عبر SMARTOPS_SYSTEMS_DIR (D023).
         self.systems = SystemRegistry.load(self.settings.storage.systems_dir)
+
+        from .recordings.manager import RecordingManager
+        self.recording_manager = RecordingManager(self)
+        self.recording_manager.recover()
+        from .recordings.recovery import RecordingRecovery
+        self.recording_recovery = RecordingRecovery(self)
 
         notifiers: list[Any] = [
             LocalLogNotifier(self.settings.storage.logs_dir / "alerts.jsonl", clock=self.clock)

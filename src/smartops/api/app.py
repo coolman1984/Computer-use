@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..adapters.notify.local import LocalLogNotifier
 from ..core.errors import SmartOpsError
-from ..domain.enums import IncidentStatus, RunStatus, TriggerType
+from ..domain.enums import IncidentStatus, RunStatus, TriggerType, RecordingStatus
+from ..recordings.artifacts import preview_path
 from ..sessions import session_age_hours, session_exists
 from ..services import Services
 from .ws import create_ws_router
@@ -35,6 +36,11 @@ class CreateRunRequest(BaseModel):
     start: bool = Field(default=True, description="ابدأ التنفيذ فورًا")
 
 
+class CreateRecordingRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    system_key: str = Field(min_length=1, max_length=120)
+
+
 def create_app(services: Services | None = None) -> FastAPI:
     app = FastAPI(title="SmartOps", version="0.1.0")
 
@@ -48,8 +54,8 @@ def create_app(services: Services | None = None) -> FastAPI:
         app.mount("/app", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "service": "smartops"}
+    def health(svc: Services = Depends(provide)) -> dict[str, Any]:
+        return {"status": "ok", "service": "smartops", "recorder": svc.recording_recovery.health()}
 
     @app.get("/")
     def root(svc: Services = Depends(provide)) -> dict[str, Any]:
@@ -164,6 +170,54 @@ def create_app(services: Services | None = None) -> FastAPI:
                 }
             )
         return {"items": items}
+
+    @app.get("/api/recordings")
+    def list_recordings(
+        include_deleted: bool = False, status: RecordingStatus | None = None,
+        limit: int = Query(default=100, le=500), svc: Services = Depends(provide),
+    ) -> dict[str, Any]:
+        return {"items": [r.to_dict() for r in svc.recordings.list(include_deleted=include_deleted, status=status, limit=limit)]}
+
+    @app.post("/api/recordings", status_code=201)
+    def create_recording(body: CreateRecordingRequest, svc: Services = Depends(provide)) -> dict[str, Any]:
+        try: return svc.recording_manager.create(body.name, body.system_key).to_dict()
+        except SmartOpsError as exc: raise HTTPException(status_code=400, detail=exc.to_dict()) from exc
+
+    @app.get("/api/recordings/{recording_id}")
+    def recording_detail(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
+        record = svc.recordings.get(recording_id)
+        if not record: raise HTTPException(status_code=404, detail="التسجيل غير موجود")
+        return {"recording": record.to_dict(), "steps": [s.to_dict() for s in svc.recordings.steps(recording_id)]}
+
+    def _recording_control(action: str, recording_id: str, svc: Services) -> dict[str, Any]:
+        try: return getattr(svc.recording_manager, action)(recording_id).to_dict()
+        except SmartOpsError as exc: raise HTTPException(status_code=400, detail=exc.to_dict()) from exc
+
+    @app.post("/api/recordings/{recording_id}/start")
+    def start_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]: return _recording_control("start", recording_id, svc)
+    @app.post("/api/recordings/{recording_id}/pause")
+    def pause_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]: return _recording_control("pause", recording_id, svc)
+    @app.post("/api/recordings/{recording_id}/resume")
+    def resume_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]: return _recording_control("resume", recording_id, svc)
+    @app.post("/api/recordings/{recording_id}/stop")
+    def stop_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]: return _recording_control("stop", recording_id, svc)
+    @app.post("/api/recordings/{recording_id}/rerecord")
+    def rerecord(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]: return _recording_control("rerecord", recording_id, svc)
+    @app.post("/api/recordings/{recording_id}/delete")
+    def delete_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]: return _recording_control("delete", recording_id, svc)
+    @app.post("/api/recordings/{recording_id}/restore")
+    def restore_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]: return _recording_control("restore", recording_id, svc)
+    @app.post("/api/recordings/{recording_id}/draft")
+    def recording_draft(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]: return _recording_control("draft", recording_id, svc)
+
+    @app.get("/api/recordings/{recording_id}/artifacts/{name:path}")
+    def recording_artifact(recording_id: str, name: str, svc: Services = Depends(provide)) -> Response:
+        record=svc.recordings.get(recording_id)
+        if not record: raise HTTPException(status_code=404, detail="التسجيل غير موجود")
+        path=preview_path(Path(record.artifact_dir), name)
+        if not path: raise HTTPException(status_code=404, detail="هذا الملف غير متاح للعرض")
+        media="application/json" if path.suffix == ".json" else "image/png"
+        return Response(path.read_bytes(), media_type=media)
 
     @app.get("/api/alerts")
     def list_alerts(limit: int = Query(default=100, le=1000), svc: Services = Depends(provide)) -> dict[str, Any]:

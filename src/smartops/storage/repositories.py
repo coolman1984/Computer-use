@@ -113,6 +113,11 @@ class RecordingRepository(BaseRepository):
     def steps(self, recording_id: str) -> list[RecordingStep]:
         return [self._step(r) for r in self.db.connection.execute("SELECT * FROM recording_steps WHERE recording_id=? ORDER BY seq", (recording_id,))]
 
+    def purge(self, recording_id: str) -> None:
+        """يحذف صف السجل بعد أن أزال maintenance ملفاته الخاصة."""
+        with self.db.transaction() as tx:
+            tx.execute("DELETE FROM recordings WHERE id=? AND deleted_at IS NOT NULL", (recording_id,))
+
 
 class RunRepository(BaseRepository):
     @staticmethod

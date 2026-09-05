@@ -1,45 +1,46 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>تفاصيل تشغيل — SmartOps</title>
+<title>Run details — SmartOps</title>
 <link rel="stylesheet" href="static/style.css" />
 </head>
-<body>
+<body data-page="runs" data-title="Run details">
 <header class="top">
   <h1>غرفة القيادة</h1>
   <nav class="main">
     <a href="index.html">لوحة الحالة</a>
     <a href="runs.html" class="active">التشغيلات</a>
+    <a href="recordings.html">التسجيلات</a>
     <a href="incidents.html">الحوادث</a>
     <a href="files.html">الملفات</a>
   </nav>
 </header>
 <main>
   <div id="error"></div>
-  <p class="muted"><a class="link" href="runs.html">« الرجوع لقائمة التشغيلات</a></p>
+  <p class="muted"><a class="link" href="runs.html">← Back to runs</a></p>
 
   <section class="panel">
-    <h2>بيانات التشغيل</h2>
-    <div class="grid" id="run-info"><div class="empty">جارٍ التحميل…</div></div>
+    <h2>Run summary</h2>
+    <div class="grid" id="run-info"><div class="empty">Loading run…</div></div>
     <div class="toolbar">
-      <button id="retry-button">إعادة المحاولة الآن</button>
+      <button id="retry-button">Retry now</button>
       <span class="muted" id="retry-hint"></span>
     </div>
   </section>
 
   <section class="panel">
-    <h2>الخطوات</h2>
+    <h2>Steps</h2>
     <table>
-      <thead><tr><th>الخطوة</th><th>الحالة</th><th>عدد المحاولات</th><th>ملاحظة</th></tr></thead>
-      <tbody id="steps-body"><tr><td colspan="4" class="empty">جارٍ التحميل…</td></tr></tbody>
+      <thead><tr><th>Step</th><th>Status</th><th>Attempts</th><th>Note</th></tr></thead>
+      <tbody id="steps-body"><tr><td colspan="4" class="empty">Loading steps…</td></tr></tbody>
     </table>
   </section>
 
   <section class="panel">
-    <h2>الأحداث <span id="live-dot" class="live-dot"></span></h2>
-    <ul class="timeline" id="events-list"><li class="empty">جارٍ التحميل…</li></ul>
+    <h2>Activity <span id="live-dot" class="live-dot"></span></h2>
+    <ul class="timeline" id="events-list"><li class="empty">Loading activity…</li></ul>
   </section>
 </main>
 
@@ -54,7 +55,7 @@ const runId = new URLSearchParams(location.search).get("id");
 const errorBox = document.getElementById("error");
 
 if (!runId) {
-  showError(errorBox, new Error("لا يوجد تشغيل محدد. ارجع لقائمة التشغيلات واختر واحدًا."));
+  showError(errorBox, new Error("No run selected. Return to Runs and choose one."));
 }
 
 function renderRunInfo(run) {
@@ -65,14 +66,14 @@ function renderRunInfo(run) {
     box.appendChild(valueNode instanceof Node ? valueNode : document.createTextNode(valueNode));
     return box;
   };
-  grid.appendChild(card("سير العمل", run.workflow_key));
-  grid.appendChild(card("الحالة", statusBadge(RUN_STATUS_LABELS, run.status)));
-  grid.appendChild(card("بدأ في", formatDate(run.started_at)));
-  grid.appendChild(card("انتهى في", formatDate(run.finished_at)));
+  grid.appendChild(card("Workflow", run.workflow_key));
+  grid.appendChild(card("Status", statusBadge(RUN_STATUS_LABELS, run.status)));
+  grid.appendChild(card("Started", formatDate(run.started_at)));
+  grid.appendChild(card("Finished", formatDate(run.finished_at)));
 
   if (run.error_class) {
     const errCard = el("div", { class: "card" }, [
-      el("h3", { text: "سبب التوقف" }, []),
+      el("h3", { text: "Failure reason" }, []),
       el("div", {}, [ERROR_CLASS_LABELS[run.error_class] || run.error_class]),
     ]);
     grid.appendChild(errCard);
@@ -85,7 +86,7 @@ function renderSteps(steps) {
   const tbody = document.getElementById("steps-body");
   tbody.innerHTML = "";
   if (steps.length === 0) {
-    tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["لا توجد خطوات بعد"])]));
+    tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["No steps yet"])]));
     return;
   }
   for (const step of steps) {
@@ -102,7 +103,7 @@ function renderEvents(events) {
   const list = document.getElementById("events-list");
   list.innerHTML = "";
   if (events.length === 0) {
-    list.appendChild(el("li", { class: "empty" }, ["لا توجد أحداث بعد"]));
+    list.appendChild(el("li", { class: "empty" }, ["No events yet"]));
     return;
   }
   for (const evt of [...events].reverse()) {
@@ -143,7 +144,7 @@ async function loadAll() {
 document.getElementById("retry-button").addEventListener("click", async (event) => {
   const button = event.target;
   button.disabled = true;
-  document.getElementById("retry-hint").textContent = "جارٍ إعادة المحاولة…";
+  document.getElementById("retry-hint").textContent = "Retrying…";
   try {
     await postJSON(`/api/runs/${encodeURIComponent(runId)}/start`, {});
     document.getElementById("retry-hint").textContent = "";

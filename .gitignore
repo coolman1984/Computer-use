@@ -8,6 +8,7 @@ venv/
 /data/
 /data/sessions/
 /data/recordings/
+/data/recording-backups/
 *.har
 *storage-state*.json
 *.storage_state.json

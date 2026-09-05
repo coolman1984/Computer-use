@@ -85,3 +85,12 @@ smartops login <system>`) و`storage_state` يُحفظ خارج المستودع
 `storage.systems_dir` قابل للتجاوز عبر `SMARTOPS_SYSTEMS_DIR` لمجلد خارج
 المستودع، فينفّذ هذا عمليًا ما نص عليه D012 من منع أي تفاصيل داخلية حساسة في
 المستودع العام.
+
+## D024 — Recording Center يحفظ الفهرس في SQLite والأدلة في مساحة خاصة
+حالة التسجيل والخطوات المنقحة فقط تظهر في الواجهة؛ HAR الخام وtrace وstorage state
+والكوكيز لا تخرج من `recordings_dir` ولا توجد لها نقطة API.
+
+## D025 — Chrome المباشر استثناء محصور في عامل التسجيل
+عامل التسجيل يستخدم `Playwright channel="chrome"` وprofile خاص لأنه يحتاج
+ارتباطًا مباشرًا بالـDOM والشبكة والتنزيلات والـtrace. launcher الإلزامي لا يقدم
+CDP أو profile مخصصًا؛ التفاصيل والحدود التشغيلية في `RECORDING_OPERATIONS.md`.

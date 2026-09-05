@@ -13,6 +13,8 @@ storage:
   sessions_dir: data/sessions
   systems_dir: config/systems   # للتعريفات الحقيقية: استخدم SMARTOPS_SYSTEMS_DIR لمجلد خارج المستودع
   recordings_dir: data/recordings # للإنتاج: SMARTOPS_RECORDINGS_DIR خارج المستودع
+  recordings_backup_dir: data/recording-backups # للإنتاج: مسار خاص خارج المستودع
+  recordings_retention_days: 0 # 0 = تعطيل الحذف الدائم التلقائي
 
 browser:
   engine: playwright
@@ -41,3 +43,4 @@ safety:
   allow_production_code_changes: false
   allow_destructive_actions: false
   require_approval_for_sensitive_actions: true
+  allow_recording_purge: false

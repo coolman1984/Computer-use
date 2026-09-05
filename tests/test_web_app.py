@@ -100,7 +100,7 @@ def test_dashboard_runs_selfcheck_and_updates_live(page) -> None:
     )
 
     status_badge = page.locator("#selfcheck-status .badge")
-    assert status_badge.inner_text() == "نجح"
+    assert status_badge.inner_text() == "Succeeded"
 
     # لازم ظهر في جدول آخر التشغيلات كمان
     page.wait_for_selector("#recent-runs td:has-text('platform.selfcheck')")
@@ -115,7 +115,7 @@ def test_dashboard_loads_recent_events_on_open(page, services) -> None:
     page.goto("/app/index.html")
     page.wait_for_selector("#live-events li:not(.empty)")
 
-    assert "اكتمل التشغيل بنجاح" in page.locator("#live-events").inner_text()
+    assert "Run completed" in page.locator("#live-events").inner_text()
     assert page.errors_log == []
 
 
@@ -127,13 +127,13 @@ def test_runs_page_lists_run_and_links_to_detail(page) -> None:
     page.wait_for_url("**/run.html?id=*", timeout=5000)
 
     page.wait_for_function(
-        "document.querySelector('#run-info .badge')?.textContent === 'نجح'", timeout=5000
+        "document.querySelector('#run-info .badge')?.textContent === 'Succeeded'", timeout=5000
     )
 
     step_rows = page.locator("#steps-body tr")
     assert step_rows.count() == 2
     statuses = page.locator("#steps-body .badge").all_inner_texts()
-    assert statuses == ["نجحت", "نجحت"]
+    assert statuses == ["Succeeded", "Succeeded"]
 
     assert page.errors_log == []
 
@@ -141,13 +141,25 @@ def test_runs_page_lists_run_and_links_to_detail(page) -> None:
 def test_incidents_and_files_pages_load_without_errors(page) -> None:
     page.goto("/app/incidents.html")
     page.wait_for_selector("#incidents-body td")
-    assert "لا توجد حوادث" in page.locator("#incidents-body").inner_text()
+    assert "No matching incidents" in page.locator("#incidents-body").inner_text()
 
     page.goto("/app/files.html")
     page.wait_for_selector("#files-body td")
-    assert "لا توجد ملفات" in page.locator("#files-body").inner_text()
+    assert "No matching files" in page.locator("#files-body").inner_text()
 
     assert page.errors_log == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["index.html", "runs.html", "run.html", "incidents.html", "files.html", "recordings.html"],
+)
+def test_every_primary_page_links_to_recording_center(page, path) -> None:
+    page.goto(f"/app/{path}")
+
+    link = page.locator('.side-nav a[href="recordings.html"]')
+    assert link.count() == 1
+    assert "Recordings" in link.inner_text()
 
 
 def test_retry_button_disabled_after_success(page, services) -> None:
@@ -156,7 +168,7 @@ def test_retry_button_disabled_after_success(page, services) -> None:
 
     page.goto(f"/app/run.html?id={run.id}")
     page.wait_for_function(
-        "document.querySelector('#run-info .badge')?.textContent === 'نجح'", timeout=5000
+        "document.querySelector('#run-info .badge')?.textContent === 'Succeeded'", timeout=5000
     )
 
     assert page.locator("#retry-button").is_disabled()

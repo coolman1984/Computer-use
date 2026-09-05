@@ -31,6 +31,34 @@ def test_parser_accepts_all_commands() -> None:
     assert parser.parse_args(["serve"]).command == "serve"
 
 
+def test_help_prints_with_legacy_windows_encoding(monkeypatch) -> None:
+    class LegacyStream:
+        encoding = "cp1252"
+
+        def __init__(self) -> None:
+            self.parts: list[str] = []
+
+        def write(self, value: str) -> int:
+            value.encode(self.encoding, errors="strict")
+            self.parts.append(value)
+            return len(value)
+
+        def flush(self) -> None:
+            pass
+
+        def reconfigure(self, *, encoding: str, errors: str) -> None:
+            self.encoding = encoding
+
+    stream = LegacyStream()
+    monkeypatch.setattr("sys.stdout", stream)
+
+    with pytest.raises(SystemExit) as raised:
+        main(["--help"])
+
+    assert raised.value.code == 0
+    assert "recordings-backup" in "".join(stream.parts)
+
+
 def test_parser_rejects_unknown_command() -> None:
     parser = build_parser()
     with pytest.raises(SystemExit):

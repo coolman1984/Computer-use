@@ -29,6 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("work", help="تشغيل العامل الخلفي + الجدولة (Ctrl-C للإيقاف)")
     sub.add_parser("serve", help="تشغيل خادم HTTP (uvicorn)")
+    sub.add_parser("recordings-backup", help="نسخة احتياطية خاصة من SQLite والتسجيلات")
+    sub.add_parser("recordings-recover", help="تسوية التسجيلات المتقطعة بعد إعادة التشغيل")
+    sub.add_parser("recordings-purge", help="حذف دائم للتسجيلات المنتهية حسب retention الصريح")
 
     return parser
 
@@ -54,6 +57,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             "history_dir": settings.storage.history_dir,
             "sessions_dir": settings.storage.sessions_dir,
             "systems_dir": settings.storage.systems_dir,
+            "recordings_dir": settings.storage.recordings_dir,
+            "recordings_backup_dir": settings.storage.recordings_backup_dir,
         }
         for label, path in dirs.items():
             exists = path.exists()
@@ -61,6 +66,10 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             status = "موجود وقابل للكتابة" if writable else ("موجود لكن غير قابل للكتابة" if exists else "غير موجود")
             print(f"  {label}: {path} — {status}")
 
+        print()
+        recorder = services.recording_recovery.health()
+        print(f"مسجل المتصفح: {recorder['status']} — عمال نشطون: {recorder['active_workers']}")
+        print(f"سياسة الحذف الدائم: {settings.storage.recordings_retention_days or 'معطلة'} يوم، مفعّل: {settings.safety.allow_recording_purge}")
         print()
         systems = services.systems.list()
         print(f"الأنظمة المحمّلة: {len(systems)}")
@@ -195,6 +204,33 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         services.close()
 
 
+def _cmd_recordings_backup(args: argparse.Namespace) -> int:
+    services = _build_services()
+    try:
+        print(f"تم إنشاء نسخة احتياطية خاصة: {services.recording_recovery.backup()}")
+        return 0
+    finally:
+        services.close()
+
+
+def _cmd_recordings_recover(args: argparse.Namespace) -> int:
+    services = _build_services()
+    try:
+        print(f"تمت تسوية {services.recording_manager.recover()} تسجيلات متقطعة")
+        return 0
+    finally:
+        services.close()
+
+
+def _cmd_recordings_purge(args: argparse.Namespace) -> int:
+    services = _build_services()
+    try:
+        print(f"حُذف نهائيًا {services.recording_recovery.purge_expired()} تسجيلات")
+        return 0
+    finally:
+        services.close()
+
+
 _HANDLERS = {
     "doctor": _cmd_doctor,
     "systems": _cmd_systems,
@@ -202,10 +238,25 @@ _HANDLERS = {
     "collect": _cmd_collect,
     "work": _cmd_work,
     "serve": _cmd_serve,
+    "recordings-backup": _cmd_recordings_backup,
+    "recordings-recover": _cmd_recordings_recover,
+    "recordings-purge": _cmd_recordings_purge,
 }
 
 
+def _configure_console_output() -> None:
+    """Keep Arabic CLI messages printable in legacy Windows PowerShell."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError):
+                pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_console_output()
     parser = build_parser()
     args = parser.parse_args(argv)
     handler = _HANDLERS[args.command]

@@ -6,8 +6,8 @@ from smartops.storage.db import Database
 
 def test_migrations_are_idempotent() -> None:
     db = Database(":memory:")
-    assert db.migrate() == 1
-    assert db.migrate() == 1
+    assert db.migrate() == 2
+    assert db.migrate() == 2
 
 
 def test_run_lock_prevents_double_execution(services) -> None:
