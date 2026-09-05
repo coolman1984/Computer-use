@@ -54,7 +54,9 @@
 5. `docs/AI_AGENT_ORCHESTRATION.md`
 6. `docs/OBSERVABILITY_SELF_HEALING.md`
 7. `docs/IMPLEMENTATION_ROADMAP.md`
-8. `AGENTS.md`
+8. `docs/EXECUTION_PLAN.md`
+9. `docs/AGENT_TASK_PACKETS.md`
+10. `AGENTS.md`
 
 ## أول هدف تنفيذي
 
@@ -70,3 +72,20 @@
 - تشغيل Codex لتحليل حادثة
 
 بعد إثبات الثبات نوسع المنصة.
+
+## التشغيل المحلي
+
+```bash
+pip install -e ".[dev]"
+uvicorn smartops.main:app --reload --port 8765
+pytest -q
+```
+
+نقاط الواجهة الحالية: `/health`، `/api/workflows`، `/api/runs`، `/api/runs/{id}`،
+`/api/runs/{id}/events`، `/api/events`، `/api/incidents`، `/api/files`.
+
+## حالة البناء
+
+النواة جاهزة: إعدادات، قاعدة SQLite بترحيلات، سجل أحداث، محرك سير عمل قابل للاستكمال
+مع قفل وإعادة محاولة مصنّفة، فتح حوادث تلقائي، وعقود جاهزة للمتصفح والتحقق والوكلاء والإنذار.
+الخطوة التالية في `docs/AGENT_TASK_PACKETS.md`.

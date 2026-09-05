@@ -1,17 +1,7 @@
-from fastapi import FastAPI
+"""نقطة التشغيل: uvicorn smartops.main:app"""
 
-app = FastAPI(title="SmartOps", version="0.1.0")
+from __future__ import annotations
 
+from .api.app import create_app
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": "smartops"}
-
-
-@app.get("/")
-def root() -> dict[str, str]:
-    return {
-        "name": "SmartOps",
-        "status": "foundation-ready",
-        "next": "Build workflow state model and browser extraction engine",
-    }
+app = create_app()
