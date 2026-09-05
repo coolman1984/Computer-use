@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>الحوادث — SmartOps</title>
+<link rel="stylesheet" href="static/style.css" />
+</head>
+<body>
+<header class="top">
+  <h1>غرفة القيادة</h1>
+  <nav class="main">
+    <a href="index.html">لوحة الحالة</a>
+    <a href="runs.html">التشغيلات</a>
+    <a href="incidents.html" class="active">الحوادث</a>
+    <a href="files.html">الملفات</a>
+  </nav>
+</header>
+<main>
+  <div id="error"></div>
+
+  <section class="panel">
+    <h2>الحوادث</h2>
+    <p class="muted">أي مشكلة توقف تشغيلًا تفتح حادثة هنا تلقائيًا، مع كل الأدلة اللازمة للتشخيص.</p>
+    <div class="toolbar">
+      <label class="muted" for="status-filter">فلترة بالحالة:</label>
+      <select id="status-filter">
+        <option value="">كل الحالات</option>
+        <option value="open" selected>مفتوحة</option>
+        <option value="diagnosing">قيد التشخيص</option>
+        <option value="fixing">قيد الإصلاح</option>
+        <option value="resolved">تم الحل</option>
+        <option value="escalated">مُصعَّدة لشخص</option>
+      </select>
+    </div>
+    <table>
+      <thead><tr><th>العنوان</th><th>الخطورة</th><th>الحالة</th><th>فُتحت في</th><th></th></tr></thead>
+      <tbody id="incidents-body"><tr><td colspan="5" class="empty">جارٍ التحميل…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="static/app.js"></script>
+<script>
+const { getJSON, formatDate, statusBadge, SEVERITY_LABELS, INCIDENT_STATUS_LABELS, link, showError, el } = SmartOps;
+const errorBox = document.getElementById("error");
+
+async function loadIncidents() {
+  const status = document.getElementById("status-filter").value;
+  const url = status ? `/api/incidents?status=${encodeURIComponent(status)}&limit=100` : "/api/incidents?limit=100";
+  try {
+    const data = await getJSON(url);
+    const tbody = document.getElementById("incidents-body");
+    tbody.innerHTML = "";
+    if (data.items.length === 0) {
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "empty" }, ["لا توجد حوادث مطابقة — كل شيء بخير"])]));
+      return;
+    }
+    for (const incident of data.items) {
+      tbody.appendChild(el("tr", {}, [
+        el("td", {}, [incident.title]),
+        el("td", {}, [statusBadge(SEVERITY_LABELS, incident.severity)]),
+        el("td", {}, [statusBadge(INCIDENT_STATUS_LABELS, incident.status)]),
+        el("td", {}, [formatDate(incident.created_at)]),
+        el("td", {}, [incident.run_id ? link("عرض التشغيل", `run.html?id=${encodeURIComponent(incident.run_id)}`) : "—"]),
+      ]));
+    }
+  } catch (err) {
+    showError(errorBox, err);
+  }
+}
+
+document.getElementById("status-filter").addEventListener("change", loadIncidents);
+loadIncidents();
+</script>
+</body>
+</html>

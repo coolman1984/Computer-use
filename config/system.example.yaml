@@ -9,6 +9,7 @@ storage:
   raw_data_dir: data/raw
   incidents_dir: incidents
   logs_dir: logs
+  history_dir: data/history
 
 browser:
   engine: playwright
@@ -21,10 +22,17 @@ browser:
 agents:
   codex:
     enabled: false
-    mode: read_only
+    mode: read_only    # الوضع المدعوم الوحيد حاليًا. أي قيمة أخرى ترفض التركيب بخطأ واضح.
+    executable: ""     # فاضي = استخدم "codex" كأمر تشغيل
   claude:
     enabled: false
     mode: read_only
+    executable: ""     # فاضي = استخدم "claude" كأمر تشغيل
+
+# قناة السجل المحلي (logs_dir/alerts.jsonl) شغّالة دائمًا. أضف رابط
+# Webhook هنا (أو عبر SMARTOPS_WEBHOOK_URL) لو عايز قناة إضافية.
+notify:
+  webhook_url: ""
 
 safety:
   allow_production_code_changes: false

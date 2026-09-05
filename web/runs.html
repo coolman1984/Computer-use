@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>التشغيلات — SmartOps</title>
+<link rel="stylesheet" href="static/style.css" />
+</head>
+<body>
+<header class="top">
+  <h1>غرفة القيادة</h1>
+  <nav class="main">
+    <a href="index.html">لوحة الحالة</a>
+    <a href="runs.html" class="active">التشغيلات</a>
+    <a href="incidents.html">الحوادث</a>
+    <a href="files.html">الملفات</a>
+  </nav>
+</header>
+<main>
+  <div id="error"></div>
+
+  <section class="panel">
+    <h2>تشغيل سير عمل جديد</h2>
+    <p class="muted">مثال جاهز: <code>platform.selfcheck</code> (فحص صحة المنصة، لا يحتاج أي إعداد إضافي).</p>
+    <div class="toolbar">
+      <input type="text" id="workflow-key" placeholder="مفتاح سير العمل" value="platform.selfcheck" />
+      <button id="start-run">تشغيل</button>
+    </div>
+    <details>
+      <summary class="muted">معطيات إضافية (اختياري)</summary>
+      <textarea id="workflow-params" placeholder='مثال: {"system": "erp_demo", "report": "daily_sales"}'></textarea>
+    </details>
+  </section>
+
+  <section class="panel">
+    <h2>كل التشغيلات</h2>
+    <div class="toolbar">
+      <label class="muted" for="status-filter">فلترة بالحالة:</label>
+      <select id="status-filter">
+        <option value="">كل الحالات</option>
+        <option value="queued">في الانتظار</option>
+        <option value="running">قيد التنفيذ</option>
+        <option value="waiting">معلّق مؤقتًا</option>
+        <option value="retrying">يعيد المحاولة</option>
+        <option value="succeeded">نجح</option>
+        <option value="failed">فشل</option>
+        <option value="cancelled">أُلغي</option>
+      </select>
+    </div>
+    <table>
+      <thead>
+        <tr><th>سير العمل</th><th>الحالة</th><th>أُنشئ في</th><th>انتهى في</th><th></th></tr>
+      </thead>
+      <tbody id="runs-body"><tr><td colspan="5" class="empty">جارٍ التحميل…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="static/app.js"></script>
+<script>
+const { getJSON, postJSON, formatDate, statusBadge, RUN_STATUS_LABELS, link, showError, el } = SmartOps;
+const errorBox = document.getElementById("error");
+
+async function loadRuns() {
+  const status = document.getElementById("status-filter").value;
+  const url = status ? `/api/runs?status=${encodeURIComponent(status)}&limit=100` : "/api/runs?limit=100";
+  try {
+    const data = await getJSON(url);
+    const tbody = document.getElementById("runs-body");
+    tbody.innerHTML = "";
+    if (data.items.length === 0) {
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "empty" }, ["لا توجد تشغيلات مطابقة"])]));
+      return;
+    }
+    for (const run of data.items) {
+      tbody.appendChild(el("tr", {}, [
+        el("td", {}, [run.workflow_key]),
+        el("td", {}, [statusBadge(RUN_STATUS_LABELS, run.status)]),
+        el("td", {}, [formatDate(run.created_at)]),
+        el("td", {}, [formatDate(run.finished_at)]),
+        el("td", {}, [link("التفاصيل", `run.html?id=${encodeURIComponent(run.id)}`)]),
+      ]));
+    }
+  } catch (err) {
+    showError(errorBox, err);
+  }
+}
+
+document.getElementById("status-filter").addEventListener("change", loadRuns);
+
+document.getElementById("start-run").addEventListener("click", async (event) => {
+  const button = event.target;
+  const workflow = document.getElementById("workflow-key").value.trim();
+  if (!workflow) return;
+  let params = {};
+  const raw = document.getElementById("workflow-params").value.trim();
+  if (raw) {
+    try {
+      params = JSON.parse(raw);
+    } catch (_) {
+      showError(errorBox, new Error("المعطيات الإضافية يجب أن تكون بصيغة صحيحة، راجعها من فضلك"));
+      return;
+    }
+  }
+  button.disabled = true;
+  try {
+    const run = await postJSON("/api/runs", { workflow, params, start: true });
+    location.href = `run.html?id=${encodeURIComponent(run.id)}`;
+  } catch (err) {
+    showError(errorBox, err);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+loadRuns();
+</script>
+</body>
+</html>
