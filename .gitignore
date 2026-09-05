@@ -5,9 +5,9 @@ venv/
 .env
 .env.*
 !.env.example
-data/
-logs/
-incidents/
+/data/
+/logs/
+/incidents/
 playwright-report/
 test-results/
 *.db
