@@ -65,17 +65,36 @@ function Test-LocalPortInUse {
     }
 }
 
-function Find-ChromeLauncher {
+function Find-Chrome {
+    <#
+        Locate Google Chrome on THIS machine. The launcher used to point at one
+        developer's folder ("d:\WORK\...") and throw when it was missing, which
+        made START.cmd fail on every other computer. Nothing here is specific to
+        a machine: the registry entry Chrome writes on install, the two standard
+        install locations, and finally PATH.
+    #>
+    $registryKeys = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
+        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"
+    )
+    foreach ($key in $registryKeys) {
+        try {
+            $path = (Get-ItemProperty -LiteralPath $key -ErrorAction Stop)."(default)"
+            if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { return $path }
+        }
+        catch { }
+    }
     $candidates = @(
-        "d:\WORK\Software Development\GitHub\AI CREW\Mandatory To Use Skills\windows-chrome-launcher\scripts\open_chrome.py",
-        (Join-Path $env:USERPROFILE ".codex\skills\windows-chrome-launcher\scripts\open_chrome.py")
+        (Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Google\Chrome\Application\chrome.exe"),
+        (Join-Path $env:LOCALAPPDATA "Google\Chrome\Application\chrome.exe")
     )
     foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-            return (Resolve-Path -LiteralPath $candidate).Path
-        }
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
     }
-    throw "The mandatory Google Chrome launcher was not found. Expected it in the shared skills folder or your .codex skills folder."
+    $command = Get-Command chrome.exe -ErrorAction SilentlyContinue
+    if ($null -ne $command) { return $command.Source }
+    return $null
 }
 
 try {
@@ -161,15 +180,23 @@ try {
     }
 
     if (-not $NoBrowser) {
-        $chromeLauncher = Find-ChromeLauncher
-        Write-LauncherMessage "Opening the complete web app in Google Chrome..." Cyan
-        & $pythonExe $chromeLauncher $appUrl
-        if ($LASTEXITCODE -ne 0) {
-            throw "Google Chrome could not be opened by the approved launcher."
+        # A browser that will not open is never a reason to fail a server that
+        # started correctly: the address is printed either way, so the user can
+        # always get in.
+        $chrome = Find-Chrome
+        if ($null -ne $chrome) {
+            Write-LauncherMessage "Opening SmartOps in Google Chrome..." Cyan
+            Start-Process -FilePath $chrome -ArgumentList $appUrl | Out-Null
+        }
+        else {
+            Write-LauncherMessage "Google Chrome was not found; opening your default browser instead." Yellow
+            try { Start-Process $appUrl | Out-Null }
+            catch { Write-LauncherMessage "Could not open a browser automatically. Open this address yourself: $appUrl" Yellow }
         }
     }
 
     Write-LauncherMessage "SmartOps is ready: $appUrl" Green
+    Write-LauncherMessage "Scheduled automations run automatically while this server is running." DarkGray
     Write-LauncherMessage "Logs: $runtimeRoot" DarkGray
     exit 0
 }

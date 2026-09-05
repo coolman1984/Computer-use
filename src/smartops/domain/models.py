@@ -11,6 +11,7 @@ from .enums import (
     AgentMode,
     EventType,
     IncidentStatus,
+    ProcessStatus,
     RunStatus,
     Severity,
     StepStatus,
@@ -18,6 +19,87 @@ from .enums import (
     ValidationStatus,
     RecordingStatus,
 )
+
+
+@dataclass
+class Process:
+    """An automation the platform can actually re-run.
+
+    This is what a recording becomes once it has been reviewed: an ordered,
+    executable plan plus the validation rules its output must satisfy and the
+    schedule it runs on. Everything downstream — a manual run, a test run, the
+    scheduler — goes through a Process, so "recorded once" and "runs every
+    night by itself" are the same object at two points in its life.
+    """
+
+    id: str
+    name: str
+    system_key: str
+    report_key: str
+    status: ProcessStatus = ProcessStatus.DRAFT
+    version: int = 1
+    recording_id: str | None = None
+    plan: dict[str, Any] = field(default_factory=dict)
+    validation_rules: dict[str, Any] = field(default_factory=dict)
+    schedule_daily_at: str = ""
+    schedule_every_seconds: float | None = None
+    schedule_enabled: bool = False
+    last_test_run_id: str | None = None
+    last_run_id: str | None = None
+    error_message: str | None = None
+    approved_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @property
+    def is_runnable(self) -> bool:
+        return self.status is ProcessStatus.APPROVED
+
+    @property
+    def is_scheduled(self) -> bool:
+        """Only an approved process with a real schedule is ever picked up automatically."""
+        return (
+            self.is_runnable
+            and self.schedule_enabled
+            and bool(self.schedule_daily_at or self.schedule_every_seconds)
+        )
+
+    def to_run_params(self) -> dict[str, Any]:
+        """Params for runner.create_run("process.replay", params=...)."""
+        return {
+            "process_id": self.id,
+            "system": self.system_key,
+            "report": self.report_key,
+            "plan": self.plan,
+            "rules": dict(self.validation_rules),
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "system_key": self.system_key,
+            "report_key": self.report_key,
+            "status": self.status.value,
+            "version": self.version,
+            "recording_id": self.recording_id,
+            "plan": self.plan,
+            "validation_rules": self.validation_rules,
+            "schedule": {
+                "daily_at": self.schedule_daily_at,
+                "every_seconds": self.schedule_every_seconds,
+                "enabled": self.schedule_enabled,
+            },
+            "last_test_run_id": self.last_test_run_id,
+            "last_run_id": self.last_run_id,
+            "error_message": self.error_message,
+            "is_runnable": self.is_runnable,
+            "is_scheduled": self.is_scheduled,
+            "action_count": len(self.plan.get("actions") or []),
+            "approved_at": to_iso(self.approved_at),
+            "created_at": to_iso(self.created_at),
+            "updated_at": to_iso(self.updated_at),
+        }
 
 
 @dataclass

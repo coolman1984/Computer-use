@@ -204,24 +204,36 @@ def _parse_auth(raw: dict[str, Any], *, system_key: str) -> AuthProfile:
     )
 
 
-def _parse_schedule(raw: dict[str, Any], *, context: str) -> ScheduleProfile:
-    daily_at = raw.get("daily_at", "") or ""
-    every_seconds = raw.get("every_seconds")
+def validate_schedule(
+    *, daily_at: str = "", every_seconds: float | None = None, context: str
+) -> None:
+    """One shared rule set for every schedule in the platform.
+
+    Reports (defined in YAML) and automations (created in the UI) are scheduled
+    by the same scheduler, so they must agree on what a legal schedule is —
+    otherwise the UI would accept something the loader later rejects.
+    """
     if daily_at and every_seconds is not None:
         raise ConfigurationError(
-            f"Choose either daily_at or every_seconds, not both, in {context}",
+            f"Choose either a daily time or an interval, not both, in {context}",
             details={"context": context},
         )
     if daily_at and not _TIME_RE.match(daily_at):
         raise ConfigurationError(
-            f"Invalid daily_at format (expected HH:MM) in {context}: {daily_at}",
+            f"The daily time must look like HH:MM (24-hour) in {context}: {daily_at}",
             details={"context": context, "daily_at": daily_at},
         )
     if every_seconds is not None and float(every_seconds) <= 0:
         raise ConfigurationError(
-            f"every_seconds must be greater than zero in {context}",
+            f"The interval must be greater than zero in {context}",
             details={"context": context, "every_seconds": every_seconds},
         )
+
+
+def _parse_schedule(raw: dict[str, Any], *, context: str) -> ScheduleProfile:
+    daily_at = raw.get("daily_at", "") or ""
+    every_seconds = raw.get("every_seconds")
+    validate_schedule(daily_at=daily_at, every_seconds=every_seconds, context=context)
     return ScheduleProfile(
         daily_at=daily_at,
         every_seconds=float(every_seconds) if every_seconds is not None else None,
@@ -298,15 +310,120 @@ def load_system_profiles(directory: Path | str | None = None) -> dict[str, Syste
     return profiles
 
 
+def system_to_yaml_dict(profile: SystemProfile) -> dict[str, Any]:
+    """Serialise a system back to the same YAML shape the loader reads.
+
+    Round-tripping through the loader's own format is what lets a system be
+    created in the web app and still be a hand-editable file on disk — one
+    source of truth, two ways in.
+    """
+    auth: dict[str, Any] = {"mode": profile.auth.mode}
+    for field_name in (
+        "login_url",
+        "logged_in_selector",
+        "login_selector",
+        "credential_ref",
+        "username_selector",
+        "password_selector",
+        "submit_selector",
+    ):
+        value = getattr(profile.auth, field_name)
+        if value:
+            auth[field_name] = value
+
+    reports: list[dict[str, Any]] = []
+    for report in profile.reports:
+        entry: dict[str, Any] = {"key": report.key, "title": report.title, "url": report.url}
+        for field_name in ("download_selector", "direct_download_url", "wait_selector", "period"):
+            value = getattr(report, field_name)
+            if value:
+                entry[field_name] = value
+        entry["normal_duration_seconds"] = report.normal_duration_seconds
+        if report.validation_rules:
+            entry["validation_rules"] = dict(report.validation_rules)
+        alert: dict[str, Any] = {}
+        if report.alert.warn_after_seconds is not None:
+            alert["warn_after_seconds"] = report.alert.warn_after_seconds
+        if report.alert.critical_after_seconds is not None:
+            alert["critical_after_seconds"] = report.alert.critical_after_seconds
+        if alert:
+            entry["alert"] = alert
+        schedule: dict[str, Any] = {"enabled": report.schedule.enabled}
+        if report.schedule.daily_at:
+            schedule["daily_at"] = report.schedule.daily_at
+        if report.schedule.every_seconds is not None:
+            schedule["every_seconds"] = report.schedule.every_seconds
+        entry["schedule"] = schedule
+        reports.append(entry)
+
+    return {"key": profile.key, "name": profile.name, "auth": auth, "reports": reports}
+
+
+def system_file_path(directory: Path | str, system_key: str) -> Path:
+    """Where a system's definition lives. One file per system, named by its key."""
+    return Path(directory) / f"{system_key}.yaml"
+
+
 class SystemRegistry:
     """Registry of loaded systems: one entry point for building collect.report run params."""
 
-    def __init__(self, profiles: dict[str, SystemProfile] | None = None) -> None:
+    def __init__(
+        self, profiles: dict[str, SystemProfile] | None = None, *, directory: Path | None = None
+    ) -> None:
         self._profiles = dict(profiles or {})
+        self.directory = Path(directory) if directory is not None else DEFAULT_SYSTEMS_DIR
 
     @classmethod
     def load(cls, directory: Path | str | None = None) -> "SystemRegistry":
-        return cls(load_system_profiles(directory))
+        base = Path(directory) if directory is not None else DEFAULT_SYSTEMS_DIR
+        return cls(load_system_profiles(base), directory=base)
+
+    def reload(self) -> "SystemRegistry":
+        """Re-read the systems directory in place.
+
+        Called after any change so a system added in the web app is usable
+        immediately. Requiring a server restart for this was the single biggest
+        reason the first step of the journey lived outside the product.
+        """
+        self._profiles = load_system_profiles(self.directory)
+        return self
+
+    def save(self, raw: dict[str, Any]) -> SystemProfile:
+        """Validate a system definition and write it to disk, then reload.
+
+        Validation runs first and on the same code path the loader uses, so a
+        definition can never be written in a shape the platform would later
+        refuse to start with.
+        """
+        profile = parse_system_profile(raw)
+        self.directory.mkdir(parents=True, exist_ok=True)
+        path = system_file_path(self.directory, profile.key)
+        existing = self._profiles.get(profile.key)
+        if existing is not None and existing.source and Path(existing.source) != path:
+            # The system already lives in a differently named file (someone
+            # hand-wrote it). Update that file rather than creating a second
+            # definition of the same key, which the loader would reject.
+            path = Path(existing.source)
+        path.write_text(
+            yaml.safe_dump(system_to_yaml_dict(profile), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        self.reload()
+        return self.get(profile.key)
+
+    def delete(self, system_key: str) -> bool:
+        """Remove a system definition file and reload. Missing is not an error."""
+        profile = self._profiles.get(system_key)
+        path = (
+            Path(profile.source)
+            if profile is not None and profile.source
+            else system_file_path(self.directory, system_key)
+        )
+        removed = path.exists()
+        if removed:
+            path.unlink()
+        self.reload()
+        return removed
 
     def get(self, system_key: str) -> SystemProfile:
         if system_key not in self._profiles:

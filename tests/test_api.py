@@ -68,6 +68,15 @@ reports:
 """
 
 
+def _save_fake_session(services, system_key: str) -> None:
+    """Stand up a saved-session file so sign-in-gated endpoints are reachable in tests."""
+    from smartops.sessions import session_path
+
+    path = session_path(services.settings.storage.sessions_dir, system_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"cookies": [], "origins": []}', encoding="utf-8")
+
+
 @pytest.fixture
 def client_with_system(services, tmp_path) -> TestClient:
     from smartops.workflows.profiles import SystemRegistry
@@ -131,9 +140,23 @@ def test_collect_now_runs_workflow_with_wired_fake_browser(services, tmp_path) -
     services.systems = SystemRegistry.load(tmp_path)
     services.browser = FakeBrowser()
     services.validator = FakeValidator()
+    # The system signs in by session, and the platform refuses to collect
+    # without one (see the gate test below), so stand a saved session up first.
+    _save_fake_session(services, "erp_demo")
 
     client = TestClient(create_app(services))
     response = client.post("/api/systems/erp_demo/daily_sales/collect")
 
     assert response.status_code == 201
     assert response.json()["status"] == "succeeded"
+
+
+def test_collect_now_is_blocked_until_the_system_is_signed_in(client_with_system) -> None:
+    """The journey is enforced by the API, not by hiding a button in the UI."""
+    response = client_with_system.post("/api/systems/erp_demo/daily_sales/collect")
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["details"]["blocked_stage"] == "signin"
+    # A refusal is only useful if it says where to go next.
+    assert detail["guidance"]["action"]["href"] == "credentials.html"

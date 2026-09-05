@@ -14,7 +14,7 @@ from typing import Any
 
 from .core.clock import Clock, SystemClock
 from .domain.enums import TERMINAL_RUN_STATUSES, TriggerType
-from .domain.models import Run
+from .domain.models import Process, Run
 from .workflows.profiles import ScheduleProfile
 
 logger = logging.getLogger("smartops.scheduler")
@@ -49,7 +49,20 @@ class Scheduler:
         self.lookback = lookback
 
     def tick(self, *, now: datetime | None = None) -> list[Run]:
+        """One scheduling pass over both kinds of scheduled work.
+
+        Two sources, one scheduler: reports defined in a system's YAML, and
+        automations recorded and approved in the app. Both end up as ordinary
+        runs, so everything downstream — the worker, retries, incidents,
+        history — stays identical no matter which one produced the run.
+        """
         moment = now or self.clock.now()
+        created: list[Run] = []
+        created.extend(self._tick_reports(moment))
+        created.extend(self._tick_processes(moment))
+        return created
+
+    def _tick_reports(self, moment: datetime) -> list[Run]:
         created: list[Run] = []
         for system, report in self.services.systems.iter_scheduled():
             try:
@@ -64,6 +77,47 @@ class Scheduler:
             if run is not None:
                 created.append(run)
         return created
+
+    def _tick_processes(self, moment: datetime) -> list[Run]:
+        """Queue any approved automation whose schedule is due.
+
+        Only approved ones are ever visible here (repository-level filter), so
+        an untested automation cannot reach the scheduler even if something
+        upstream went wrong.
+        """
+        created: list[Run] = []
+        for process in self.services.processes.scheduled():
+            try:
+                run = self._maybe_create_process_run(process, moment)
+            except Exception:
+                logger.exception(
+                    "Schedule check failed for automation %s — the scheduler continues",
+                    process.id,
+                )
+                continue
+            if run is not None:
+                created.append(run)
+        return created
+
+    def _maybe_create_process_run(self, process: Process, now: datetime) -> Run | None:
+        schedule = ScheduleProfile(
+            daily_at=process.schedule_daily_at,
+            every_seconds=process.schedule_every_seconds,
+            enabled=process.schedule_enabled,
+        )
+        recent = self.services.runs.list(workflow_key="process.replay", limit=self.lookback)
+        process_runs = [r for r in recent if r.params.get("process_id") == process.id]
+        if any(r.status not in TERMINAL_RUN_STATUSES for r in process_runs):
+            return None  # still running from last time — never stack a second copy
+        last_run_at = process_runs[0].created_at if process_runs else None
+        if not is_due(schedule, last_run_at, now):
+            return None
+        run = self.services.runner.create_run(
+            "process.replay", params=process.to_run_params(), trigger=TriggerType.SCHEDULE
+        )
+        process.last_run_id = run.id
+        self.services.processes.save(process)
+        return run
 
     def _maybe_create_run(
         self, system_key: str, report_key: str, schedule: ScheduleProfile, now: datetime

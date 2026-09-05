@@ -255,3 +255,76 @@ th, td { padding: 13px 12px; text-align: left; vertical-align: middle; } th { co
 @media (max-width: 850px) { .app-sidebar { transform: translateX(-100%); transition: transform .18s ease; } body.sidebar-open .app-sidebar { transform: translateX(0); box-shadow: 20px 0 55px rgba(15,23,42,.24); } main { margin-left: 0; padding: 0 18px 40px; } .menu-toggle { display: inline-flex; } .workspace-status { display: none; } .app-topbar { min-height: 84px; } .grid { grid-template-columns: 1fr; } }
 @media (max-width: 520px) { main { padding: 0 14px 30px; } .app-topbar h1 { font-size: 22px; } section.panel { padding: 16px; border-radius: 11px; } th, td { padding: 11px 9px; } }
 .credential-warning { border-left: 4px solid #4f46e5; }.credential-form { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 14px; align-items: end; }.credential-form label { display: grid; gap: 6px; color: #46556d; font-size: 12px; font-weight: 700; }.credential-form input, .credential-form select { width: 100%; box-sizing: border-box; }.credential-form button { align-self: end; }@media (max-width: 800px) { .credential-form { grid-template-columns: 1fr; } }
+
+/* ---------------------------------------------------------------------------
+   The journey: the ordered path, its gates, and the way the platform talks to
+   a non-technical user about what happened and what to do next.
+   --------------------------------------------------------------------------- */
+
+/* Sidebar: each entry carries its stage's real state, so the navigation itself
+   shows how far along the user is instead of being a flat list of pages. */
+.side-nav-link { position: relative; }
+.nav-label { flex: 1; }
+.nav-state { width: 14px; text-align: center; font-size: 12px; font-weight: 800; opacity: .8; }
+.side-nav-link.stage-done .nav-state { color: #4ade80; }
+.side-nav-link.stage-next .nav-state { color: #fbbf24; }
+/* Held back rather than hidden: the user can still look, and the tooltip says
+   which earlier step unlocks it. */
+.side-nav-link.stage-blocked { opacity: .55; }
+.side-nav-link.stage-blocked .nav-state { color: #64748b; }
+.workspace-status.status-warn { border-color: #fed7aa; background: #fff7ed; color: #c2410c; }
+
+/* The one thing to do now, given the most visual weight on the page. */
+.highlight-panel { border-left: 4px solid #4f46e5; background: linear-gradient(180deg, #fbfcff 0%, #ffffff 60%); }
+.next-step-title { margin: 0 0 4px; font-size: 19px; font-weight: 750; letter-spacing: -.02em; }
+.next-step p { margin: 0 0 8px; }
+
+.journey { list-style: none; margin: 0; padding: 0; counter-reset: journey; }
+.journey-step { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.journey-step:last-child { border-bottom: none; }
+.journey-step.blocked { opacity: .55; }
+.journey-number { display: grid; flex: 0 0 26px; width: 26px; height: 26px; place-items: center; border-radius: 50%; background: #eef2ff; color: #4338ca; font-size: 12px; font-weight: 800; }
+.journey-step .msg { flex: 1; }
+.journey-step .msg .link { display: inline-block; margin-top: 6px; }
+.journey-step .time { white-space: nowrap; }
+
+.gate-list { margin: 0 0 8px; padding-left: 20px; font-size: 14px; }
+.gate-list li { margin-bottom: 6px; }
+
+/* Every outcome lands in the same slot, so an action always visibly resolves. */
+.error-box strong { display: block; margin-bottom: 4px; font-size: 15px; }
+.error-box p { margin: 0 0 8px; color: #7f1d1d; }
+.error-todo { font-weight: 600; }
+.notice-box { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 10px 14px; margin-bottom: 14px; border: 1px solid #bbf7d0; border-radius: 9px; background: var(--green-bg); color: #14532d; font-size: 14px; }
+.warn-box { padding: 10px 14px; margin-bottom: 14px; border: 1px solid #fde68a; border-radius: 9px; background: var(--yellow-bg); color: #713f12; font-size: 14px; }
+/* The fix button: a link that looks and behaves like the action it stands for. */
+.button-link { display: inline-block; padding: 8px 14px; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 13px; font-weight: 700; text-decoration: none; }
+.button-link:hover { background: #3730a3; }
+.error-detail { margin-top: 6px; font-size: 12px; }
+.error-detail summary { cursor: pointer; color: #7f1d1d; }
+.error-detail p { color: #7f1d1d; font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+/* Forms that build a system or a schedule. */
+.stack-form { display: grid; gap: 18px; }
+.stack-form fieldset { padding: 16px; border: 1px solid var(--border); border-radius: 11px; }
+.stack-form legend { padding: 0 6px; color: #46556d; font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.field-row label, .stack-form > label { display: grid; gap: 6px; color: #46556d; font-size: 12px; font-weight: 700; }
+.field-row input, .field-row select, .stack-form > label input, .stack-form > label select { width: 100%; box-sizing: border-box; }
+.field-row small { font-weight: 500; }
+.report-row { padding: 14px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; background: #fafbfe; display: grid; gap: 12px; }
+button.small { min-height: 32px; padding: 4px 12px; font-size: 12px; }
+button.secondary { background: #fff; color: #46556d; border-color: #d7deea; }
+button.secondary:hover { background: #f1f5f9; }
+button.danger { background: #fff; color: var(--red); border-color: #fecaca; }
+button.danger:hover { background: var(--red-bg); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+td.actions { white-space: nowrap; }
+td.actions button { margin-right: 6px; }
+.plain-list { margin: 0; padding-left: 18px; font-size: 13px; }
+
+/* Issues read as cards: the explanation and the fix are the content, and
+   neither fits in a table cell. */
+.issue-card { padding: 16px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 11px; background: #fff; }
+.issue-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
+.issue-what { margin: 8px 0 4px; font-weight: 600; }

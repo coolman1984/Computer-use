@@ -40,6 +40,32 @@ class ExtractionRequest:
     evidence_dir: Path | None = None
 
 
+@dataclass(frozen=True)
+class ReplayRequest:
+    """Replay a recorded plan and capture whatever file it produces.
+
+    Deliberately the same shape of answer as ExtractionRequest (it returns an
+    ExtractionResult) so that a recorded automation and a YAML-defined
+    collection land in the raw data centre through exactly one code path: the
+    engine, the validator, the incident opener, and the archiver do not need
+    to know which of the two produced the file.
+    """
+
+    system: str
+    report: str
+    destination_dir: Path
+    plan: dict[str, Any]
+    period: str = ""
+    # Authentication filters, identical in meaning to ExtractionRequest.filters:
+    # logged_in_selector / login_selector / credential_ref and the unattended
+    # login selectors. Replay reuses the same saved session as extraction.
+    filters: dict[str, Any] = field(default_factory=dict)
+    timeout_seconds: float = 300.0
+    run_id: str = ""
+    session_state_path: Path | None = None
+    evidence_dir: Path | None = None
+
+
 @dataclass
 class ExtractionResult:
     ok: bool
@@ -58,6 +84,10 @@ class BrowserPort(Protocol):
     """Execute one extraction request and return the resulting file plus evidence of what happened."""
 
     def extract(self, request: ExtractionRequest) -> ExtractionResult: ...
+
+    def replay(self, request: ReplayRequest) -> ExtractionResult:
+        """Replay a recorded plan step by step and return the file it produced."""
+        ...
 
     def capture_evidence(self, run_id: str) -> dict[str, Any]:
         """Screenshot/trace/network evidence for one failed run, used to build the incident pack."""

@@ -13,6 +13,7 @@ from ..domain.enums import (
     AgentMode,
     EventType,
     IncidentStatus,
+    ProcessStatus,
     RunStatus,
     Severity,
     StepStatus,
@@ -20,7 +21,17 @@ from ..domain.enums import (
     ValidationStatus,
     RecordingStatus,
 )
-from ..domain.models import AgentRun, Event, FileArtifact, Incident, Run, StepRecord, Recording, RecordingStep
+from ..domain.models import (
+    AgentRun,
+    Event,
+    FileArtifact,
+    Incident,
+    Process,
+    Run,
+    StepRecord,
+    Recording,
+    RecordingStep,
+)
 from .db import Database
 
 
@@ -42,6 +53,151 @@ class BaseRepository:
     def __init__(self, db: Database, clock: Clock | None = None) -> None:
         self.db = db
         self.clock = clock or SystemClock()
+
+
+class ProcessRepository(BaseRepository):
+    """Persistence for automations built from recordings."""
+
+    @staticmethod
+    def _process(row: sqlite3.Row) -> Process:
+        return Process(
+            id=row["id"],
+            name=row["name"],
+            system_key=row["system_key"],
+            report_key=row["report_key"],
+            status=ProcessStatus(row["status"]),
+            version=row["version"],
+            recording_id=row["recording_id"],
+            plan=_loads(row["plan"]),
+            validation_rules=_loads(row["validation_rules"]),
+            schedule_daily_at=row["schedule_daily_at"],
+            schedule_every_seconds=row["schedule_every_seconds"],
+            schedule_enabled=bool(row["schedule_enabled"]),
+            last_test_run_id=row["last_test_run_id"],
+            last_run_id=row["last_run_id"],
+            error_message=row["error_message"],
+            approved_at=from_iso(row["approved_at"]),
+            created_at=from_iso(row["created_at"]),
+            updated_at=from_iso(row["updated_at"]),
+        )
+
+    def create(
+        self,
+        *,
+        name: str,
+        system_key: str,
+        report_key: str,
+        recording_id: str | None = None,
+        plan: dict[str, Any] | None = None,
+        validation_rules: dict[str, Any] | None = None,
+        version: int = 1,
+    ) -> Process:
+        now = self.clock.now()
+        process = Process(
+            id=new_id("proc"),
+            name=name,
+            system_key=system_key,
+            report_key=report_key,
+            recording_id=recording_id,
+            plan=plan or {},
+            validation_rules=validation_rules or {},
+            version=version,
+            created_at=now,
+            updated_at=now,
+        )
+        with self.db.transaction() as tx:
+            tx.execute(
+                "INSERT INTO processes(id,name,system_key,report_key,status,version,recording_id,"
+                "plan,validation_rules,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    process.id,
+                    process.name,
+                    process.system_key,
+                    process.report_key,
+                    process.status.value,
+                    process.version,
+                    process.recording_id,
+                    _json(process.plan),
+                    _json(process.validation_rules),
+                    to_iso(now),
+                    to_iso(now),
+                ),
+            )
+        return process
+
+    def get(self, process_id: str) -> Process | None:
+        row = self.db.connection.execute(
+            "SELECT * FROM processes WHERE id=?", (process_id,)
+        ).fetchone()
+        return self._process(row) if row else None
+
+    def list(
+        self,
+        *,
+        system_key: str | None = None,
+        status: ProcessStatus | None = None,
+        limit: int = 100,
+    ) -> list[Process]:
+        clauses: list[str] = []
+        args: list[Any] = []
+        if system_key:
+            clauses.append("system_key=?")
+            args.append(system_key)
+        if status:
+            clauses.append("status=?")
+            args.append(status.value)
+        sql = "SELECT * FROM processes"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        return [self._process(row) for row in self.db.connection.execute(sql, args)]
+
+    def scheduled(self) -> list[Process]:
+        """Approved processes with an active schedule — the scheduler's second data source."""
+        rows = self.db.connection.execute(
+            "SELECT * FROM processes WHERE status=? AND schedule_enabled=1",
+            (ProcessStatus.APPROVED.value,),
+        )
+        return [p for p in (self._process(row) for row in rows) if p.is_scheduled]
+
+    def latest_version(self, system_key: str, report_key: str) -> int:
+        row = self.db.connection.execute(
+            "SELECT MAX(version) AS v FROM processes WHERE system_key=? AND report_key=?",
+            (system_key, report_key),
+        ).fetchone()
+        return int(row["v"] or 0)
+
+    def save(self, process: Process) -> Process:
+        process.updated_at = self.clock.now()
+        with self.db.transaction() as tx:
+            tx.execute(
+                "UPDATE processes SET name=?,report_key=?,status=?,plan=?,validation_rules=?,"
+                "schedule_daily_at=?,schedule_every_seconds=?,schedule_enabled=?,last_test_run_id=?,"
+                "last_run_id=?,error_message=?,approved_at=?,updated_at=? WHERE id=?",
+                (
+                    process.name,
+                    process.report_key,
+                    process.status.value,
+                    _json(process.plan),
+                    _json(process.validation_rules),
+                    process.schedule_daily_at,
+                    process.schedule_every_seconds,
+                    int(process.schedule_enabled),
+                    process.last_test_run_id,
+                    process.last_run_id,
+                    process.error_message,
+                    to_iso(process.approved_at),
+                    to_iso(process.updated_at),
+                    process.id,
+                ),
+            )
+        return process
+
+    def delete(self, process_id: str) -> bool:
+        with self.db.transaction() as tx:
+            cursor = tx.execute("DELETE FROM processes WHERE id=?", (process_id,))
+        return cursor.rowcount > 0
 
 
 class RecordingRepository(BaseRepository):

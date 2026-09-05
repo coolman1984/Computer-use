@@ -282,7 +282,9 @@ def test_bad_daily_at_format_raises() -> None:
     raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
     raw["reports"][0]["schedule"]["daily_at"] = "8am"
 
-    with pytest.raises(ConfigurationError, match="daily_at"):
+    # The message is written for a non-technical reader, so it names the concept
+    # ("daily time", "HH:MM") rather than the YAML field.
+    with pytest.raises(ConfigurationError, match="HH:MM"):
         parse_system_profile(raw)
 
 

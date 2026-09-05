@@ -3,62 +3,75 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Files — SmartOps</title>
+<title>Results — SmartOps</title>
 <link rel="stylesheet" href="static/style.css" />
 </head>
-<body data-page="files" data-title="Files">
+<body data-page="files" data-title="Results">
 <header class="top"></header>
 <main>
   <div id="error"></div>
 
   <section class="panel">
-    <h2>Downloaded files</h2>
-    <p class="muted">Every file collected from every system, with its validation result before approval.</p>
+    <h2>Step 9 · Check the results</h2>
+    <p class="muted">Every file the platform has collected. A download on its own proves nothing — a file only counts as a result once it has passed its checks, and you can open it here to see for yourself.</p>
     <div class="toolbar">
-      <label class="muted" for="run-filter">Filter by run ID (optional):</label>
-      <input type="text" id="run-filter" placeholder="Example: run_01ABC…" />
-      <button id="apply-filter">Apply</button>
+      <label class="muted" for="status-filter">Show:</label>
+      <select id="status-filter">
+        <option value="">Everything</option>
+        <option value="passed">Valid only</option>
+        <option value="failed">Rejected only</option>
+        <option value="pending">Not checked yet</option>
+      </select>
     </div>
     <table>
-      <thead>
-        <tr><th>System</th><th>Report</th><th>Status</th><th>Size</th><th>Rows</th><th>Downloaded</th></tr>
-      </thead>
-      <tbody id="files-body"><tr><td colspan="6" class="empty">Loading files…</td></tr></tbody>
+      <thead><tr><th>System</th><th>Report</th><th>Checked</th><th>Size</th><th>Rows</th><th>When</th><th></th></tr></thead>
+      <tbody id="files-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
     </table>
   </section>
 </main>
 
 <script src="static/app.js"></script>
 <script>
-const { getJSON, formatDate, statusBadge, VALIDATION_STATUS_LABELS, showError, el } = SmartOps;
+const { getJSON, formatDate, formatSize, statusBadge, VALIDATION_STATUS_LABELS, showError, el } = SmartOps;
 const errorBox = document.getElementById("error");
 
-function formatSize(bytes) {
-  if (!bytes) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+/* Why a file was rejected is the whole point of showing a rejected file. */
+function checkedCell(file) {
+  const cell = el("td", {}, [statusBadge(VALIDATION_STATUS_LABELS, file.validation_status)]);
+  const failures = file.validation_details?.failures;
+  if (failures?.length) {
+    cell.appendChild(el("div", { class: "muted hint" }, [failures.join("; ")]));
+  }
+  return cell;
 }
 
 async function loadFiles() {
-  const runId = document.getElementById("run-filter").value.trim();
-  const url = runId ? `/api/files?run_id=${encodeURIComponent(runId)}&limit=200` : "/api/files?limit=200";
+  const wanted = document.getElementById("status-filter").value;
   try {
-    const data = await getJSON(url);
+    const data = await getJSON("/api/files?limit=200");
+    const items = wanted ? data.items.filter(f => f.validation_status === wanted) : data.items;
     const tbody = document.getElementById("files-body");
     tbody.innerHTML = "";
-    if (data.items.length === 0) {
-      tbody.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "empty" }, ["No matching files"])]));
+    if (!items.length) {
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "empty" }, [
+        data.items.length ? "Nothing matches that filter" : "No files collected yet",
+      ])]));
       return;
     }
-    for (const file of data.items) {
+    for (const file of items) {
+      // A row for a file someone has since moved or deleted is not a result;
+      // say so instead of offering a download that would 404.
+      const action = file.exists
+        ? el("a", { class: "link", href: `/api/files/${encodeURIComponent(file.id)}/download` }, ["Download"])
+        : el("span", { class: "muted", text: "No longer on disk" }, []);
       tbody.appendChild(el("tr", {}, [
         el("td", {}, [file.system]),
         el("td", {}, [file.report]),
-        el("td", {}, [statusBadge(VALIDATION_STATUS_LABELS, file.validation_status)]),
+        checkedCell(file),
         el("td", {}, [formatSize(file.size_bytes)]),
         el("td", {}, [file.row_count == null ? "—" : String(file.row_count)]),
         el("td", {}, [formatDate(file.created_at)]),
+        el("td", {}, [action]),
       ]));
     }
   } catch (err) {
@@ -66,10 +79,7 @@ async function loadFiles() {
   }
 }
 
-document.getElementById("apply-filter").addEventListener("click", loadFiles);
-document.getElementById("run-filter").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") loadFiles();
-});
+document.getElementById("status-filter").addEventListener("change", loadFiles);
 loadFiles();
 </script>
 </body>

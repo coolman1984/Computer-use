@@ -1,105 +1,239 @@
-/* Systems: the first real step of the workflow. Shows every defined system,
-   whether it is signed in, and what to do next when it is not. */
-const { getJSON, postJSON, badge, formatDate, showError, el, link } = SmartOps;
-const errorBox = document.getElementById("error");
+/* Systems: steps 1 and 2 of the journey, both fully inside the app.
 
-// Each sign-in mode needs a different action from the user, so say which one
-// plainly rather than leaving a bare status badge with no next step.
-function signInCell(system) {
-  if (system.auth_mode === "none") {
-    return el("td", {}, [badge("No sign-in needed", "gray")]);
+   Adding a system used to mean writing a YAML file by hand in a folder outside
+   the repository and restarting the server — the first step of the journey lived
+   entirely outside the product. This page writes the same file through the same
+   validator and reloads it live. */
+
+const {
+  getJSON, putJSON, postJSON, deleteJSON, badge, showError, clearError, showNotice,
+  el, paintShell,
+} = SmartOps;
+
+const errorBox = document.getElementById("error");
+const form = document.getElementById("system-form");
+const reportsBox = document.getElementById("reports");
+
+/* ---------- the report sub-form ---------- */
+
+function reportRow(report = {}) {
+  const row = el("div", { class: "report-row" }, [
+    el("div", { class: "field-row" }, [
+      el("label", {}, ["Short name", el("input", { class: "r-key", required: true, value: report.key || "", placeholder: "daily_sales" }, [])]),
+      el("label", {}, ["Title", el("input", { class: "r-title", value: report.title || "", placeholder: "Daily sales" }, [])]),
+      el("label", {}, ["Report page address", el("input", { class: "r-url", type: "url", required: true, value: report.url || "", placeholder: "https://intranet.example.com/reports/daily" }, [])]),
+    ]),
+    el("div", { class: "field-row" }, [
+      el("label", {}, ["Download button", el("input", { class: "r-download", value: report.download_selector || "", placeholder: "#export-csv" }, [])]),
+      el("label", {}, ["…or direct file address", el("input", { class: "r-direct", value: report.direct_download_url || "", placeholder: "https://…/export.csv" }, [])]),
+      el("label", {}, ["Wait for (optional)", el("input", { class: "r-wait", value: report.wait_selector || "", placeholder: "#report-ready" }, [])]),
+    ]),
+  ]);
+  const remove = el("button", { type: "button", class: "secondary small" }, ["Remove this report"]);
+  remove.addEventListener("click", () => {
+    // Never leave zero rows: a system with no report cannot be saved, and an
+    // empty form gives the user nothing to correct.
+    if (reportsBox.children.length > 1) row.remove();
+    else showNotice(errorBox, "A system needs at least one report.");
+  });
+  row.appendChild(remove);
+  return row;
+}
+
+function readReports() {
+  return [...reportsBox.querySelectorAll(".report-row")].map(row => {
+    const value = (cls) => row.querySelector(cls).value.trim();
+    const report = { key: value(".r-key"), title: value(".r-title") || value(".r-key"), url: value(".r-url") };
+    if (value(".r-download")) report.download_selector = value(".r-download");
+    if (value(".r-direct")) report.direct_download_url = value(".r-direct");
+    if (value(".r-wait")) report.wait_selector = value(".r-wait");
+    return report;
+  });
+}
+
+/* ---------- the form ---------- */
+
+let editingKey = null;
+
+function setAuthVisibility() {
+  const mode = document.getElementById("auth-mode").value;
+  document.getElementById("auth-fields").hidden = mode === "none";
+  document.getElementById("unattended-fields").hidden = mode !== "unattended";
+}
+
+document.getElementById("auth-mode").addEventListener("change", setAuthVisibility);
+document.getElementById("add-report").addEventListener("click", () => reportsBox.appendChild(reportRow()));
+
+function resetForm() {
+  editingKey = null;
+  form.reset();
+  document.getElementById("key").disabled = false;
+  document.getElementById("form-title").textContent = "Add a system";
+  document.getElementById("cancel-edit").hidden = true;
+  document.getElementById("form-hint").textContent = "";
+  reportsBox.innerHTML = "";
+  reportsBox.appendChild(reportRow());
+  setAuthVisibility();
+}
+
+function fillForm(system) {
+  editingKey = system.key;
+  document.getElementById("key").value = system.key;
+  // The key names the folders files land in, so changing it would orphan
+  // everything already collected. Editing creates a new system instead.
+  document.getElementById("key").disabled = true;
+  document.getElementById("name").value = system.name || "";
+  document.getElementById("auth-mode").value = system.auth_mode || "none";
+  document.getElementById("login-url").value = system.login_url || "";
+  document.getElementById("logged-in-selector").value = system.logged_in_selector || "";
+  document.getElementById("login-selector").value = system.login_selector || "";
+  reportsBox.innerHTML = "";
+  for (const report of system.reports.length ? system.reports : [{}]) reportsBox.appendChild(reportRow(report));
+  setAuthVisibility();
+  document.getElementById("form-title").textContent = `Edit ${system.name || system.key}`;
+  document.getElementById("cancel-edit").hidden = false;
+  document.getElementById("form-title").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+document.getElementById("cancel-edit").addEventListener("click", resetForm);
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearError(errorBox);
+  const key = document.getElementById("key").value.trim() || editingKey;
+  const mode = document.getElementById("auth-mode").value;
+  const auth = { mode };
+  if (mode !== "none") {
+    auth.login_url = document.getElementById("login-url").value.trim();
+    auth.logged_in_selector = document.getElementById("logged-in-selector").value.trim();
+    auth.login_selector = document.getElementById("login-selector").value.trim();
   }
+  if (mode === "unattended") {
+    auth.credential_ref = key;
+    auth.username_selector = document.getElementById("username-selector").value.trim();
+    auth.password_selector = document.getElementById("password-selector").value.trim();
+    auth.submit_selector = document.getElementById("submit-selector").value.trim();
+  }
+  const payload = { key, name: document.getElementById("name").value.trim() || key, auth, reports: readReports() };
+
+  const button = form.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    await putJSON(`/api/systems/${encodeURIComponent(key)}`, payload);
+    showNotice(errorBox, `Saved. Next: test the connection to ${payload.name}.`);
+    resetForm();
+    await load();
+    paintShell();
+  } catch (err) {
+    showError(errorBox, err);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+/* ---------- the list ---------- */
+
+function signInCell(system) {
+  if (system.auth_mode === "none") return el("td", {}, [badge("Not needed", "gray")]);
   if (system.auth_mode === "unattended") {
     return el("td", {}, [
-      badge(system.session_exists ? "Connected" : "Credential login", system.session_exists ? "green" : "blue"),
-      el("div", { class: "muted hint" }, ["Store the username and password under Sign-in, then SmartOps logs in by itself."]),
+      badge("Username & password", "blue"),
+      el("div", { class: "muted hint" }, ["Save the password once on the Sign-in page."]),
     ]);
   }
   if (!system.session_exists) {
     return el("td", {}, [
       badge("Not signed in", "red"),
-      el("div", { class: "muted hint" }, [`Run once in a terminal: python -m smartops login ${system.key}`]),
+      el("div", { class: "muted hint" }, ["Sign in from the Sign-in page — one click, no terminal."]),
     ]);
   }
   const hours = system.session_age_hours != null ? system.session_age_hours.toFixed(1) : "?";
   return el("td", {}, [
-    badge("Connected", "green"),
-    el("div", { class: "muted hint" }, [`Saved session is ${hours} hours old. Sign in again when it expires.`]),
+    badge("Signed in", "green"),
+    el("div", { class: "muted hint" }, [`Saved ${hours} hours ago.`]),
   ]);
 }
 
-function scheduleText(schedule) {
-  if (!schedule || !schedule.enabled) return "Manual only";
-  if (schedule.daily_at) return `Daily at ${schedule.daily_at}`;
-  if (schedule.every_seconds) return `Every ${Math.round(schedule.every_seconds / 60)} min`;
-  return "Manual only";
+function connectionCell(system, onTested) {
+  const cell = el("td", {}, []);
+  const check = system.connection_check;
+  cell.appendChild(check ? badge("Tested", "green") : badge("Not tested", "yellow"));
+  if (check?.summary) cell.appendChild(el("div", { class: "muted hint" }, [check.summary]));
+
+  const button = el("button", { type: "button", class: "secondary small" }, [check ? "Test again" : "Test connection"]);
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "Opening the site…";
+    clearError(errorBox);
+    try {
+      const result = await postJSON(`/api/systems/${encodeURIComponent(system.key)}/check`, {});
+      // The verdict always carries the next step, so a failed test is still a
+      // usable answer rather than a dead end.
+      showNotice(errorBox, `${result.summary} ${result.next_step || ""}`.trim());
+      await onTested();
+      paintShell();
+    } catch (err) {
+      showError(errorBox, err);
+      button.textContent = original;
+      button.disabled = false;
+    }
+  });
+  cell.appendChild(button);
+  return cell;
+}
+
+function actionsCell(system) {
+  const edit = el("button", { type: "button", class: "secondary small" }, ["Edit"]);
+  edit.addEventListener("click", () => fillForm(system));
+  const remove = el("button", { type: "button", class: "danger small" }, ["Delete"]);
+  remove.addEventListener("click", async () => {
+    if (!confirm(`Delete "${system.name || system.key}"? Its recordings and collected files stay on disk.`)) return;
+    clearError(errorBox);
+    try {
+      await deleteJSON(`/api/systems/${encodeURIComponent(system.key)}`);
+      showNotice(errorBox, "System deleted.");
+      await load();
+      paintShell();
+    } catch (err) {
+      showError(errorBox, err);
+    }
+  });
+  return el("td", { class: "actions" }, [edit, remove]);
 }
 
 async function load() {
-  const systemsBody = document.getElementById("systems-body");
-  const reportsBody = document.getElementById("reports-body");
+  const body = document.getElementById("systems-body");
   try {
     const data = await getJSON("/api/systems");
-    systemsBody.innerHTML = "";
-    reportsBody.innerHTML = "";
-    // Showing the directory the server actually read makes the usual setup
-    // mistake self-diagnosing: SMARTOPS_SYSTEMS_DIR set in a different
-    // terminal than the one running the server, so it silently falls back to
-    // the in-repo examples.
+    // Showing the folder the server actually read makes the usual setup mistake
+    // self-diagnosing rather than a guess.
     if (data.directory) document.getElementById("systems-dir").textContent = data.directory;
-
+    body.innerHTML = "";
     if (!data.items.length) {
-      systemsBody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, [
-        "No systems defined yet — add a .yaml file to your systems directory and restart the server.",
+      body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "empty" }, [
+        "No systems yet. Add your first one in the form below.",
       ])]));
-      reportsBody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["No reports yet"])]));
       return;
     }
-
     for (const system of data.items) {
-      systemsBody.appendChild(el("tr", {}, [
+      body.appendChild(el("tr", {}, [
         el("td", {}, [
           el("strong", {}, [system.name || system.key]),
-          el("div", { class: "muted hint" }, [system.key]),
+          el("div", { class: "muted hint" }, [`${system.reports.length} report(s)`]),
         ]),
-        el("td", {}, [system.auth_mode]),
         signInCell(system),
-        el("td", {}, [String(system.reports.length)]),
+        connectionCell(system, load),
+        el("td", {}, [
+          el("ul", { class: "plain-list" }, system.reports.map(r => el("li", {}, [r.title || r.key]))),
+        ]),
+        actionsCell(system),
       ]));
-
-      for (const report of system.reports) {
-        const button = el("button", {}, ["Collect now"]);
-        button.addEventListener("click", async () => {
-          button.disabled = true;
-          const original = button.textContent;
-          button.textContent = "Collecting…";
-          try {
-            const run = await postJSON(`/api/systems/${encodeURIComponent(system.key)}/${encodeURIComponent(report.key)}/collect`, {});
-            location.href = `run.html?id=${encodeURIComponent(run.id)}`;
-          } catch (err) {
-            showError(errorBox, err);
-            button.textContent = original;
-            button.disabled = false;
-          }
-        });
-        reportsBody.appendChild(el("tr", {}, [
-          el("td", {}, [system.name || system.key]),
-          el("td", {}, [
-            el("strong", {}, [report.title || report.key]),
-            el("div", { class: "muted hint" }, [report.key]),
-          ]),
-          el("td", {}, [scheduleText(report.schedule)]),
-          el("td", {}, [button]),
-        ]));
-      }
-    }
-
-    if (!reportsBody.children.length) {
-      reportsBody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["No reports defined on any system"])]));
     }
   } catch (err) {
     showError(errorBox, err);
   }
 }
 
+resetForm();
 load();

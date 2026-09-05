@@ -1,21 +1,40 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Recordings — SmartOps</title><link rel="stylesheet" href="static/style.css"></head><body data-page="recordings" data-title="Recordings">
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Recordings — SmartOps</title>
+<link rel="stylesheet" href="static/style.css" />
+</head>
+<body data-page="recordings" data-title="Recordings">
 <header class="top"></header>
 <main>
   <div id="error"></div>
+
   <section class="panel">
-    <h2>Capture a workflow</h2>
-    <p class="muted">Launch a visible Chrome session, complete sign-in yourself, and save a reviewable recording. SmartOps never captures your typed passwords or cookies.</p>
-    <p class="muted">The recording opens at the chosen system's sign-in page, so define the system first under <a class="link" href="systems.html">Systems</a>.</p>
+    <h2>Step 3 · Record the task once</h2>
+    <p class="muted">A browser window opens. You do the job exactly as you normally would — click through to the report and download it — and the platform watches so it can repeat it later. Your typed passwords and cookies are never captured.</p>
+    <p class="muted">You can only record against a system that has passed its connection test and is signed in, so you never spend time recording a login screen.</p>
     <p id="system-note" class="muted" role="status"></p>
     <form id="create-form" class="toolbar">
-      <input id="name" required maxlength="120" aria-label="Recording name" placeholder="Recording name">
-      <select id="system" required aria-label="Target system"></select>
-      <button type="submit">New recording</button>
+      <input id="name" required maxlength="120" aria-label="What is this task called?" placeholder="e.g. Daily sales export" />
+      <select id="system" required aria-label="Which system?"></select>
+      <button type="submit">Start a new recording</button>
     </form>
   </section>
+
   <section class="panel">
-    <div class="toolbar"><h2>Saved recordings</h2><label class="muted"><input type="checkbox" id="deleted"> Include deleted</label></div>
-    <table><thead><tr><th>Name</th><th>System</th><th>Version</th><th>Status</th><th>Steps</th><th>Created</th><th></th></tr></thead><tbody id="rows"><tr><td colspan="7" class="empty">Loading recordings…</td></tr></tbody></table>
+    <div class="toolbar">
+      <h2>Your recordings</h2>
+      <label class="muted"><input type="checkbox" id="deleted" /> Show deleted</label>
+    </div>
+    <table>
+      <thead><tr><th>Task</th><th>System</th><th>Status</th><th>Steps</th><th>Recorded</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+    </table>
   </section>
 </main>
-<script src="static/app.js"></script><script src="static/recordings.js"></script></body></html>
+<script src="static/app.js"></script>
+<script src="static/recordings.js"></script>
+</body>
+</html>

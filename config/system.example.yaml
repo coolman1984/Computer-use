@@ -23,6 +23,10 @@ browser:
     width: 1440
     height: 900
   max_concurrency: 4
+  # Which browser to drive. Empty = the one Playwright installed. Point this at
+  # an existing Chrome/Chromium (or set SMARTOPS_BROWSER_PATH) on a machine
+  # where Playwright's own browser was never downloaded.
+  executable_path: ""
 
 agents:
   codex:

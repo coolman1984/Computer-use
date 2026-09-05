@@ -11,26 +11,36 @@
 <main>
   <div id="error"></div>
 
+  <section class="panel highlight-panel">
+    <h2>Your next step</h2>
+    <div id="next-step" class="next-step">
+      <p class="muted">Checking where you are…</p>
+    </div>
+  </section>
+
   <section class="panel">
-    <h2>Where you are</h2>
-    <p class="muted">Each step needs the one above it. The first step that is not done yet is the one to do next.</p>
-    <ol class="timeline" id="workflow-steps">
-      <li class="empty">Checking…</li>
+    <h2>The whole journey</h2>
+    <p class="muted">Eleven steps, in order. Each one needs the one before it, so the platform will not let you skip ahead — that is what stops a half-finished automation from running overnight.</p>
+    <ol class="journey" id="journey-steps">
+      <li class="empty">Loading…</li>
     </ol>
   </section>
 
   <div class="grid">
     <div class="card">
-      <h3>Active runs</h3>
+      <h3>Running now</h3>
       <div class="value" id="active-count">—</div>
+      <p class="muted hint">Work in progress this moment.</p>
     </div>
     <div class="card">
-      <h3>Open incidents</h3>
+      <h3>Needs attention</h3>
       <div class="value" id="open-incidents-count">—</div>
+      <p class="muted hint">Failures waiting on a decision.</p>
     </div>
     <div class="card">
-      <h3>Latest health check</h3>
-      <div class="value" id="selfcheck-status">—</div>
+      <h3>Running by themselves</h3>
+      <div class="value" id="scheduled-count">—</div>
+      <p class="muted hint">Approved automations on a schedule.</p>
     </div>
   </div>
 
@@ -38,24 +48,25 @@
     <h2>Recent runs</h2>
     <table>
       <thead>
-        <tr><th>Workflow</th><th>Status</th><th>Started</th><th></th></tr>
+        <tr><th>What ran</th><th>Result</th><th>Started</th><th></th></tr>
       </thead>
-      <tbody id="recent-runs"><tr><td colspan="4" class="empty">Loading runs…</td></tr></tbody>
+      <tbody id="recent-runs"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
     </table>
   </section>
 
   <section class="panel">
     <h2>Live activity <span id="live-dot" class="live-dot"></span></h2>
+    <p class="muted">Everything the platform does, as it happens.</p>
     <ul class="timeline" id="live-events">
-      <li class="empty">No events yet</li>
+      <li class="empty">No activity yet</li>
     </ul>
   </section>
 
   <section class="panel">
-    <h2>Platform health check</h2>
-    <p class="muted">Confirms local storage is ready and writes a health pulse to the event log. Useful when something looks wrong, not part of the normal workflow.</p>
+    <h2>Is the platform itself healthy?</h2>
+    <p class="muted">Confirms local storage is ready and writes a health pulse. Use it when something looks wrong; it is not part of the normal journey.</p>
     <div class="toolbar">
-      <button id="run-selfcheck" class="secondary">Run health check</button>
+      <button id="run-selfcheck" class="secondary" type="button">Run health check</button>
       <span class="muted" id="selfcheck-hint"></span>
     </div>
   </section>

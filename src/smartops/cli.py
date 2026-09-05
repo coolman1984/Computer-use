@@ -1,7 +1,10 @@
-"""Command line interface for SmartOps: sign-in, manual collection, the
-background worker, and the HTTP server. Non-technical end users work in the
-web app; this file is for the operator setting the platform up (first
-sign-in, running it as a service).
+"""Command line interface for SmartOps.
+
+Everything a normal user needs now lives in the web app — adding a system,
+testing it, signing in, recording, approving, running and scheduling. Nothing
+here is a required step of the journey any more; these commands exist for the
+operator (diagnostics, running the platform as a service) and as a fallback
+when the app itself will not start.
 """
 
 from __future__ import annotations
@@ -21,15 +24,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="Full check of settings, directories, and sessions")
     sub.add_parser("systems", help="List the defined systems and reports")
 
-    login = sub.add_parser("login", help="Sign in to a system manually and save the session")
+    login = sub.add_parser(
+        "login",
+        help="Sign in to a system and save the session (the Sign-in page does this too)",
+    )
     login.add_argument("system", help="System key as written in its definition")
 
     collect = sub.add_parser("collect", help="Collect one report now and print the result")
     collect.add_argument("system")
     collect.add_argument("report")
 
-    sub.add_parser("work", help="Run the background worker + scheduler (Ctrl-C to stop)")
-    sub.add_parser("serve", help="Run the HTTP server (uvicorn)")
+    sub.add_parser(
+        "work",
+        help="Run only the background worker + scheduler. Not needed alongside 'serve', "
+        "which already runs them.",
+    )
+    sub.add_parser(
+        "serve", help="Run SmartOps: the web app, the background worker, and the scheduler"
+    )
     sub.add_parser("recordings-backup", help="Private backup of SQLite and the recordings")
     sub.add_parser("recordings-recover", help="Settle interrupted recordings after a restart")
     sub.add_parser("recordings-purge", help="Permanently delete expired recordings per explicit retention")
@@ -88,6 +100,14 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
                     except Exception:
                         session_status += "; stored credential: unavailable"
             print(f"  - {system.key} ({system.auth.mode}): {session_status}")
+
+        print()
+        processes = services.processes.list(limit=500)
+        approved = [p for p in processes if p.is_runnable]
+        scheduled = [p for p in processes if p.is_scheduled]
+        print(f"Automations: {len(processes)} total, {len(approved)} approved, {len(scheduled)} scheduled")
+        for process in processes:
+            print(f"  - {process.name} [{process.status.value}] {process.system_key}/{process.report_key}")
 
         print()
         agent = services.agent_runner
@@ -206,7 +226,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     services = _build_services()
     try:
+        # create_app starts the worker and scheduler with the server (see its
+        # lifespan), so this one command is the whole platform.
         app = create_app(services)
+        print(
+            f"SmartOps is starting on http://{services.settings.app.host}:{services.settings.app.port}/app/index.html"
+        )
+        print("Scheduled automations run automatically while this is up.")
         uvicorn.run(app, host=services.settings.app.host, port=services.settings.app.port)
         return 0
     finally:

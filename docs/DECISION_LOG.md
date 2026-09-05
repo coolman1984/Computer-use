@@ -102,3 +102,61 @@ The recording worker uses `Playwright channel="chrome"` and a private
 profile because it needs a direct connection to the DOM, network,
 downloads, and trace. The mandatory launcher provides no CDP endpoint or
 dedicated profile; details and operational limits are in `RECORDING_OPERATIONS.md`.
+
+## D026 — A recording becomes a Process, and a Process is the only runnable automation
+A recording's captured steps are converted into an executable *plan*, and that
+plan is owned by a new first-class object: the Process. Everything runnable and
+schedulable is a Process, so "recorded once" and "runs every night" are two
+points in one object's life rather than two disconnected features. Previously
+the conversion produced a JSON draft nothing consumed, which meant a recording
+could never become an automation at all.
+
+## D027 — A plan only ever claims a layer the replay engine can execute
+`build_plan` labels a step `dom` (a stable selector), `visual` (a click stored
+as a fraction of the viewport, never absolute screen coordinates), or `manual`.
+There is deliberately no `network` layer for replay: nothing can execute one, and
+a plan that named it would describe a capability the platform does not have. A
+`manual` step is reported honestly and blocks the review gate, so the failure
+surfaces during review instead of deep inside a browser weeks later.
+
+## D028 — Approval requires a passing test, and only approval unlocks running and scheduling
+`ProcessManager` enforces DRAFT → TESTED → APPROVED. A test is an ordinary run
+through the same engine, validator and incident path, so "it passed" means
+exactly "it produced a valid file". Editing an automation drops it back to
+DRAFT, because what was proven to work must remain the thing that would run. The
+scheduler's repository query only ever sees approved processes, so an untested
+automation cannot fire even if something upstream went wrong.
+
+## D029 — The journey is computed and enforced on the server
+`journey.py` is the single source of truth for the eleven stages. The web app
+renders it rather than inventing its own idea of progress, and the API enforces
+the same gates (409 naming the blocking stage and the page that fixes it).
+Hiding a button in the UI is a suggestion; a server-side gate is a rule, and the
+two can never disagree.
+
+## D030 — The server, the worker and the scheduler start as one process
+`create_app`'s lifespan starts the background worker and scheduler. Previously
+`serve` ran only the API, so a schedule fired only if someone separately ran
+`python -m smartops work` — the platform's central promise silently depended on
+a second terminal. `SMARTOPS_DISABLE_WORKER=1` opts out for tests and tooling,
+and endpoints that queue work fall back to running inline when no worker exists,
+so a run is never queued into nothing.
+
+## D031 — Systems are edited in the app, validated by the loader, and reloaded live
+The Systems page writes the same YAML the loader reads, through the same
+`parse_system_profile` validation, then reloads the registry in place. One source
+of truth, two ways in, and no restart — which is what moved step one of the
+journey inside the product.
+
+## D032 — Every failure reaches the user as what happened, what to do, and one button
+`guidance.py` translates an error class (or a blocked stage) into three fields
+the UI renders identically everywhere. A blocked stage is deliberately worded as
+"an earlier step is not finished", not as a fault, so the user is not sent
+hunting for a problem that does not exist.
+
+## D033 — The browser to drive is configurable
+`browser.executable_path` (or `SMARTOPS_BROWSER_PATH`) points every launch site —
+extraction, replay, connection test, sign-in, and the recorder — at a specific
+browser. Without it, a machine that ran only the launcher and never
+`playwright install` fails on every browser action with a raw Playwright message.
+A missing browser is now detected and reported as its own actionable case.

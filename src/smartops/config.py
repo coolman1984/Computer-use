@@ -50,6 +50,12 @@ class BrowserSettings:
     viewport_width: int = 1440
     viewport_height: int = 900
     max_concurrency: int = 4
+    # Which browser to drive. Empty means "the one Playwright installed", which
+    # is right on a developer machine but is exactly what is missing on a
+    # machine where someone only ran the launcher. Pointing this at an existing
+    # Chrome install (or setting SMARTOPS_BROWSER_PATH) avoids a separate
+    # download step the user would otherwise have to do from a terminal.
+    executable_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -157,6 +163,9 @@ def load_settings(path: Path | str | None = None) -> Settings:
         viewport_width=int(viewport_raw.get("width", 1440)),
         viewport_height=int(viewport_raw.get("height", 900)),
         max_concurrency=int(browser_raw.get("max_concurrency", 4)),
+        executable_path=os.getenv(
+            "SMARTOPS_BROWSER_PATH", browser_raw.get("executable_path", "") or ""
+        ),
     )
     safety = SafetySettings(
         allow_production_code_changes=bool(safety_raw.get("allow_production_code_changes", False)),

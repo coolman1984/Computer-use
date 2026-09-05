@@ -41,8 +41,12 @@ document.addEventListener('click', e => {
 """
 
 class PlaywrightRecordingWorker:
-    def __init__(self, recording_id: str, artifact_dir: Path, start_url: str, on_step: Callable[[dict], None], on_heartbeat: Callable[[], None], on_finished: Callable[[str | None], None]) -> None:
+    def __init__(self, recording_id: str, artifact_dir: Path, start_url: str, on_step: Callable[[dict], None], on_heartbeat: Callable[[], None], on_finished: Callable[[str | None], None], executable_path: str = "") -> None:
         self.recording_id, self.artifact_dir, self.start_url = recording_id, artifact_dir, start_url
+        # Empty means "use the installed Google Chrome". A configured path lets
+        # a machine without Chrome record with whatever Chromium it does have,
+        # instead of failing with a raw Playwright message.
+        self.executable_path = executable_path
         self.on_step, self.on_heartbeat, self.on_finished = on_step, on_heartbeat, on_finished
         self._stop, self._paused = threading.Event(), threading.Event()
         self._thread: threading.Thread | None = None
@@ -61,7 +65,12 @@ class PlaywrightRecordingWorker:
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
             for item in ("screenshots", "downloads", "network", "trace", "session", "profile"): (self.artifact_dir / item).mkdir(exist_ok=True)
             with sync_playwright() as p:
-                context = p.chromium.launch_persistent_context(str(self.artifact_dir / "profile"), channel="chrome", headless=False, accept_downloads=True)
+                launch_kwargs = {"headless": False, "accept_downloads": True}
+                if self.executable_path:
+                    launch_kwargs["executable_path"] = self.executable_path
+                else:
+                    launch_kwargs["channel"] = "chrome"
+                context = p.chromium.launch_persistent_context(str(self.artifact_dir / "profile"), **launch_kwargs)
                 try:
                     context.tracing.start(screenshots=True, snapshots=True, sources=False)
                     # Context-level, not page-level: applies to every page this

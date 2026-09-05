@@ -13,6 +13,7 @@ venv/
 *storage-state*.json
 *.storage_state.json
 /logs/
+/scratch/
 /incidents/
 playwright-report/
 test-results/

@@ -11,6 +11,7 @@ from .adapters.browser.playwright_engine import PlaywrightBrowserAdapter
 from .adapters.history.archiver import HistoryArchiver
 from .adapters.notify.local import CompositeNotifier, LocalLogNotifier, WebhookNotifier
 from .adapters.validation.local import LocalFileValidator
+from .checks import ConnectionCheckStore
 from .config import AgentSettings, Settings, ensure_directories, load_settings
 from .credentials import CredentialStore, default_credential_store
 from .core.clock import Clock, SystemClock
@@ -26,6 +27,7 @@ from .storage.repositories import (
     EventRepository,
     FileRepository,
     IncidentRepository,
+    ProcessRepository,
     RunRepository,
     StepRepository,
     RecordingRepository,
@@ -64,6 +66,7 @@ class Services:
         self.incidents = IncidentRepository(self.db, self.clock)
         self.agent_runs = AgentRunRepository(self.db, self.clock)
         self.recordings = RecordingRepository(self.db, self.clock)
+        self.processes = ProcessRepository(self.db, self.clock)
 
         self.bus = EventBus()
         self.events = EventLog(EventRepository(self.db, self.clock), self.bus, self.clock)
@@ -83,6 +86,17 @@ class Services:
         # settings.storage.systems_dir, or empty if the folder does not
         # exist. Real definitions live outside the repo via SMARTOPS_SYSTEMS_DIR (D023).
         self.systems = SystemRegistry.load(self.settings.storage.systems_dir)
+
+        # Which systems have passed a connection test. Durable on purpose: a
+        # restart must not silently undo a completed stage of the journey.
+        self.connection_checks = ConnectionCheckStore(
+            self.settings.storage.logs_dir / "connection-checks.json"
+        )
+
+        from .processes.manager import ProcessManager
+        self.process_manager = ProcessManager(self)
+        from .login import LoginManager
+        self.login_manager = LoginManager(self)
 
         from .recordings.manager import RecordingManager
         self.recording_manager = RecordingManager(self)
@@ -131,6 +145,14 @@ class Services:
         if self.settings.agents.codex.enabled:
             return "codex", self.settings.agents.codex
         return "", None
+
+    def reload_systems(self) -> None:
+        """Re-read system definitions from disk after a change made in the app.
+
+        Without this, adding a system would still mean restarting the server —
+        the reason step one of the journey used to live outside the product.
+        """
+        self.systems.reload()
 
     def close(self) -> None:
         self.db.close()

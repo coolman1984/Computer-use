@@ -73,8 +73,9 @@ def capture_login(
 
     with sync_playwright() as playwright:
         launch_kwargs: dict = {"headless": False}
-        if executable_path:
-            launch_kwargs["executable_path"] = executable_path
+        chosen = executable_path or browser_settings.executable_path
+        if chosen:
+            launch_kwargs["executable_path"] = chosen
         browser = playwright.chromium.launch(**launch_kwargs)
         try:
             context_kwargs: dict = {

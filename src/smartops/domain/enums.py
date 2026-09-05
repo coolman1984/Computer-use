@@ -83,6 +83,40 @@ class EventType(StrEnum):
     RECORDING_DELETED = "recording_deleted"
     RECORDING_RESTORED = "recording_restored"
     RECORDING_DRAFT_CREATED = "recording_draft_created"
+    PROCESS_CREATED = "process_created"
+    PROCESS_TEST_STARTED = "process_test_started"
+    PROCESS_TESTED = "process_tested"
+    PROCESS_TEST_FAILED = "process_test_failed"
+    PROCESS_APPROVED = "process_approved"
+    PROCESS_RETIRED = "process_retired"
+    PROCESS_SCHEDULE_CHANGED = "process_schedule_changed"
+    SYSTEM_SAVED = "system_saved"
+    SYSTEM_DELETED = "system_deleted"
+    SYSTEM_CHECK_PASSED = "system_check_passed"
+    SYSTEM_CHECK_FAILED = "system_check_failed"
+    LOGIN_STARTED = "login_started"
+    LOGIN_SUCCEEDED = "login_succeeded"
+    LOGIN_FAILED = "login_failed"
+
+
+class ProcessStatus(StrEnum):
+    """Lifecycle of an automation built from a recording.
+
+    The order is a gate, not a label: a process is only runnable and only
+    schedulable once it reaches APPROVED, and it can only reach APPROVED
+    after a real test replay actually succeeded (TESTED). That is what stops
+    a raw recording from being mistaken for a working automation.
+    """
+
+    DRAFT = "draft"
+    TESTING = "testing"
+    TESTED = "tested"
+    TEST_FAILED = "test_failed"
+    APPROVED = "approved"
+    RETIRED = "retired"
+
+
+RUNNABLE_PROCESS_STATUSES = frozenset({ProcessStatus.APPROVED})
 
 
 class RecordingStatus(StrEnum):

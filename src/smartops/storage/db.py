@@ -167,7 +167,35 @@ CREATE TABLE IF NOT EXISTS recording_steps (
 );
 """
 
-MIGRATIONS: tuple[tuple[int, str], ...] = ((1, SCHEMA_V1), (2, SCHEMA_V2))
+# A process is a recording that has been reviewed and turned into something
+# re-runnable. It carries its own schedule so that "approve it once" and "it
+# runs by itself afterwards" are one object, not two disconnected settings.
+SCHEMA_V3 = """
+CREATE TABLE IF NOT EXISTS processes (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    system_key TEXT NOT NULL,
+    report_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    recording_id TEXT,
+    plan TEXT NOT NULL DEFAULT '{}',
+    validation_rules TEXT NOT NULL DEFAULT '{}',
+    schedule_daily_at TEXT NOT NULL DEFAULT '',
+    schedule_every_seconds REAL,
+    schedule_enabled INTEGER NOT NULL DEFAULT 0,
+    last_test_run_id TEXT,
+    last_run_id TEXT,
+    error_message TEXT,
+    approved_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_processes_system ON processes(system_key, status);
+CREATE INDEX IF NOT EXISTS idx_processes_created ON processes(created_at DESC);
+"""
+
+MIGRATIONS: tuple[tuple[int, str], ...] = ((1, SCHEMA_V1), (2, SCHEMA_V2), (3, SCHEMA_V3))
 
 
 class Database:
