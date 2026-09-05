@@ -56,6 +56,11 @@ class BrowserSettings:
     # Chrome install (or setting SMARTOPS_BROWSER_PATH) avoids a separate
     # download step the user would otherwise have to do from a terminal.
     executable_path: str = ""
+    # Recording is headed by definition: a person has to see the window they are
+    # working in. This exists so the capture path can be exercised automatically
+    # on a machine with no screen — without it, the only way to check that
+    # typing, selecting and frames are still captured would be by hand.
+    record_headless: bool = False
 
 
 @dataclass(frozen=True)
@@ -165,6 +170,10 @@ def load_settings(path: Path | str | None = None) -> Settings:
         max_concurrency=int(browser_raw.get("max_concurrency", 4)),
         executable_path=os.getenv(
             "SMARTOPS_BROWSER_PATH", browser_raw.get("executable_path", "") or ""
+        ),
+        record_headless=(
+            os.getenv("SMARTOPS_RECORD_HEADLESS", "1" if browser_raw.get("record_headless") else "")
+            == "1"
         ),
     )
     safety = SafetySettings(

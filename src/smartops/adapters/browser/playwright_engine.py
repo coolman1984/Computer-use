@@ -21,6 +21,7 @@ from ...config import BrowserSettings
 from ...credentials import CredentialStore
 from ...domain.enums import ExtractionLayer
 from ...ports.browser import ExtractionRequest, ExtractionResult, ReplayRequest
+from .replay import ReplaySession, StepFailed
 from ...storage.paths import slug
 
 
@@ -422,12 +423,17 @@ class PlaywrightBrowserAdapter:
     def _replay_with_context(
         self, context, request: ReplayRequest, plan: dict[str, Any], started: float
     ) -> ExtractionResult:
+        """Walk the recorded steps, proving each one, and keep every file produced."""
         filters = request.filters or {}
         as_extraction = self._as_extraction_request(request)
-        page = context.new_page()
+        session = ReplaySession(
+            context,
+            artifact_dir=Path(request.destination_dir),
+            credential_store=self._credential_store,
+            evidence_timeout_ms=int(min(request.timeout_seconds, 60) * 1000),
+        )
+        page = session.open(plan["start_url"])
         try:
-            page.goto(plan["start_url"], wait_until="networkidle")
-
             auth_message = self._ensure_authenticated(context, page, as_extraction, filters)
             if auth_message:
                 self._capture_failure_evidence(page, as_extraction, auth_message)
@@ -435,93 +441,94 @@ class PlaywrightBrowserAdapter:
             # A sign-in redirect can land somewhere else; return to the recorded
             # starting page before replaying the first action.
             if page.url != plan["start_url"]:
-                page.goto(plan["start_url"], wait_until="networkidle")
+                page.goto(plan["start_url"], wait_until="domcontentloaded")
 
-            expects_download = bool(plan.get("expects_download"))
-            download = None
-            actions = plan.get("actions") or []
-            for index, action in enumerate(actions):
-                is_last = index == len(actions) - 1
-                # The download is triggered by the final action, exactly as it
-                # was during the recording, so that is the only click we arm an
-                # expect_download around. Arming every click would time out on
-                # each ordinary navigation step.
-                if expects_download and is_last:
-                    with page.expect_download() as info:
-                        self._perform_action(page, action)
-                    download = info.value
-                else:
-                    self._perform_action(page, action)
-                    page.wait_for_load_state("networkidle")
+            for action in plan.get("actions") or []:
+                session.perform(action)
+                # Files are saved as they arrive rather than all at the end: a
+                # later step can navigate away or close the tab a download
+                # belongs to, and the handle would be gone with it.
+                session.collect_downloads(Path(request.destination_dir))
 
-            if expects_download:
-                if download is None:
-                    message = "The recorded steps ran, but no file was downloaded."
-                    self._capture_failure_evidence(page, as_extraction, message)
-                    return self._replay_failure(request, message, started)
-                suggested = download.suggested_filename or request.report
-                target = Path(request.destination_dir) / suggested
-                download.save_as(target)
-                return ExtractionResult(
-                    ok=True,
-                    layer_used=ExtractionLayer.DOM,
-                    file_path=target,
-                    original_name=suggested,
-                    size_bytes=target.stat().st_size,
-                    duration_seconds=self._clock() - started,
-                )
-
-            message = "The recording produced no file, so there is nothing to validate."
-            self._capture_failure_evidence(page, as_extraction, message)
-            return self._replay_failure(request, message, started)
+            session.collect_downloads(Path(request.destination_dir))
+            return self._replay_outcome(request, plan, session, started, as_extraction, page)
+        except StepFailed as failure:
+            self._capture_failure_evidence(page, as_extraction, failure.reason)
+            return self._replay_failure(
+                request, str(failure), started, step_results=session.step_results
+            )
         except PlaywrightTimeoutError as exc:
             message = f"A recorded step no longer works on the site: {exc}"
             self._capture_failure_evidence(page, as_extraction, message)
-            return self._replay_failure(request, message, started)
+            return self._replay_failure(request, message, started, step_results=session.step_results)
         except Exception as exc:
             message = f"Repeating the recording failed: {exc}"
             self._capture_failure_evidence(page, as_extraction, message)
-            return self._replay_failure(request, message, started)
-        finally:
-            page.close()
+            return self._replay_failure(request, message, started, step_results=session.step_results)
 
-    def _perform_action(self, page, action: dict[str, Any]) -> None:
-        """Replay one recorded action on the most durable layer it supports.
+    def _replay_outcome(
+        self,
+        request: ReplayRequest,
+        plan: dict[str, Any],
+        session: ReplaySession,
+        started: float,
+        as_extraction: ExtractionRequest,
+        page: Any,
+    ) -> ExtractionResult:
+        """Decide whether the task really produced what the recording promised."""
+        expected = int(plan.get("expected_download_count") or 0)
+        if not plan.get("expects_download"):
+            message = "The recording produced no file, so there is nothing to validate."
+            self._capture_failure_evidence(page, as_extraction, message)
+            return self._replay_failure(request, message, started, step_results=session.step_results)
 
-        Ratios, never pixels: the recording stored the click as a fraction of the
-        viewport, so it lands in the same relative place on a different screen
-        size (AGENTS.md forbids absolute screen coordinates).
-        """
-        layer = action.get("layer")
-        if layer == "dom":
-            selector = action.get("selector") or ""
-            locator = page.locator(selector).first
-            locator.wait_for(state="visible")
-            locator.click()
-            return
-        if layer == "visual":
-            viewport = page.viewport_size or {
-                "width": self._settings.viewport_width,
-                "height": self._settings.viewport_height,
-            }
-            x = float(action["x_ratio"]) * viewport["width"]
-            y = float(action["y_ratio"]) * viewport["height"]
-            page.mouse.click(x, y)
-            return
-        raise RuntimeError(
-            f"Step {action.get('seq')} was not captured well enough to repeat; record the workflow again."
+        if not session.downloads:
+            message = "The recorded steps ran, but no file was downloaded."
+            self._capture_failure_evidence(page, as_extraction, message)
+            return self._replay_failure(request, message, started, step_results=session.step_results)
+
+        # Fewer files than the recording produced is a partial result, and a
+        # partial result reported as success is how a missing detail file goes
+        # unnoticed for a month.
+        if expected and len(session.downloads) < expected:
+            message = (
+                f"The task produced {len(session.downloads)} file(s) but the recording "
+                f"produced {expected}. Something the recording did is no longer happening."
+            )
+            self._capture_failure_evidence(page, as_extraction, message)
+            return self._replay_failure(request, message, started, step_results=session.step_results)
+
+        first = session.downloads[0]
+        return ExtractionResult(
+            ok=True,
+            layer_used=ExtractionLayer.DOM,
+            file_paths=list(session.downloads),
+            original_name=first.name,
+            size_bytes=first.stat().st_size,
+            duration_seconds=self._clock() - started,
+            step_results=session.step_results,
         )
 
     def _replay_failure(
-        self, request: ReplayRequest, message: str, started: float, *, auth_required: bool = False
+        self,
+        request: ReplayRequest,
+        message: str,
+        started: float,
+        *,
+        auth_required: bool = False,
+        step_results: list[dict[str, Any]] | None = None,
     ) -> ExtractionResult:
-        return self._failure(
+        result = self._failure(
             self._as_extraction_request(request),
             ExtractionLayer.DOM,
             message,
             started,
             auth_required=auth_required,
         )
+        # Even a failed run says how far it got: which steps passed, which one
+        # stopped it, and how long each took.
+        result.step_results = list(step_results or [])
+        return result
 
     def capture_evidence(self, run_id: str) -> dict[str, Any]:
         """Return the failure evidence for this exact run, otherwise the last recorded

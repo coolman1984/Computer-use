@@ -21,11 +21,14 @@ from urllib.parse import urlsplit
 
 from ..domain.models import RecordingStep
 
-PLAN_VERSION = 1
+PLAN_VERSION = 2
 
 # Confidence per layer, used only to explain the plan to a non-technical
 # reviewer ("this step is solid" vs "this step is a guess").
 _LAYER_CONFIDENCE = {"dom": "high", "visual": "low", "manual": "none"}
+
+# Actions that do not act on an element and so need no locator.
+_NO_ELEMENT = {"switch_page", "switch_frame", "navigate", "wait_for", "download"}
 
 
 def _layer_for(step: RecordingStep) -> str:
@@ -33,9 +36,13 @@ def _layer_for(step: RecordingStep) -> str:
 
     A selector survives a layout change; a click ratio does not, but it still
     beats having no replay at all. A step with neither is honestly reported as
-    manual rather than silently dropped, so review shows the real gap.
+    manual rather than silently dropped, so review shows the real gap — except
+    for the steps that act on no element at all, which need no locator to be
+    perfectly repeatable.
     """
-    if step.selector:
+    if (step.action or step.kind) in _NO_ELEMENT:
+        return "dom"
+    if step.selector or (step.locator or {}).get("value"):
         return "dom"
     if step.x_ratio is not None and step.y_ratio is not None:
         return "visual"
@@ -61,33 +68,33 @@ def build_plan(
 ) -> dict[str, Any]:
     """Build the executable replay plan for one recording.
 
-    The returned dict is stored on the Process and handed to the browser
-    adapter as-is, so its shape is a contract: `actions` is an ordered list of
-    {seq, layer, kind, selector, x_ratio, y_ratio, label}, and `expects_download`
-    says whether a successful replay must produce a file.
+    The returned dict is stored on the Process and handed to the browser adapter
+    as-is, so its shape is a contract. Each action carries the whole step: what
+    it is, which tab and frame it happens in, how to find its element, what goes
+    in, what proves it worked, where execution may resume, and whether repeating
+    it is safe.
+
+    A download is not an action to replay — the click before it caused it, and
+    clicking again would fetch the file twice — but the number of downloads is
+    kept, because a task that used to produce two files and now produces one has
+    failed even though every step "worked".
     """
     actions: list[dict[str, Any]] = []
-    for step in steps:
-        if step.kind == "download":
-            # A download is an outcome of the click before it, not a separate
-            # action to replay: clicking it again would download twice.
-            continue
-        layer = _layer_for(step)
-        actions.append(
-            {
-                "seq": len(actions) + 1,
-                "layer": layer,
-                "kind": step.kind,
-                "selector": step.selector,
-                "x_ratio": step.x_ratio,
-                "y_ratio": step.y_ratio,
-                "url": step.page_url_redacted,
-                "label": step.target_text_redacted or step.selector or "click",
-                "confidence": _LAYER_CONFIDENCE[layer],
-            }
-        )
+    downloads = [s for s in steps if (s.action or s.kind) == "download"]
 
-    downloads = [s for s in steps if s.kind == "download"]
+    for step in steps:
+        action_kind = step.action or step.kind
+        if action_kind == "download":
+            continue
+        actions.append(_action_from(step, seq=len(actions) + 1))
+
+    # Where execution can safely pick up again. Only a step that has proved
+    # itself can be a checkpoint: resuming after a step whose outcome was never
+    # confirmed would skip work that may not have happened.
+    for action in actions:
+        if action["success"]["type"] != "none":
+            action["checkpoint"] = f"after-step-{action['seq']}"
+
     return {
         "plan_version": PLAN_VERSION,
         "recording_id": recording_id,
@@ -96,7 +103,44 @@ def build_plan(
         "start_url": start_url or _start_url(steps),
         "actions": actions,
         "expects_download": bool(downloads),
+        "expected_download_count": len(downloads),
+        "download_names": [d.inputs.get("file_name", "") for d in downloads if d.inputs],
         "download_hint": downloads[0].download_ref if downloads else "",
+    }
+
+
+def _action_from(step: RecordingStep, *, seq: int) -> dict[str, Any]:
+    """One recorded step as an executable action, upgrading an older one if needed."""
+    action_kind = step.action or step.kind or "click"
+    layer = _layer_for(step)
+    locator = dict(step.locator or {})
+    if not locator and step.selector:
+        # A recording made before the contract existed: it has a selector and
+        # nothing else. It still replays, on the layer it can support.
+        locator = {"strategy": "css", "value": step.selector, "fallbacks": []}
+    if step.x_ratio is not None and step.y_ratio is not None:
+        # Kept as the last resort, used only when no selector matches.
+        locator.setdefault("x_ratio", step.x_ratio)
+        locator.setdefault("y_ratio", step.y_ratio)
+
+    return {
+        "seq": seq,
+        "action": action_kind,
+        "target": dict(step.target or {"page": "main", "frame": ""}),
+        "locator": locator,
+        "inputs": dict(step.inputs or {}),
+        "success": dict(step.success or {"type": "none"}),
+        "checkpoint": step.checkpoint,
+        "retry": dict(step.retry or {"max_attempts": 1, "safe_to_repeat": False}),
+        # Kept for the review screen and for older readers of the plan.
+        "layer": layer,
+        "kind": step.kind,
+        "selector": step.selector,
+        "x_ratio": step.x_ratio,
+        "y_ratio": step.y_ratio,
+        "url": step.page_url_redacted,
+        "label": step.target_text_redacted or step.selector or action_kind,
+        "confidence": _LAYER_CONFIDENCE[layer],
     }
 
 
@@ -143,26 +187,101 @@ def review_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "break if the site's layout changes."
         )
 
+    # A step with no evidence of success is repeated blind: the platform will
+    # click and move on whether or not anything happened. Worth saying, but not
+    # worth blocking — many clicks genuinely have no single visible consequence.
+    unproven = [a for a in actions if (a.get("success") or {}).get("type", "none") == "none"]
+    if unproven:
+        warnings.append(
+            f"{len(unproven)} step(s) have no way to confirm they worked, so a run will move "
+            "past them even if the site did nothing. The final download is still checked."
+        )
+
     return {
         "ready": not problems,
         "problems": problems,
         "warnings": warnings,
         "action_count": len(actions),
         "weak_action_count": len(weak),
+        "unproven_action_count": len(unproven),
+        "download_count": int(plan.get("expected_download_count") or 0),
     }
 
 
 def describe_plan(plan: dict[str, Any]) -> list[str]:
-    """One plain sentence per action, for the review screen."""
+    """One plain sentence per action, for the review screen.
+
+    The reviewer is deciding whether this is really the task they performed, so
+    the sentences say what will happen in their words — including where it
+    happens and how the platform will know it worked.
+    """
     lines: list[str] = []
     for action in plan.get("actions") or []:
-        label = action.get("label") or "an element"
-        if action.get("layer") == "dom":
-            lines.append(f"Click {label} (matched by name on the page).")
-        elif action.get("layer") == "visual":
-            lines.append(f"Click {label} (matched by its position on the page).")
-        else:
-            lines.append(f"Step {action.get('seq')} cannot be repeated automatically.")
-    if plan.get("expects_download"):
+        lines.append(_describe_action(action))
+    count = int(plan.get("expected_download_count") or 0)
+    if count == 1:
         lines.append("Wait for the file to download, then check it is valid.")
+    elif count > 1:
+        lines.append(f"Wait for all {count} files to download, then check each one is valid.")
     return lines
+
+
+def _describe_action(action: dict[str, Any]) -> str:
+    kind = action.get("action") or action.get("kind") or "click"
+    label = action.get("label") or "an element"
+    inputs = action.get("inputs") or {}
+    where = _describe_where(action)
+
+    if kind == "fill":
+        if inputs.get("secret_ref"):
+            body = f"Type the saved password into {label}"
+        else:
+            body = f"Type \"{inputs.get('value', '')}\" into {label}"
+    elif kind == "select":
+        body = f"Choose \"{inputs.get('value', '')}\" from {label}"
+    elif kind == "check":
+        body = f"{'Tick' if inputs.get('checked', True) else 'Untick'} {label}"
+    elif kind == "press":
+        body = f"Press {inputs.get('key', 'Enter')}"
+    elif kind == "switch_page":
+        body = "Move to the tab the task opened"
+    elif kind == "switch_frame":
+        body = "Move into the panel on the page"
+    elif kind == "navigate":
+        body = f"Open {inputs.get('url', 'the next page')}"
+    elif kind == "wait_for":
+        body = "Wait for the page to catch up"
+    elif action.get("layer") == "visual":
+        body = f"Click {label} (matched by its position on the page)"
+    elif action.get("layer") == "manual":
+        return f"Step {action.get('seq')} cannot be repeated automatically."
+    else:
+        body = f"Click {label}"
+
+    return f"{body}{where}{_describe_proof(action)}."
+
+
+def _describe_where(action: dict[str, Any]) -> str:
+    target = action.get("target") or {}
+    if target.get("frame"):
+        return ", inside the panel on the page"
+    page = target.get("page") or "main"
+    return "" if page in ("", "main") else ", in the other tab"
+
+
+def _describe_proof(action: dict[str, Any]) -> str:
+    """How the platform will know the step worked — the part that used to be missing."""
+    success = action.get("success") or {}
+    kind = success.get("type") or "none"
+    return {
+        "selector_visible": ", then wait until the result appears",
+        "selector_hidden": ", then wait until it disappears",
+        "value_equals": ", and check the value took",
+        "value_not_empty": ", and check the field was filled",
+        "checked_is": ", and check the box changed",
+        "url_changed": ", and check the page moved",
+        "new_page": ", and check a new tab opened",
+        "page_available": "",
+        "download_started": ", and check a file starts downloading",
+        "none": "",
+    }.get(kind, "")

@@ -178,40 +178,61 @@ def replay_recording(ctx: StepContext) -> StepResult:
             result.message or f"Session expired for system {system}",
             details={"system": system, "needs_login": True, "no_retry": True},
         )
-    if not result.ok or result.file_path is None:
+    if not result.ok or not result.file_paths:
         raise TransientError(
             result.message or "Repeating the recording failed",
-            details={"layer": result.layer_used.value, "evidence": result.evidence},
+            details={
+                "layer": result.layer_used.value,
+                "evidence": result.evidence,
+                # Which step stopped it, and how far the task got, belongs on the
+                # failure: "it failed" is not something anyone can act on.
+                "step_results": result.step_results,
+            },
         )
 
-    artifact = FileArtifact(
-        id=new_id("file"),
-        run_id=ctx.run_id,
-        system=system,
-        report=report,
-        path=str(result.file_path),
-        original_name=result.original_name,
-        size_bytes=result.size_bytes,
-        period=request.period,
-        created_at=now,
-    )
-    ctx.services.files.save(artifact)
-    ctx.emit(
-        EventType.FILE_DOWNLOADED,
-        message=f"Downloaded {report} from {system} by repeating the recording",
-        payload={
-            "file_id": artifact.id,
-            "path": artifact.path,
-            "layer": result.layer_used.value,
-            "size_bytes": artifact.size_bytes,
-            "process_id": ctx.get("process_id"),
-        },
-    )
+    # One task can produce several files. Each is registered and validated in its
+    # own right, so a summary that arrives and a detail that does not is a
+    # failure rather than a success with something missing.
+    file_ids: list[str] = []
+    file_paths: list[str] = []
+    for produced in result.file_paths:
+        artifact = FileArtifact(
+            id=new_id("file"),
+            run_id=ctx.run_id,
+            system=system,
+            report=report,
+            path=str(produced),
+            original_name=produced.name,
+            size_bytes=produced.stat().st_size if produced.exists() else 0,
+            period=request.period,
+            created_at=now,
+        )
+        ctx.services.files.save(artifact)
+        file_ids.append(artifact.id)
+        file_paths.append(artifact.path)
+        ctx.emit(
+            EventType.FILE_DOWNLOADED,
+            message=f"Downloaded {produced.name} from {system} by repeating the recording",
+            payload={
+                "file_id": artifact.id,
+                "path": artifact.path,
+                "layer": result.layer_used.value,
+                "size_bytes": artifact.size_bytes,
+                "process_id": ctx.get("process_id"),
+            },
+        )
+
     _raise_latency_alert_if_needed(
         ctx, system=system, report=report, duration_seconds=result.duration_seconds
     )
     return StepResult.ok(
-        file_id=artifact.id, file_path=artifact.path, layer_used=result.layer_used.value
+        file_ids=file_ids,
+        file_paths=file_paths,
+        # Kept so anything reading a single file still works.
+        file_id=file_ids[0],
+        file_path=file_paths[0],
+        layer_used=result.layer_used.value,
+        step_results=result.step_results,
     )
 
 
@@ -294,15 +315,17 @@ def _raise_latency_alert_if_needed(
 
 
 def validate_file(ctx: StepContext) -> StepResult:
-    """Checks the downloaded file. A failure here is a data-quality error, not a silent success."""
+    """Checks every downloaded file. A failure here is a data-quality error, not a silent success."""
     validator = getattr(ctx.services, "validator", None)
     if validator is None:
         raise ConfigurationError("The file validator is not wired up (services.validator)")
 
-    file_path = ctx.get("file_path")
-    file_id = ctx.get("file_id")
-    if not file_path:
-        raise ConfigurationError("No file_path in the run's shared state")
+    # A task can produce several files; all of them are checked. Falling back to
+    # the singular keys keeps runs started before this change working.
+    paths = ctx.get("file_paths") or ([ctx.get("file_path")] if ctx.get("file_path") else [])
+    ids = ctx.get("file_ids") or ([ctx.get("file_id")] if ctx.get("file_id") else [])
+    if not paths:
+        raise ConfigurationError("No downloaded file in the run's shared state")
 
     raw_rules = ctx.get("rules", {}) or {}
     rules = ValidationRules(
@@ -313,40 +336,57 @@ def validate_file(ctx: StepContext) -> StepResult:
         max_age_hours=raw_rules.get("max_age_hours"),
         reject_duplicate_hash=bool(raw_rules.get("reject_duplicate_hash", True)),
     )
-    report = validator.validate(Path(file_path), rules)
+    by_id = {f.id: f for f in ctx.services.files.list(run_id=ctx.run_id)}
+    all_failures: list[str] = []
+    checksums: list[str] = []
+    rows: list[int | None] = []
 
-    artifacts = [f for f in ctx.services.files.list(run_id=ctx.run_id) if f.id == file_id]
-    if artifacts:
-        artifact = artifacts[0]
-        artifact.validation_status = (
-            ValidationStatus.PASSED if report.passed else ValidationStatus.FAILED
-        )
-        artifact.validation_details = {"failures": report.failures, **report.details}
-        artifact.row_count = report.row_count
-        artifact.sha256 = report.sha256
-        ctx.services.files.save(artifact)
+    for index, path in enumerate(paths):
+        file_id = ids[index] if index < len(ids) else ""
+        report = validator.validate(Path(path), rules)
+        artifact = by_id.get(file_id)
+        if artifact is not None:
+            artifact.validation_status = (
+                ValidationStatus.PASSED if report.passed else ValidationStatus.FAILED
+            )
+            artifact.validation_details = {"failures": report.failures, **report.details}
+            artifact.row_count = report.row_count
+            artifact.sha256 = report.sha256
+            ctx.services.files.save(artifact)
 
-    if not report.passed:
-        ctx.emit(
-            EventType.FILE_REJECTED,
-            severity=Severity.ERROR,
-            message="The file failed validation",
-            payload={"failures": report.failures, "file_id": file_id},
-        )
+        if report.passed:
+            checksums.append(report.sha256)
+            rows.append(report.row_count)
+            ctx.emit(
+                EventType.FILE_VALIDATED,
+                message=f"{Path(path).name} is valid",
+                payload={"file_id": file_id, "rows": report.row_count, "sha256": report.sha256},
+            )
+        else:
+            named = [f"{Path(path).name}: {failure}" for failure in report.failures]
+            all_failures.extend(named)
+            ctx.emit(
+                EventType.FILE_REJECTED,
+                severity=Severity.ERROR,
+                message=f"{Path(path).name} failed its checks",
+                payload={"failures": report.failures, "file_id": file_id},
+            )
+
+    if all_failures:
         # The specific failure belongs in the run's own error message: the run
         # page and the incident both show that string, and "the file failed
         # validation" tells the user nothing they can act on.
         raise DataQualityError(
-            "The file did not pass its checks: " + "; ".join(report.failures),
-            details={"failures": report.failures, "file_id": file_id},
+            "The file did not pass its checks: " + "; ".join(all_failures),
+            details={"failures": all_failures},
         )
 
-    ctx.emit(
-        EventType.FILE_VALIDATED,
-        message="The file is valid",
-        payload={"file_id": file_id, "rows": report.row_count, "sha256": report.sha256},
+    return StepResult.ok(
+        sha256=checksums[0] if checksums else "",
+        sha256_list=checksums,
+        row_count=rows[0] if rows else None,
+        validated_count=len(paths),
     )
-    return StepResult.ok(sha256=report.sha256, row_count=report.row_count)
 
 
 SELF_CHECK = WorkflowDefinition(

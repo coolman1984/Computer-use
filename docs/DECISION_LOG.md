@@ -239,3 +239,68 @@ The scheduler already refused to stack runs, but a second click on "Run it now"
 did not. Two runs of one automation share a browser session and a target system
 and can each half-download the same report. `ProcessManager.active_run` is now
 the single answer to "is it running", used by both paths.
+
+## D043 — A recorded step is a contract, not a click
+A step now carries seven things: what the action was, which tab and frame it
+happened in, how to find the element again (several ways, best first), what went
+in, **what proves it worked**, where execution may resume, and whether repeating
+it is safe. The old shape — kind, selector, x/y — could describe only clicking,
+so a form the person filled in came back as two clicks with no idea what was
+typed, and replaying it produced an empty form and a report for the wrong thing.
+The old columns are kept and still populated, so recordings made before this
+still load and still replay on the layer they can support.
+
+## D044 — Nothing in the recorder may call Playwright from inside Playwright
+Page bindings and download events are dispatched *during* the click that caused
+them. Any Playwright call from that handler — a screenshot, a title, saving a
+download — re-enters the sync API on a call that has not returned, and the whole
+recorder deadlocks. Handlers now read only cached values (`page.url`,
+`frame.url`) and queue the event; every protocol call happens on the worker's
+own loop. This is why the first version hung on the very first key press.
+
+## D045 — A typed value is committed once, in the order it was typed
+`change` is the right event to record — one step with the finished value rather
+than one per keystroke — but on a text input it only fires on blur, and someone
+who types and presses Enter never blurs. The recorder holds the latest value and
+commits it on whichever comes first: change, blur, another action being
+recorded, or the recording ending. Committing before another action is what
+keeps the steps in the order they really happened; remembering what was already
+committed per element is what stops the same typing being recorded twice, which
+made replay type it, type it again, and shift every step number after it.
+
+## D046 — Success is a consequence, never a dispatched action
+A click that lands on a dead button and a click that opens a report are
+indistinguishable until the page says which. Every step names its own evidence —
+an element appeared or vanished, a value took, a tab opened, a file started
+downloading, the page moved — and a step that cannot prove itself fails the run
+at that step, naming it. A step with no recorded evidence is allowed but flagged
+in review, because many clicks genuinely have no single visible consequence.
+
+## D047 — Downloads are collected at the context, and counted
+`expect_download` armed around one action could only ever return one file, so a
+task exporting a summary and its detail lost the second silently. A context-level
+listener catches every file from any action and any tab. The plan records how
+many the recording produced, and a run that brings back fewer fails: a partial
+result reported as success is how a missing detail file goes unnoticed for a
+month. Two files with the same suggested name no longer overwrite each other.
+
+## D048 — A step is retried only when repeating it is harmless
+Typing a value again lands on the same state; pressing Enter on a form or
+clicking a download does not, and repeating those can double-file a request. The
+recording marks which is which, and an unsafe step gets exactly one attempt
+whatever the plan says — failing a run costs less than submitting twice.
+
+## D049 — A secret is a reference in the recording and a value only at run time
+The recorder identifies a sensitive field by what the page declares (input type,
+autocomplete), records that something must be typed there and which system's
+credential it comes from, and never the value. The credential is fetched during
+the run, used, and kept out of step results, events and error messages. Its
+success check is "the field is no longer empty" — never a comparison that would
+need the value.
+
+## D050 — A plan starts where its recording started
+The plan was handed the system's sign-in URL, so every replay began somewhere the
+recorded steps do not exist and step one failed as "the element is no longer on
+the page" — reporting a change to the site that had never happened. The first
+captured page URL is the start; the system URL is only the fallback for a
+recording that never reached a real page.

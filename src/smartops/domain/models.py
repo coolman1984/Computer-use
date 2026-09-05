@@ -138,6 +138,19 @@ class Recording:
 
 @dataclass
 class RecordingStep:
+    """One thing a person did, described completely enough to repeat and to verify.
+
+    A click log was never enough. Repeating a human task needs to know what kind
+    of action it was, where it happened (which tab, which frame), how to find the
+    element again, what went into it, **and what proves it worked** — because a
+    dispatched click is not a result. Two more fields make the sequence safe to
+    resume and to retry: where execution can pick up again, and whether repeating
+    this particular step could do damage.
+
+    The older `kind`/`selector`/`x_ratio` fields are kept and still populated, so
+    recordings made before this contract existed still load and still replay.
+    """
+
     recording_id: str
     seq: int
     kind: str
@@ -154,6 +167,29 @@ class RecordingStep:
     before_image: str = ""
     after_image: str = ""
 
+    # --- the step contract ---
+    # What was done: click, fill, select, press, navigate, switch_page,
+    # switch_frame, wait_for, download.
+    action: str = ""
+    # Where: {"page": "main" | "latest" | "page-2", "frame": "" | frame selector}.
+    target: dict[str, Any] = field(default_factory=dict)
+    # How to find the element again: {"strategy", "value", "fallbacks": [...]}
+    # plus x_ratio/y_ratio as the last resort when the page offers no stable name.
+    locator: dict[str, Any] = field(default_factory=dict)
+    # What goes in: {"value"} for typing and selecting, {"key"} for the keyboard,
+    # {"secret_ref"} when the value must come from the credential store instead —
+    # a password is never stored here.
+    inputs: dict[str, Any] = field(default_factory=dict)
+    # What proves it worked: {"type": "selector_visible" | "value_equals" |
+    # "url_changed" | "new_page" | "download_started" | ..., "value": ...}.
+    success: dict[str, Any] = field(default_factory=dict)
+    # How far execution has got once this step succeeds, so a resumed run knows
+    # what it may skip.
+    checkpoint: str = ""
+    # {"max_attempts": n, "safe_to_repeat": bool}. Repeating a submit or a
+    # download is not safe: it can double-file a request or double-charge one.
+    retry: dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "recording_id": self.recording_id, "seq": self.seq, "kind": self.kind,
@@ -163,6 +199,13 @@ class RecordingStep:
             "y_ratio": self.y_ratio, "changed_ratio": self.changed_ratio,
             "request_ref": self.request_ref, "download_ref": self.download_ref,
             "before_image": self.before_image, "after_image": self.after_image,
+            "action": self.action or self.kind,
+            "target": self.target or {"page": "main", "frame": ""},
+            "locator": self.locator or ({"strategy": "css", "value": self.selector} if self.selector else {}),
+            "inputs": self.inputs or {},
+            "success": self.success or {"type": "none"},
+            "checkpoint": self.checkpoint,
+            "retry": self.retry or {"max_attempts": 1, "safe_to_repeat": False},
         }
 
 

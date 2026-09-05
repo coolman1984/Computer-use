@@ -42,7 +42,7 @@ class RecordingManager:
         if other: raise ConcurrencyError("Another recording is already active for this system")
         record.status, record.error_message, record.started_at = RecordingStatus.STARTING, None, self.services.clock.now(); self.services.recordings.save(record); self._emit(EventType.RECORDING_STARTED, record, "Opening Google Chrome for recording")
         url = self._system_url(record.system_key)
-        worker = PlaywrightRecordingWorker(record.id, Path(record.artifact_dir), url, lambda item: self._step(record.id, item), lambda: self._heartbeat(record.id), lambda error: self._finished(record.id, error), self.services.settings.browser.executable_path, session_path(self.services.settings.storage.sessions_dir, record.system_key))
+        worker = PlaywrightRecordingWorker(record.id, Path(record.artifact_dir), url, lambda item: self._step(record.id, item), lambda: self._heartbeat(record.id), lambda error: self._finished(record.id, error), self.services.settings.browser.executable_path, session_path(self.services.settings.storage.sessions_dir, record.system_key), self.services.settings.browser.record_headless)
         self.workers[record.id] = worker
         try:
             worker.start()
@@ -112,10 +112,18 @@ class RecordingManager:
         """
         record=self._required(recording_id)
         if record.status != RecordingStatus.COMPLETED: raise PermanentError("Complete and review the recording before creating a draft")
+        # Where the recording actually began, not the system's sign-in page.
+        # Handing the login URL to the plan made every replay start somewhere the
+        # recorded steps do not exist, and the first step failed as "the element
+        # is no longer on the page" — a change to the site that never happened.
+        # build_plan reads the first captured page URL; the system URL is only
+        # the fallback for a recording that never reached a real page.
         plan=build_plan(recording_id=record.id, system_key=record.system_key,
                         report_key=report_key or _default_report_key(record.name),
                         steps=self.services.recordings.steps(record.id),
-                        start_url=self._system_url(record.system_key))
+                        start_url="") or {}
+        if not plan.get("start_url"):
+            plan["start_url"] = self._system_url(record.system_key)
         record.automation_draft={**plan, "review": review_plan(plan)}
         self.services.recordings.save(record); self._emit(EventType.RECORDING_DRAFT_CREATED, record, "Reviewable automation draft created"); return record
     def recover(self, stale_seconds: int = 90) -> int:
@@ -139,10 +147,24 @@ class RecordingManager:
     def _step(self, recording_id: str, data: dict[str, Any]) -> None:
         record=self.services.recordings.get(recording_id)
         if not record or record.status == RecordingStatus.PAUSED: return
+        self._resolve_secret_ref(record, data)
         step=RecordingStep(recording_id=recording_id, seq=record.step_count+1, occurred_at=self.services.clock.now(), **data); self.services.recordings.save_step(step)
         record.step_count += 1; record.download_count += int(step.kind=="download"); self.services.recordings.save(record)
         root=Path(record.artifact_dir); root.mkdir(parents=True, exist_ok=True)
         with (root/"steps.jsonl").open("a", encoding="utf-8") as out: out.write(json.dumps(step.to_dict(), ensure_ascii=False)+"\n")
+    @staticmethod
+    def _resolve_secret_ref(record: Recording, data: dict[str, Any]) -> None:
+        """Name the credential a sensitive field must be filled from at run time.
+
+        The recorder sees a password box and records that a secret goes here,
+        never what it was. It has no business knowing how credentials are named,
+        so the system this recording belongs to is attached here — that key is
+        what the credential store is asked for during the run.
+        """
+        inputs = data.get("inputs")
+        if isinstance(inputs, dict) and inputs.get("secret_field") and not inputs.get("secret_ref"):
+            inputs["secret_ref"] = record.system_key
+
     def _finished(self, recording_id: str, error: str | None) -> None:
         record=self.services.recordings.get(recording_id)
         if not record: return

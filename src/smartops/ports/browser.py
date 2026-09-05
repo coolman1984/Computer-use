@@ -70,6 +70,10 @@ class ReplayRequest:
 class ExtractionResult:
     ok: bool
     layer_used: ExtractionLayer
+    # One task can produce several files — a summary and its detail, a report per
+    # branch. `file_paths` is the real answer; `file_path` stays as the first of
+    # them so every existing caller keeps working.
+    file_paths: list[Path] = field(default_factory=list)
     file_path: Path | None = None
     original_name: str = ""
     size_bytes: int = 0
@@ -78,6 +82,17 @@ class ExtractionResult:
     message: str = ""
     # True when the failure was an expired or missing session, not an ordinary error.
     auth_required: bool = False
+    # What happened to each recorded step, in order: enough for the run page to
+    # show where a task got to, and for a resumed run to know what is already done.
+    step_results: list[dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Keep the singular and plural views of the files consistent whichever
+        # one the caller filled in.
+        if self.file_paths and self.file_path is None:
+            self.file_path = self.file_paths[0]
+        elif self.file_path is not None and not self.file_paths:
+            self.file_paths = [self.file_path]
 
 
 class BrowserPort(Protocol):

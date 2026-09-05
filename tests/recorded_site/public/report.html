@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Daily sales</title></head>
+<body>
+<div id="user-menu">Signed in as tester</div>
+<h1>Daily sales</h1>
+
+<!-- A text field: typing must be recorded as a value, not as clicks. -->
+<label>Reference <input id="reference" type="text" /></label>
+
+<!-- A password field: its value must NEVER reach the recording. -->
+<label>Confirm password <input id="secret" type="password" /></label>
+
+<!-- A dropdown: needs a change event, not a click. -->
+<label>Period
+  <select id="period">
+    <option value="">Choose…</option>
+    <option value="daily">Daily</option>
+    <option value="monthly">Monthly</option>
+  </select>
+</label>
+
+<!-- Responds to Enter, not to a click: proves keyboard steps are captured. -->
+<label>Filter <input id="filter" type="text" /></label>
+<div id="filter-applied" hidden>Filter applied</div>
+
+<!-- Appears only after a delay: proves waiting is a real step. -->
+<button id="prepare">Prepare report</button>
+<div id="ready" hidden>Report is ready</div>
+
+<!-- Opens a second tab: proves window switching. -->
+<a id="open-details" href="details.html" target="_blank">Open details in a new tab</a>
+
+<!-- Content the main document cannot see: proves frame handling. -->
+<iframe id="totals" src="totals.html" width="400" height="120"></iframe>
+
+<!-- Two separate downloads in one task. -->
+<a id="download-summary" href="summary.csv" download="summary.csv">Download summary</a>
+<a id="download-detail" href="detail.csv" download="detail.csv">Download detail</a>
+
+<script>
+  document.getElementById('filter').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('filter-applied').hidden = false;
+  });
+  document.getElementById('prepare').addEventListener('click', () => {
+    setTimeout(() => { document.getElementById('ready').hidden = false; }, 700);
+  });
+</script>
+</body></html>

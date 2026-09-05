@@ -195,7 +195,23 @@ CREATE INDEX IF NOT EXISTS idx_processes_system ON processes(system_key, status)
 CREATE INDEX IF NOT EXISTS idx_processes_created ON processes(created_at DESC);
 """
 
-MIGRATIONS: tuple[tuple[int, str], ...] = ((1, SCHEMA_V1), (2, SCHEMA_V2), (3, SCHEMA_V3))
+# The step contract: what was done, where, how to find it again, what went in,
+# what proves it worked, where execution can resume, and whether repeating it is
+# safe. Added as columns rather than replacing the old ones so recordings made
+# before this contract still load and still replay.
+SCHEMA_V4 = """
+ALTER TABLE recording_steps ADD COLUMN action TEXT NOT NULL DEFAULT '';
+ALTER TABLE recording_steps ADD COLUMN target TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE recording_steps ADD COLUMN locator TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE recording_steps ADD COLUMN inputs TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE recording_steps ADD COLUMN success TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE recording_steps ADD COLUMN checkpoint TEXT NOT NULL DEFAULT '';
+ALTER TABLE recording_steps ADD COLUMN retry TEXT NOT NULL DEFAULT '{}';
+"""
+
+MIGRATIONS: tuple[tuple[int, str], ...] = (
+    (1, SCHEMA_V1), (2, SCHEMA_V2), (3, SCHEMA_V3), (4, SCHEMA_V4),
+)
 
 
 class Database:

@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Totals</title></head>
+<body>
+<div id="frame-total">Total: 1200</div>
+<button id="confirm-total">Confirm total</button>
+<div id="total-confirmed" hidden>Total confirmed</div>
+<script>
+  document.getElementById('confirm-total').addEventListener('click', () => {
+    document.getElementById('total-confirmed').hidden = false;
+  });
+</script>
+</body></html>

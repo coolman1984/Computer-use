@@ -221,6 +221,9 @@ class RecordingRepository(BaseRepository):
             page_title=row["page_title"], selector=row["selector"], target_text_redacted=row["target_text_redacted"],
             x_ratio=row["x_ratio"], y_ratio=row["y_ratio"], changed_ratio=row["changed_ratio"],
             request_ref=row["request_ref"], download_ref=row["download_ref"], before_image=row["before_image"], after_image=row["after_image"],
+            action=row["action"], target=_loads(row["target"]), locator=_loads(row["locator"]),
+            inputs=_loads(row["inputs"]), success=_loads(row["success"]),
+            checkpoint=row["checkpoint"], retry=_loads(row["retry"]),
         )
 
     def create(self, name: str, system_key: str, *, parent: Recording | None = None, artifact_dir: str = "") -> Recording:
@@ -262,8 +265,8 @@ class RecordingRepository(BaseRepository):
 
     def save_step(self, step: RecordingStep) -> RecordingStep:
         with self.db.transaction() as tx:
-            tx.execute("INSERT INTO recording_steps(recording_id,seq,kind,occurred_at,page_url_redacted,page_title,selector,target_text_redacted,x_ratio,y_ratio,changed_ratio,request_ref,download_ref,before_image,after_image) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(recording_id,seq) DO UPDATE SET kind=excluded.kind,occurred_at=excluded.occurred_at,page_url_redacted=excluded.page_url_redacted,page_title=excluded.page_title,selector=excluded.selector,target_text_redacted=excluded.target_text_redacted,x_ratio=excluded.x_ratio,y_ratio=excluded.y_ratio,changed_ratio=excluded.changed_ratio,request_ref=excluded.request_ref,download_ref=excluded.download_ref,before_image=excluded.before_image,after_image=excluded.after_image",
-                (step.recording_id,step.seq,step.kind,to_iso(step.occurred_at),step.page_url_redacted,step.page_title,step.selector,step.target_text_redacted,step.x_ratio,step.y_ratio,step.changed_ratio,step.request_ref,step.download_ref,step.before_image,step.after_image))
+            tx.execute("INSERT INTO recording_steps(recording_id,seq,kind,occurred_at,page_url_redacted,page_title,selector,target_text_redacted,x_ratio,y_ratio,changed_ratio,request_ref,download_ref,before_image,after_image,action,target,locator,inputs,success,checkpoint,retry) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(recording_id,seq) DO UPDATE SET kind=excluded.kind,occurred_at=excluded.occurred_at,page_url_redacted=excluded.page_url_redacted,page_title=excluded.page_title,selector=excluded.selector,target_text_redacted=excluded.target_text_redacted,x_ratio=excluded.x_ratio,y_ratio=excluded.y_ratio,changed_ratio=excluded.changed_ratio,request_ref=excluded.request_ref,download_ref=excluded.download_ref,before_image=excluded.before_image,after_image=excluded.after_image,action=excluded.action,target=excluded.target,locator=excluded.locator,inputs=excluded.inputs,success=excluded.success,checkpoint=excluded.checkpoint,retry=excluded.retry",
+                (step.recording_id,step.seq,step.kind,to_iso(step.occurred_at),step.page_url_redacted,step.page_title,step.selector,step.target_text_redacted,step.x_ratio,step.y_ratio,step.changed_ratio,step.request_ref,step.download_ref,step.before_image,step.after_image,step.action,_json(step.target),_json(step.locator),_json(step.inputs),_json(step.success),step.checkpoint,_json(step.retry)))
         return step
 
     def steps(self, recording_id: str) -> list[RecordingStep]:
