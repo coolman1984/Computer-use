@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..core.errors import SmartOpsError
 from ..domain.enums import IncidentStatus, RunStatus, TriggerType
 from ..services import Services
 from .ws import create_ws_router
+
+# غرفة القيادة (واجهة الويب الثابتة) تعيش في web/ بجذر المستودع، بجانب src/.
+WEB_DIR = Path(__file__).resolve().parents[3] / "web"
 
 _services: Services | None = None
 
@@ -35,6 +40,10 @@ def create_app(services: Services | None = None) -> FastAPI:
         return services or get_services()
 
     app.include_router(create_ws_router(provide))
+
+    if WEB_DIR.is_dir():
+        # غرفة القيادة: /app/index.html ولوحاتها. لا تأثير على أي نقطة API قائمة.
+        app.mount("/app", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     @app.get("/health")
     def health() -> dict[str, str]:

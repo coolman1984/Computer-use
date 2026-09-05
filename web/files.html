@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>الملفات — SmartOps</title>
+<link rel="stylesheet" href="static/style.css" />
+</head>
+<body>
+<header class="top">
+  <h1>غرفة القيادة</h1>
+  <nav class="main">
+    <a href="index.html">لوحة الحالة</a>
+    <a href="runs.html">التشغيلات</a>
+    <a href="incidents.html">الحوادث</a>
+    <a href="files.html" class="active">الملفات</a>
+  </nav>
+</header>
+<main>
+  <div id="error"></div>
+
+  <section class="panel">
+    <h2>الملفات المنزَّلة</h2>
+    <p class="muted">كل ملف تم تنزيله من أي نظام، مع نتيجة التحقق منه قبل اعتماده.</p>
+    <div class="toolbar">
+      <label class="muted" for="run-filter">فلترة حسب معرّف تشغيل معيّن (اختياري):</label>
+      <input type="text" id="run-filter" placeholder="مثال: run_01ABC…" />
+      <button id="apply-filter">تطبيق</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>النظام</th><th>التقرير</th><th>الحالة</th><th>الحجم</th><th>عدد الصفوف</th><th>وقت التنزيل</th></tr>
+      </thead>
+      <tbody id="files-body"><tr><td colspan="6" class="empty">جارٍ التحميل…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="static/app.js"></script>
+<script>
+const { getJSON, formatDate, statusBadge, VALIDATION_STATUS_LABELS, showError, el } = SmartOps;
+const errorBox = document.getElementById("error");
+
+function formatSize(bytes) {
+  if (!bytes) return "0 بايت";
+  if (bytes < 1024) return `${bytes} بايت`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} ك.بايت`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} م.بايت`;
+}
+
+async function loadFiles() {
+  const runId = document.getElementById("run-filter").value.trim();
+  const url = runId ? `/api/files?run_id=${encodeURIComponent(runId)}&limit=200` : "/api/files?limit=200";
+  try {
+    const data = await getJSON(url);
+    const tbody = document.getElementById("files-body");
+    tbody.innerHTML = "";
+    if (data.items.length === 0) {
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "empty" }, ["لا توجد ملفات مطابقة"])]));
+      return;
+    }
+    for (const file of data.items) {
+      tbody.appendChild(el("tr", {}, [
+        el("td", {}, [file.system]),
+        el("td", {}, [file.report]),
+        el("td", {}, [statusBadge(VALIDATION_STATUS_LABELS, file.validation_status)]),
+        el("td", {}, [formatSize(file.size_bytes)]),
+        el("td", {}, [file.row_count == null ? "—" : String(file.row_count)]),
+        el("td", {}, [formatDate(file.created_at)]),
+      ]));
+    }
+  } catch (err) {
+    showError(errorBox, err);
+  }
+}
+
+document.getElementById("apply-filter").addEventListener("click", loadFiles);
+document.getElementById("run-filter").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") loadFiles();
+});
+loadFiles();
+</script>
+</body>
+</html>

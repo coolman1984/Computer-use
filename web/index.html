@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>غرفة القيادة — SmartOps</title>
+<link rel="stylesheet" href="static/style.css" />
+</head>
+<body>
+<header class="top">
+  <h1>غرفة القيادة</h1>
+  <nav class="main">
+    <a href="index.html" class="active">لوحة الحالة</a>
+    <a href="runs.html">التشغيلات</a>
+    <a href="incidents.html">الحوادث</a>
+    <a href="files.html">الملفات</a>
+  </nav>
+</header>
+<main>
+  <div id="error"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>تشغيلات نشطة الآن</h3>
+      <div class="value" id="active-count">—</div>
+    </div>
+    <div class="card">
+      <h3>حوادث مفتوحة</h3>
+      <div class="value" id="open-incidents-count">—</div>
+    </div>
+    <div class="card">
+      <h3>آخر نتيجة للفحص الذاتي</h3>
+      <div class="value" id="selfcheck-status">—</div>
+    </div>
+  </div>
+
+  <section class="panel">
+    <h2>فحص سريع لصحة المنصة</h2>
+    <p class="muted">يتأكد هذا الفحص أن مساحات التخزين جاهزة، ويسجّل نبضة صحة في السجل.</p>
+    <div class="toolbar">
+      <button id="run-selfcheck">تشغيل الفحص الذاتي الآن</button>
+      <span class="muted" id="selfcheck-hint"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>آخر التشغيلات</h2>
+    <table>
+      <thead>
+        <tr><th>سير العمل</th><th>الحالة</th><th>بدأ في</th><th></th></tr>
+      </thead>
+      <tbody id="recent-runs"><tr><td colspan="4" class="empty">جارٍ التحميل…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>آخر الأحداث <span id="live-dot" class="live-dot"></span></h2>
+    <ul class="timeline" id="live-events">
+      <li class="empty">لا توجد أحداث بعد</li>
+    </ul>
+  </section>
+</main>
+
+<script src="static/app.js"></script>
+<script>
+const { getJSON, postJSON, formatDate, statusBadge, RUN_STATUS_LABELS, EVENT_TYPE_LABELS, shortId, link, showError, connectEvents, el } = SmartOps;
+
+async function loadDashboard() {
+  try {
+    const [runs, incidents] = await Promise.all([
+      getJSON("/api/runs?limit=5"),
+      getJSON("/api/incidents?status=open&limit=50"),
+    ]);
+
+    const active = runs.items.filter(r => ["queued", "running", "waiting", "retrying"].includes(r.status));
+    document.getElementById("active-count").textContent = active.length;
+    document.getElementById("open-incidents-count").textContent = incidents.items.length;
+
+    const lastSelfcheck = runs.items.find(r => r.workflow_key === "platform.selfcheck");
+    const statusEl = document.getElementById("selfcheck-status");
+    statusEl.innerHTML = "";
+    if (lastSelfcheck) {
+      statusEl.appendChild(statusBadge(RUN_STATUS_LABELS, lastSelfcheck.status));
+    } else {
+      statusEl.textContent = "لم يُشغَّل بعد";
+    }
+
+    const tbody = document.getElementById("recent-runs");
+    tbody.innerHTML = "";
+    if (runs.items.length === 0) {
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["لا توجد تشغيلات بعد"])]));
+    }
+    for (const run of runs.items) {
+      const tr = el("tr", {}, [
+        el("td", {}, [run.workflow_key]),
+        el("td", {}, [statusBadge(RUN_STATUS_LABELS, run.status)]),
+        el("td", {}, [formatDate(run.started_at || run.created_at)]),
+        el("td", {}, [link("التفاصيل", `run.html?id=${encodeURIComponent(run.id)}`)]),
+      ]);
+      tbody.appendChild(tr);
+    }
+  } catch (err) {
+    showError(document.getElementById("error"), err);
+  }
+}
+
+document.getElementById("run-selfcheck").addEventListener("click", async (event) => {
+  const button = event.target;
+  button.disabled = true;
+  document.getElementById("selfcheck-hint").textContent = "جارٍ التشغيل…";
+  try {
+    const run = await postJSON("/api/runs", { workflow: "platform.selfcheck", start: true });
+    document.getElementById("selfcheck-hint").textContent =
+      run.status === "succeeded" ? "تم بنجاح ✅" : `الحالة: ${run.status}`;
+    await loadDashboard();
+  } catch (err) {
+    showError(document.getElementById("error"), err);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+function addLiveEvent(evt) {
+  const list = document.getElementById("live-events");
+  if (list.firstElementChild?.classList.contains("empty")) list.innerHTML = "";
+  const label = EVENT_TYPE_LABELS[evt.type] || evt.type;
+  const li = el("li", {}, [
+    el("span", { class: "msg" }, [`${label}${evt.run_id ? " — " + shortId(evt.run_id) : ""}`]),
+    el("span", { class: "time" }, [formatDate(evt.created_at)]),
+  ]);
+  list.insertBefore(li, list.firstChild);
+  while (list.children.length > 15) list.removeChild(list.lastChild);
+}
+
+loadDashboard();
+const socket = connectEvents(null, (evt) => {
+  document.getElementById("live-dot").classList.add("on");
+  addLiveEvent(evt);
+});
+socket.onopen = () => document.getElementById("live-dot").classList.add("on");
+socket.onclose = () => document.getElementById("live-dot").classList.remove("on");
+</script>
+</body>
+</html>
