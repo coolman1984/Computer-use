@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from ..core.errors import SmartOpsError
 from ..domain.enums import IncidentStatus, RunStatus, TriggerType
 from ..services import Services
+from .ws import create_ws_router
 
 _services: Services | None = None
 
@@ -32,6 +33,8 @@ def create_app(services: Services | None = None) -> FastAPI:
 
     def provide() -> Services:
         return services or get_services()
+
+    app.include_router(create_ws_router(provide))
 
     @app.get("/health")
     def health() -> dict[str, str]:
