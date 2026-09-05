@@ -12,31 +12,79 @@
   <div id="error"></div>
 
   <section class="panel">
-    <h2>What a system is</h2>
-    <p class="muted">A system is one target site plus the reports you collect from it. Everything else in SmartOps keys off a system: you sign in to a system, you record a workflow against a system, and every run and file belongs to one. Systems are defined in YAML files, never in this interface, so that no internal URL or selector is ever stored in the app database.</p>
-    <p class="muted">SmartOps reads them from <code id="systems-dir">the configured systems directory</code>. Point <code>SMARTOPS_SYSTEMS_DIR</code> at a private folder outside the repository, put one <code>.yaml</code> file per system in it, and restart the server.</p>
+    <h2>Step 1 · Add the system</h2>
+    <p class="muted">A system is one website plus the reports you collect from it. Everything else hangs off it: you sign in to a system, you record against a system, and every run and file belongs to one.</p>
+    <p class="muted">Definitions are saved as files in <code id="systems-dir">your systems folder</code>. You can edit them here or by hand — both read the same files, and changes take effect immediately with no restart.</p>
   </section>
 
   <section class="panel">
-    <h2>Defined systems</h2>
-    <p class="muted">Sign-in state is checked live. A system must be connected before its reports can be collected or recorded.</p>
+    <h2>Your systems</h2>
+    <p class="muted">Step 2 lives here too: <strong>Test connection</strong> opens the site and tells you in one sentence whether the address works and whether you are signed in. Nothing can be recorded against a system until it has passed this test.</p>
     <table>
       <thead>
-        <tr><th>System</th><th>Sign-in mode</th><th>Status</th><th>Reports</th></tr>
+        <tr><th>System</th><th>Sign-in</th><th>Connection</th><th>Reports</th><th></th></tr>
       </thead>
-      <tbody id="systems-body"><tr><td colspan="4" class="empty">Loading systems…</td></tr></tbody>
+      <tbody id="systems-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
     </table>
   </section>
 
   <section class="panel">
-    <h2>Reports</h2>
-    <p class="muted">Collect a report now to test it end to end. A collection run downloads the file, validates it, and opens an incident automatically if anything fails.</p>
-    <table>
-      <thead>
-        <tr><th>System</th><th>Report</th><th>Schedule</th><th></th></tr>
-      </thead>
-      <tbody id="reports-body"><tr><td colspan="4" class="empty">Loading reports…</td></tr></tbody>
-    </table>
+    <h2 id="form-title">Add a system</h2>
+    <p class="muted">Fill in what you know. The only hard requirement is a name for the system and at least one report with a page address and a download button.</p>
+    <form id="system-form" class="stack-form">
+      <div class="field-row">
+        <label>Short name (no spaces)
+          <input id="key" required maxlength="120" pattern="[A-Za-z0-9_.\-]+" placeholder="erp" />
+          <small class="muted">Used in folder names and file paths. Cannot be changed later.</small>
+        </label>
+        <label>Display name
+          <input id="name" maxlength="200" placeholder="Sales ERP" />
+        </label>
+      </div>
+
+      <fieldset>
+        <legend>How do you sign in?</legend>
+        <label>Sign-in type
+          <select id="auth-mode">
+            <option value="none">No sign-in needed</option>
+            <option value="session" selected>I sign in myself once (works with SSO and MFA)</option>
+            <option value="unattended">Username and password typed by the platform (simple forms only)</option>
+          </select>
+        </label>
+        <div id="auth-fields" class="field-row">
+          <label>Sign-in page address
+            <input id="login-url" type="url" placeholder="https://intranet.example.com/login" />
+          </label>
+          <label>Signed-in marker
+            <input id="logged-in-selector" placeholder="#user-menu" />
+            <small class="muted">Something that is only on the page once you are signed in. Lets the platform notice an expired session instead of failing mid-run.</small>
+          </label>
+          <label>Sign-in form marker
+            <input id="login-selector" placeholder="#login-form" />
+            <small class="muted">Something that only appears when you are signed out. Either marker is enough.</small>
+          </label>
+        </div>
+        <div id="unattended-fields" class="field-row" hidden>
+          <label>Username box<input id="username-selector" placeholder="#username" /></label>
+          <label>Password box<input id="password-selector" placeholder="#password" /></label>
+          <label>Sign-in button<input id="submit-selector" placeholder="button[type=submit]" /></label>
+          <p class="muted">The password itself is never stored here — you save it on the Sign-in page, into Windows Credential Manager.</p>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Reports on this system</legend>
+        <p class="muted">One row per report you want collected. A report needs its page address, and either a download button or a direct file address.</p>
+        <div id="reports"></div>
+        <button type="button" id="add-report" class="secondary">Add another report</button>
+      </fieldset>
+
+      <div class="toolbar">
+        <button type="submit">Save system</button>
+        <button type="button" id="cancel-edit" class="secondary" hidden>Cancel</button>
+        <span class="muted" id="form-hint"></span>
+      </div>
+    </form>
   </section>
 </main>
 

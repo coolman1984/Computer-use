@@ -12,40 +12,60 @@
   <div id="error"></div>
 
   <section class="panel">
-    <h2>How runs start</h2>
-    <p class="muted">A run is one execution: collecting a report, or a platform check. The normal way to start one is <strong>Collect now</strong> on a report in <a class="link" href="systems.html">Systems</a> — that fills in the system, report, validation rules, and alert thresholds for you. Runs also start on their own from each report's schedule.</p>
-    <details>
-      <summary class="muted">Start a workflow by key (advanced)</summary>
-      <p class="muted">For platform workflows and debugging. <code>platform.selfcheck</code> needs no parameters; <code>collect.report</code> needs the full parameter set that Collect now builds automatically.</p>
-      <div class="toolbar">
-        <input type="text" id="workflow-key" placeholder="Workflow key" value="platform.selfcheck" />
-        <button id="start-run" type="button">Start run</button>
-      </div>
-      <textarea id="workflow-params" placeholder='Optional JSON parameters, e.g. {"system": "erp_demo", "report": "daily_sales"}'></textarea>
-    </details>
+    <h2>Step 8 · Every run, past and present</h2>
+    <p class="muted">A run is one execution. You start them from <a class="link" href="processes.html">Automations</a>, or they start on their own from a schedule. This page is where you watch them and see what came out.</p>
+    <div class="toolbar">
+      <label class="muted" for="status-filter">Show:</label>
+      <select id="status-filter">
+        <option value="">Everything</option>
+        <option value="running">Running now</option>
+        <option value="succeeded">Succeeded</option>
+        <option value="failed">Failed</option>
+        <option value="queued">Waiting to start</option>
+      </select>
+    </div>
   </section>
 
   <section class="panel">
-    <h2>All runs</h2>
-    <div class="toolbar">
-      <label class="muted" for="status-filter">Status:</label>
-      <select id="status-filter">
-        <option value="">All statuses</option><option value="queued">Queued</option><option value="running">Running</option><option value="waiting">Waiting</option><option value="retrying">Retrying</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option>
-      </select>
-    </div>
     <table>
-      <thead>
-        <tr><th>Workflow</th><th>Status</th><th>Created</th><th>Finished</th><th></th></tr>
-      </thead>
-      <tbody id="runs-body"><tr><td colspan="5" class="empty">Loading runs…</td></tr></tbody>
+      <thead><tr><th>What ran</th><th>Started by</th><th>Result</th><th>Started</th><th>Finished</th><th></th></tr></thead>
+      <tbody id="runs-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
     </table>
+  </section>
+
+  <section class="panel">
+    <details>
+      <summary class="muted">Start a workflow by key (for troubleshooting)</summary>
+      <p class="muted">Not part of the normal journey. <code>platform.selfcheck</code> needs no settings; the others are filled in for you when you run an automation.</p>
+      <div class="toolbar">
+        <input type="text" id="workflow-key" placeholder="Workflow key" value="platform.selfcheck" />
+        <button id="start-run" type="button">Start</button>
+      </div>
+      <textarea id="workflow-params" placeholder='Optional JSON settings'></textarea>
+    </details>
   </section>
 </main>
 
 <script src="static/app.js"></script>
 <script>
-const { getJSON, postJSON, formatDate, statusBadge, RUN_STATUS_LABELS, link, showError, el } = SmartOps;
+const { getJSON, postJSON, formatDate, statusBadge, RUN_STATUS_LABELS, showError, el } = SmartOps;
 const errorBox = document.getElementById("error");
+
+const TRIGGER_LABELS = {
+  manual: "You", schedule: "Its schedule", dependency: "Another run",
+  retry: "An automatic retry", agent: "The AI assistant",
+};
+
+/* A workflow key means nothing to the reader; what it actually collected does. */
+function describeRun(run) {
+  const system = run.params?.system;
+  const report = run.params?.report;
+  if (system && report) return el("span", {}, [
+    el("strong", {}, [report]), el("div", { class: "muted hint" }, [system]),
+  ]);
+  if (run.workflow_key === "platform.selfcheck") return el("span", {}, ["Platform health check"]);
+  return el("span", {}, [run.workflow_key]);
+}
 
 async function loadRuns() {
   const status = document.getElementById("status-filter").value;
@@ -54,17 +74,18 @@ async function loadRuns() {
     const data = await getJSON(url);
     const tbody = document.getElementById("runs-body");
     tbody.innerHTML = "";
-    if (data.items.length === 0) {
-      tbody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "empty" }, ["No matching runs"])]));
+    if (!data.items.length) {
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "empty" }, ["Nothing to show"])]));
       return;
     }
     for (const run of data.items) {
       tbody.appendChild(el("tr", {}, [
-        el("td", {}, [run.workflow_key]),
+        el("td", {}, [describeRun(run)]),
+        el("td", {}, [TRIGGER_LABELS[run.trigger] || run.trigger]),
         el("td", {}, [statusBadge(RUN_STATUS_LABELS, run.status)]),
-        el("td", {}, [formatDate(run.created_at)]),
+        el("td", {}, [formatDate(run.started_at || run.created_at)]),
         el("td", {}, [formatDate(run.finished_at)]),
-        el("td", {}, [link("View", `run.html?id=${encodeURIComponent(run.id)}`)]),
+        el("td", {}, [el("a", { class: "link", href: `run.html?id=${encodeURIComponent(run.id)}` }, ["Open"])]),
       ]));
     }
   } catch (err) {
@@ -81,12 +102,8 @@ document.getElementById("start-run").addEventListener("click", async (event) => 
   let params = {};
   const raw = document.getElementById("workflow-params").value.trim();
   if (raw) {
-    try {
-      params = JSON.parse(raw);
-    } catch (_) {
-      showError(errorBox, new Error("Optional parameters must be valid JSON."));
-      return;
-    }
+    try { params = JSON.parse(raw); }
+    catch (_) { showError(errorBox, new Error("The optional settings must be valid JSON.")); return; }
   }
   button.disabled = true;
   try {
@@ -100,6 +117,7 @@ document.getElementById("start-run").addEventListener("click", async (event) => 
 });
 
 loadRuns();
+setInterval(loadRuns, 5000);
 </script>
 </body>
 </html>

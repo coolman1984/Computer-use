@@ -1,9 +1,42 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Recording details — SmartOps</title><link rel="stylesheet" href="static/style.css"></head><body data-page="recordings" data-title="Recording details">
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Recording — SmartOps</title>
+<link rel="stylesheet" href="static/style.css" />
+</head>
+<body data-page="recordings" data-title="Recording">
 <header class="top"></header>
 <main>
   <div id="error"></div>
-  <section class="panel"><div id="info">Loading recording…</div><p class="muted">Complete sign-in or MFA yourself in the Chrome window. SmartOps does not capture keyboard input or browser cookies in this interface.</p><div id="controls" class="toolbar"></div></section>
-  <section class="panel"><h2>Captured steps</h2><ol id="steps" class="timeline"><li class="empty">No steps yet</li></ol></section>
-  <section class="panel"><h2>Automation draft</h2><pre id="draft" class="code-block">No draft generated yet</pre></section>
+  <p class="muted"><a class="link" href="recordings.html">← Back to recordings</a></p>
+
+  <section class="panel">
+    <div id="info">Loading…</div>
+    <p class="muted">Do the whole task in the Chrome window that opens, including signing in or entering an MFA code if you are asked. Nothing you type and no cookie is captured.</p>
+    <div id="controls" class="toolbar"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Step 4 · Review what was captured</h2>
+    <p class="muted">These are the steps the platform will repeat. Check they match what you did; if a step could not be captured well enough to repeat, it is called out here and you should record again.</p>
+    <div id="review"></div>
+    <ol class="timeline" id="plan"><li class="empty">No plan built yet</li></ol>
+  </section>
+
+  <section class="panel">
+    <h2>Step 5 · Turn it into an automation</h2>
+    <p class="muted">Once the plan is complete, make it an automation. That is the thing you can test, approve, run and schedule.</p>
+    <div id="promote"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Raw captured steps</h2>
+    <ol class="timeline" id="steps"><li class="empty">Nothing captured yet</li></ol>
+  </section>
 </main>
-<script src="static/app.js"></script><script src="static/recording.js"></script></body></html>
+<script src="static/app.js"></script>
+<script src="static/recording.js"></script>
+</body>
+</html>

@@ -842,7 +842,7 @@ def create_app(services: Services | None = None) -> FastAPI:
             raise _blocked(exc) from exc
         except SmartOpsError as exc:
             raise _fail(exc) from exc
-        return run.to_dict()
+        return _queue_or_drive(svc, run).to_dict()
 
     @app.put("/api/processes/{process_id}/schedule")
     def schedule_process(
@@ -866,6 +866,21 @@ def create_app(services: Services | None = None) -> FastAPI:
         except SmartOpsError as exc:
             raise _fail(exc) from exc
 
+    def _queue_or_drive(svc: Services, run: Any) -> Any:
+        """Hand the run to the worker, or run it inline when there is no worker.
+
+        Queued is the normal path: a real download takes minutes and must not
+        hold an HTTP request open, and the page follows it live over the event
+        stream. But a run queued into a process with no worker would sit there
+        forever, so a worker-less deployment (tests, one-off tooling) drives it
+        here instead of silently doing nothing.
+        """
+        if getattr(app.state, "worker", None) is not None:
+            return run
+        driven = svc.runner.drive(run.id)
+        _settle_owning_process(svc, driven)
+        return driven
+
     # ---------- YAML-defined report collection (unchanged path, now queued) ----------
 
     @app.post("/api/systems/{system_key}/{report_key}/collect", status_code=201)
@@ -880,12 +895,7 @@ def create_app(services: Services | None = None) -> FastAPI:
         except SmartOpsError as exc:
             raise _fail(exc, status=404) from exc
         run = svc.runner.create_run("collect.report", params=params, trigger=TriggerType.MANUAL)
-        # Queued, not driven inline: a real download takes minutes and must not
-        # hold an HTTP request open. The worker picks it up on its next poll and
-        # the page follows it live over the event stream.
-        if getattr(app.state, "worker", None) is None:
-            run = svc.runner.drive(run.id)
-        return run.to_dict()
+        return _queue_or_drive(svc, run).to_dict()
 
     return app
 

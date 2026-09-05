@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Automation — SmartOps</title>
+<link rel="stylesheet" href="static/style.css" />
+</head>
+<body data-page="processes" data-title="Automation">
+<header class="top"></header>
+<main>
+  <div id="error"></div>
+  <p class="muted"><a class="link" href="processes.html">← Back to automations</a></p>
+
+  <section class="panel">
+    <div id="info">Loading…</div>
+  </section>
+
+  <section class="panel highlight-panel">
+    <h2>What to do next</h2>
+    <div id="next-action"></div>
+  </section>
+
+  <section class="panel">
+    <h2>What it does</h2>
+    <p class="muted">The exact steps that will be repeated, every time.</p>
+    <ol class="timeline" id="plan"><li class="empty">No steps</li></ol>
+  </section>
+
+  <section class="panel">
+    <h2>Step 10 · Run it automatically</h2>
+    <p class="muted">Available once the automation is approved. It then runs on its own while SmartOps is open — no terminal, no reminders.</p>
+    <form id="schedule-form" class="stack-form">
+      <div class="field-row">
+        <label>When
+          <select id="schedule-kind">
+            <option value="off">Do not run automatically</option>
+            <option value="daily">Every day at a set time</option>
+            <option value="interval">Every so many minutes</option>
+          </select>
+        </label>
+        <label id="daily-field">Time (24-hour)<input id="daily-at" type="time" /></label>
+        <label id="interval-field" hidden>Minutes between runs<input id="every-minutes" type="number" min="1" step="1" value="60" /></label>
+      </div>
+      <div class="toolbar">
+        <button type="submit">Save schedule</button>
+        <span class="muted" id="schedule-hint"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Step 9 · Files it has produced</h2>
+    <p class="muted">A file only counts as a result once it has passed its checks.</p>
+    <table>
+      <thead><tr><th>File</th><th>Checked</th><th>Size</th><th>Rows</th><th>When</th><th></th></tr></thead>
+      <tbody id="files"><tr><td colspan="6" class="empty">Nothing yet</td></tr></tbody>
+    </table>
+  </section>
+</main>
+<script src="static/app.js"></script>
+<script src="static/process.js"></script>
+</body>
+</html>

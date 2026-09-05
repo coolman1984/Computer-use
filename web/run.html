@@ -3,81 +3,121 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Run details — SmartOps</title>
+<title>Run — SmartOps</title>
 <link rel="stylesheet" href="static/style.css" />
 </head>
-<body data-page="runs" data-title="Run details">
+<body data-page="runs" data-title="Run">
 <header class="top"></header>
 <main>
   <div id="error"></div>
   <p class="muted"><a class="link" href="runs.html">← Back to runs</a></p>
 
   <section class="panel">
-    <h2>Run summary</h2>
-    <div class="grid" id="run-info"><div class="empty">Loading run…</div></div>
+    <h2>What happened</h2>
+    <div class="grid" id="run-info"><div class="empty">Loading…</div></div>
+    <div id="run-guidance"></div>
     <div class="toolbar">
-      <button id="retry-button">Retry now</button>
+      <button id="retry-button" type="button">Try again</button>
       <span class="muted" id="retry-hint"></span>
     </div>
   </section>
 
   <section class="panel">
-    <h2>Steps</h2>
+    <h2>Files it produced</h2>
     <table>
-      <thead><tr><th>Step</th><th>Status</th><th>Attempts</th><th>Note</th></tr></thead>
-      <tbody id="steps-body"><tr><td colspan="4" class="empty">Loading steps…</td></tr></tbody>
+      <thead><tr><th>File</th><th>Checked</th><th>Size</th><th>Rows</th><th></th></tr></thead>
+      <tbody id="files-body"><tr><td colspan="5" class="empty">None</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>Step by step</h2>
+    <table>
+      <thead><tr><th>Step</th><th>Result</th><th>Attempts</th><th>Note</th></tr></thead>
+      <tbody id="steps-body"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
     </table>
   </section>
 
   <section class="panel">
     <h2>Activity <span id="live-dot" class="live-dot"></span></h2>
-    <ul class="timeline" id="events-list"><li class="empty">Loading activity…</li></ul>
+    <ul class="timeline" id="events-list"><li class="empty">Loading…</li></ul>
   </section>
 </main>
 
 <script src="static/app.js"></script>
 <script>
 const {
-  getJSON, postJSON, formatDate, statusBadge, RUN_STATUS_LABELS, STEP_STATUS_LABELS,
-  EVENT_TYPE_LABELS, ERROR_CLASS_LABELS, connectEvents, el, showError,
+  getJSON, postJSON, formatDate, formatSize, statusBadge, RUN_STATUS_LABELS, STEP_STATUS_LABELS,
+  VALIDATION_STATUS_LABELS, EVENT_TYPE_LABELS, connectEvents, el, showError, clearError,
 } = SmartOps;
 
 const runId = new URLSearchParams(location.search).get("id");
 const errorBox = document.getElementById("error");
 
-if (!runId) {
-  showError(errorBox, new Error("No run selected. Return to Runs and choose one."));
-}
+if (!runId) showError(errorBox, new Error("No run selected. Go back and choose one."));
 
 function renderRunInfo(run) {
   const grid = document.getElementById("run-info");
   grid.innerHTML = "";
-  const card = (title, valueNode) => {
+  const card = (title, value) => {
     const box = el("div", { class: "card" }, [el("h3", { text: title }, [])]);
-    box.appendChild(valueNode instanceof Node ? valueNode : document.createTextNode(valueNode));
+    box.appendChild(value instanceof Node ? value : document.createTextNode(value));
     return box;
   };
-  grid.appendChild(card("Workflow", run.workflow_key));
-  grid.appendChild(card("Status", statusBadge(RUN_STATUS_LABELS, run.status)));
+  const system = run.params?.system;
+  const report = run.params?.report;
+  grid.appendChild(card("What ran", system && report ? `${report} — ${system}` : run.workflow_key));
+  grid.appendChild(card("Result", statusBadge(RUN_STATUS_LABELS, run.status)));
   grid.appendChild(card("Started", formatDate(run.started_at)));
   grid.appendChild(card("Finished", formatDate(run.finished_at)));
-
-  if (run.error_class) {
-    const errCard = el("div", { class: "card" }, [
-      el("h3", { text: "Failure reason" }, []),
-      el("div", {}, [ERROR_CLASS_LABELS[run.error_class] || run.error_class]),
-    ]);
-    grid.appendChild(errCard);
-  }
-
   document.getElementById("retry-button").disabled = ["succeeded", "cancelled"].includes(run.status);
+}
+
+/* A failed run explains itself here: what happened, what to do, and one button
+   that goes to the page where it gets fixed. */
+function renderGuidance(guidance) {
+  const box = document.getElementById("run-guidance");
+  box.innerHTML = "";
+  if (!guidance) return;
+  const card = el("div", { class: "error-box" }, [
+    el("strong", { text: guidance.what_happened }, []),
+    el("p", { text: guidance.what_to_do }, []),
+  ]);
+  if (guidance.action?.label) {
+    card.appendChild(el("a", { class: "button-link", href: guidance.action.href }, [guidance.action.label]));
+  }
+  if (guidance.technical_detail) {
+    card.appendChild(el("details", { class: "error-detail" }, [
+      el("summary", { text: "Technical detail" }, []),
+      el("p", { text: guidance.technical_detail }, []),
+    ]));
+  }
+  box.appendChild(card);
+}
+
+function renderFiles(files) {
+  const tbody = document.getElementById("files-body");
+  tbody.innerHTML = "";
+  if (!files.length) {
+    tbody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "empty" }, ["None"])]));
+    return;
+  }
+  for (const file of files) {
+    tbody.appendChild(el("tr", {}, [
+      el("td", {}, [file.original_name || file.path]),
+      el("td", {}, [statusBadge(VALIDATION_STATUS_LABELS, file.validation_status)]),
+      el("td", {}, [formatSize(file.size_bytes)]),
+      el("td", {}, [file.row_count == null ? "—" : String(file.row_count)]),
+      el("td", {}, [el("a", { class: "link", href: `/api/files/${encodeURIComponent(file.id)}/download` }, ["Download"])]),
+    ]));
+  }
 }
 
 function renderSteps(steps) {
   const tbody = document.getElementById("steps-body");
   tbody.innerHTML = "";
-  if (steps.length === 0) {
-    tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["No steps yet"])]));
+  if (!steps.length) {
+    tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["Not started yet"])]));
     return;
   }
   for (const step of steps) {
@@ -93,31 +133,19 @@ function renderSteps(steps) {
 function renderEvents(events) {
   const list = document.getElementById("events-list");
   list.innerHTML = "";
-  if (events.length === 0) {
-    list.appendChild(el("li", { class: "empty" }, ["No events yet"]));
+  if (!events.length) {
+    list.appendChild(el("li", { class: "empty" }, ["Nothing recorded"]));
     return;
   }
-  for (const evt of [...events].reverse()) {
+  for (const evt of events) {
     list.appendChild(el("li", {}, [
-      el("span", { class: "msg" }, [EVENT_TYPE_LABELS[evt.type] || evt.type]),
+      el("span", { class: "msg" }, [evt.message || EVENT_TYPE_LABELS[evt.type] || evt.type]),
       el("span", { class: "time" }, [formatDate(evt.created_at)]),
     ]));
   }
 }
 
-function prependEvent(evt) {
-  const list = document.getElementById("events-list");
-  if (list.firstElementChild?.classList.contains("empty")) list.innerHTML = "";
-  list.insertBefore(
-    el("li", {}, [
-      el("span", { class: "msg" }, [EVENT_TYPE_LABELS[evt.type] || evt.type]),
-      el("span", { class: "time" }, [formatDate(evt.created_at)]),
-    ]),
-    list.firstChild
-  );
-}
-
-async function loadAll() {
+async function load() {
   if (!runId) return;
   try {
     const [detail, events] = await Promise.all([
@@ -125,6 +153,8 @@ async function loadAll() {
       getJSON(`/api/runs/${encodeURIComponent(runId)}/events`),
     ]);
     renderRunInfo(detail.run);
+    renderGuidance(detail.guidance);
+    renderFiles(detail.files || []);
     renderSteps(detail.steps);
     renderEvents(events.items);
   } catch (err) {
@@ -135,28 +165,27 @@ async function loadAll() {
 document.getElementById("retry-button").addEventListener("click", async (event) => {
   const button = event.target;
   button.disabled = true;
-  document.getElementById("retry-hint").textContent = "Retrying…";
+  document.getElementById("retry-hint").textContent = "Running…";
+  clearError(errorBox);
   try {
     await postJSON(`/api/runs/${encodeURIComponent(runId)}/start`, {});
     document.getElementById("retry-hint").textContent = "";
-    await loadAll();
+    await load();
   } catch (err) {
     showError(errorBox, err);
-  } finally {
+    document.getElementById("retry-hint").textContent = "";
     button.disabled = false;
   }
 });
 
 if (runId) {
-  loadAll();
-  const socket = connectEvents(runId, (evt) => {
-    document.getElementById("live-dot").classList.add("on");
-    prependEvent(evt);
-    // Any new event for this run means its status or steps changed, so reload everything.
-    loadAll();
-  });
+  load();
+  const socket = connectEvents(runId, () => load());
   socket.onopen = () => document.getElementById("live-dot").classList.add("on");
   socket.onclose = () => document.getElementById("live-dot").classList.remove("on");
+  // A run executed by the background worker can finish between events; poll as
+  // a backstop so the page never shows a stale "running".
+  setInterval(load, 4000);
 }
 </script>
 </body>

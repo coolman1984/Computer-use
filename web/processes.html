@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Automations — SmartOps</title>
+<link rel="stylesheet" href="static/style.css" />
+</head>
+<body data-page="processes" data-title="Automations">
+<header class="top"></header>
+<main>
+  <div id="error"></div>
+
+  <section class="panel">
+    <h2>Steps 6 to 10 · From a recording to something that runs by itself</h2>
+    <p class="muted">An automation is a recording that has been turned into something the platform can repeat. It moves through four gates, and each one is enforced — you cannot skip a step:</p>
+    <ol class="gate-list">
+      <li><strong>Test it</strong> — it runs once, for real, against the real system.</li>
+      <li><strong>Approve it</strong> — only offered after a test passes. This is your go-ahead for it to run without you watching.</li>
+      <li><strong>Run it</strong> — on demand, any time.</li>
+      <li><strong>Schedule it</strong> — only for something already approved.</li>
+    </ol>
+    <p class="muted">Create an automation from a finished recording on the <a class="link" href="recordings.html">Recordings</a> page.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Your automations</h2>
+    <table>
+      <thead><tr><th>Automation</th><th>System</th><th>Stage</th><th>Runs by itself</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+<script src="static/app.js"></script>
+<script src="static/processes.js"></script>
+</body>
+</html>

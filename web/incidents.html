@@ -3,62 +3,106 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Incidents — SmartOps</title>
+<title>Issues — SmartOps</title>
 <link rel="stylesheet" href="static/style.css" />
 </head>
-<body data-page="incidents" data-title="Incidents">
+<body data-page="incidents" data-title="Issues">
 <header class="top"></header>
 <main>
   <div id="error"></div>
 
   <section class="panel">
-    <h2>Incident queue</h2>
-    <p class="muted">Failures create an incident here automatically with the evidence needed for diagnosis.</p>
+    <h2>Step 11 · Watch and fix</h2>
+    <p class="muted">When a run fails, an issue is opened here automatically with everything needed to understand it. Each one tells you what happened, what to do, and gives you the button that does it.</p>
     <div class="toolbar">
-      <label class="muted" for="status-filter">Status:</label>
+      <label class="muted" for="status-filter">Show:</label>
       <select id="status-filter">
-        <option value="">All statuses</option><option value="open" selected>Open</option><option value="diagnosing">Diagnosing</option><option value="fixing">Fixing</option><option value="resolved">Resolved</option><option value="escalated">Escalated</option>
+        <option value="open" selected>Needs attention</option>
+        <option value="">Everything</option>
+        <option value="resolved">Handled</option>
+        <option value="escalated">Escalated</option>
       </select>
     </div>
-    <table>
-      <thead><tr><th>Title</th><th>Severity</th><th>Status</th><th>Opened</th><th></th></tr></thead>
-      <tbody id="incidents-body"><tr><td colspan="5" class="empty">Loading incidents…</td></tr></tbody>
-    </table>
+  </section>
+
+  <section class="panel">
+    <div id="incidents-list"><p class="empty">Loading…</p></div>
   </section>
 </main>
 
 <script src="static/app.js"></script>
 <script>
-const { getJSON, formatDate, statusBadge, SEVERITY_LABELS, INCIDENT_STATUS_LABELS, link, showError, el } = SmartOps;
+const {
+  getJSON, postJSON, formatDate, statusBadge, SEVERITY_LABELS, INCIDENT_STATUS_LABELS,
+  showError, clearError, el, paintShell,
+} = SmartOps;
 const errorBox = document.getElementById("error");
 
-async function loadIncidents() {
+/* An issue is rendered as a card, not a table row: the useful part is the
+   explanation and the fix button, and neither fits in a cell. */
+function incidentCard(incident) {
+  const card = el("article", { class: "issue-card" }, [
+    el("div", { class: "issue-head" }, [
+      el("strong", {}, [incident.title]),
+      statusBadge(INCIDENT_STATUS_LABELS, incident.status),
+      statusBadge(SEVERITY_LABELS, incident.severity),
+    ]),
+    el("p", { class: "muted hint" }, [`Opened ${formatDate(incident.created_at)}`]),
+  ]);
+
+  if (incident.guidance) {
+    card.appendChild(el("p", { class: "issue-what" }, [incident.guidance.what_happened]));
+    card.appendChild(el("p", { class: "muted" }, [incident.guidance.what_to_do]));
+  }
+
+  const actions = el("div", { class: "toolbar" }, []);
+  if (incident.guidance?.action?.label) {
+    actions.appendChild(el("a", { class: "button-link", href: incident.guidance.action.href },
+      [incident.guidance.action.label]));
+  }
+  if (incident.run_id) {
+    actions.appendChild(el("a", { class: "link", href: `run.html?id=${encodeURIComponent(incident.run_id)}` },
+      ["See exactly where it stopped"]));
+  }
+  if (incident.status !== "resolved") {
+    const resolve = el("button", { type: "button", class: "secondary" }, ["Mark as handled"]);
+    resolve.addEventListener("click", async () => {
+      resolve.disabled = true;
+      clearError(errorBox);
+      try {
+        await postJSON(`/api/incidents/${incident.id}/resolve`, {});
+        await load();
+        paintShell();
+      } catch (err) {
+        showError(errorBox, err);
+        resolve.disabled = false;
+      }
+    });
+    actions.appendChild(resolve);
+  }
+  card.appendChild(actions);
+  return card;
+}
+
+async function load() {
   const status = document.getElementById("status-filter").value;
   const url = status ? `/api/incidents?status=${encodeURIComponent(status)}&limit=100` : "/api/incidents?limit=100";
   try {
     const data = await getJSON(url);
-    const tbody = document.getElementById("incidents-body");
-    tbody.innerHTML = "";
-    if (data.items.length === 0) {
-      tbody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "empty" }, ["No matching incidents — all clear"])]));
+    const list = document.getElementById("incidents-list");
+    list.innerHTML = "";
+    if (!data.items.length) {
+      list.appendChild(el("p", { class: "empty" }, ["Nothing needs your attention."]));
       return;
     }
-    for (const incident of data.items) {
-      tbody.appendChild(el("tr", {}, [
-        el("td", {}, [incident.title]),
-        el("td", {}, [statusBadge(SEVERITY_LABELS, incident.severity)]),
-        el("td", {}, [statusBadge(INCIDENT_STATUS_LABELS, incident.status)]),
-        el("td", {}, [formatDate(incident.created_at)]),
-        el("td", {}, [incident.run_id ? link("View run", `run.html?id=${encodeURIComponent(incident.run_id)}`) : "—"]),
-      ]));
-    }
+    for (const incident of data.items) list.appendChild(incidentCard(incident));
   } catch (err) {
     showError(errorBox, err);
   }
 }
 
-document.getElementById("status-filter").addEventListener("change", loadIncidents);
-loadIncidents();
+document.getElementById("status-filter").addEventListener("change", load);
+load();
 </script>
 </body>
 </html>
