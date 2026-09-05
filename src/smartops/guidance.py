@@ -75,14 +75,30 @@ _UNKNOWN = (
 def explain(
     error_class: str | None, *, message: str = "", details: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """The user-facing explanation of one failure.
+    """The user-facing explanation of one refusal or failure.
 
     `details` may carry a more specific fix than the error class implies — a
-    blocked stage, for instance, knows exactly which page unblocks it — and that
-    always wins over the generic advice.
+    blocked stage knows exactly which page unblocks it — and that always wins
+    over the generic advice.
     """
+    details = details or {}
+    # A blocked stage is not a fault: nothing is broken, an earlier step simply
+    # has not happened yet. Saying "something in the setup is wrong" there would
+    # send the user hunting for a problem that does not exist.
+    if details.get("blocked_stage"):
+        fix = details.get("fix") or {}
+        return {
+            "what_happened": "This step needs an earlier one finished first.",
+            "what_to_do": message,
+            "action": {
+                "label": fix.get("label") or "Go back a step",
+                "href": fix.get("href") or "index.html",
+            },
+            "technical_detail": "",
+        }
+
     what, todo, label, href = _BY_ERROR_CLASS.get(error_class or "", _UNKNOWN)
-    fix = (details or {}).get("fix") or {}
+    fix = details.get("fix") or {}
     if fix.get("label") and fix.get("href"):
         label, href = fix["label"], fix["href"]
     return {

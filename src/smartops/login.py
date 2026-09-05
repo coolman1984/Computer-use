@@ -147,8 +147,9 @@ class LoginManager:
 
             with sync_playwright() as playwright:
                 launch_kwargs: dict[str, Any] = {"headless": False}
-                if self._executable_path:
-                    launch_kwargs["executable_path"] = self._executable_path
+                chosen = self._executable_path or settings.executable_path
+                if chosen:
+                    launch_kwargs["executable_path"] = chosen
                 browser = playwright.chromium.launch(**launch_kwargs)
                 try:
                     context_kwargs: dict[str, Any] = {

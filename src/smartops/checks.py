@@ -91,8 +91,9 @@ def check_system(
     try:
         with sync_playwright() as playwright:
             launch_kwargs: dict[str, Any] = {"headless": browser_settings.headless}
-            if executable_path:
-                launch_kwargs["executable_path"] = executable_path
+            chosen = executable_path or browser_settings.executable_path
+            if chosen:
+                launch_kwargs["executable_path"] = chosen
             browser = playwright.chromium.launch(**launch_kwargs)
             try:
                 context_kwargs: dict[str, Any] = {
@@ -136,6 +137,22 @@ def check_system(
             screenshot_path=screenshot,
         )
     except Exception as exc:
+        # Distinguish "the browser itself is missing" from "the site is
+        # unreachable": they look identical here but need opposite actions, and
+        # a first-time user hits the first one far more often.
+        if "Executable doesn" in str(exc) or "playwright install" in str(exc).lower():
+            return ConnectionCheck(
+                ok=False,
+                reachable=False,
+                signed_in=None,
+                summary="SmartOps could not find a browser to open the site with.",
+                next_step=(
+                    "Install Google Chrome on this machine, or point SmartOps at an existing "
+                    "browser by setting browser.executable_path in the settings file."
+                ),
+                checked_url=url,
+                details={"error": "browser_missing"},
+            )
         return ConnectionCheck(
             ok=False,
             reachable=False,

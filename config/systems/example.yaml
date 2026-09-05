@@ -1,5 +1,11 @@
-# Example system definition: copy this file under another name for each real system.
-# Never put internal URLs or real company data here (this repository is public).
+# Example system definition.
+#
+# You do NOT need to write these by hand — the Systems page in the app creates
+# and edits them for you, and reads them back from this same format. This file
+# is here so you can see the shape, and hand-edit if you prefer.
+#
+# Real definitions belong in a folder OUTSIDE this public repository, pointed at
+# by SMARTOPS_SYSTEMS_DIR. Never put internal URLs or company data here.
 
 key: erp_demo
 name: Demo system for sales reports

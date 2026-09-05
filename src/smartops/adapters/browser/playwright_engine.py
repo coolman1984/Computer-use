@@ -36,7 +36,10 @@ class PlaywrightBrowserAdapter:
         credential_store: CredentialStore | None = None,
     ) -> None:
         self._settings = settings
-        self._executable_path = executable_path
+        # An explicit argument wins (tests pin a specific binary); otherwise the
+        # configured path, so a machine with Chrome but no Playwright download
+        # still works.
+        self._executable_path = executable_path or settings.executable_path or None
         self._clock = clock or time.time
         self._credential_store = credential_store
         # Last failure evidence per (system, report) — used by capture_evidence.
