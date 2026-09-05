@@ -5,9 +5,11 @@
   <section class="panel">
     <h2>Capture a workflow</h2>
     <p class="muted">Launch a visible Chrome session, complete sign-in yourself, and save a reviewable recording. SmartOps never captures your typed passwords or cookies.</p>
+    <p class="muted">The recording opens at the chosen system's sign-in page, so define the system first under <a class="link" href="systems.html">Systems</a>.</p>
+    <p id="system-note" class="muted" role="status"></p>
     <form id="create-form" class="toolbar">
       <input id="name" required maxlength="120" aria-label="Recording name" placeholder="Recording name">
-      <select id="system" required aria-label="Target system"><option value="local">Local test</option></select>
+      <select id="system" required aria-label="Target system"></select>
       <button type="submit">New recording</button>
     </form>
   </section>

@@ -1,6 +1,6 @@
-"""اختبارات F-10: واجهة سطر الأوامر — تحليل الأوامر، وdoctor/systems/login
-تعمل فعليًا على Services معزولة بالكامل داخل tmp_path (عبر SMARTOPS_CONFIG).
-لا نشغّل أي متصفح حقيقي هنا أبدًا.
+"""F-10 tests: the command line interface — argument parsing, plus
+doctor/systems/login running for real against Services fully isolated inside
+tmp_path (via SMARTOPS_CONFIG). No real browser is ever launched here.
 """
 
 from __future__ import annotations
@@ -73,23 +73,23 @@ def test_parser_requires_a_command() -> None:
 
 SYSTEM_YAML_SESSION = """
 key: erp_demo
-name: نظام تجريبي
+name: Demo system
 auth:
   mode: session
   login_url: "https://intranet.example.local/login"
 reports:
   - key: daily_sales
-    title: تقرير المبيعات
+    title: Daily sales report
     url: "https://intranet.example.local/reports/daily-sales"
     download_selector: "#dl"
 """
 
 SYSTEM_YAML_NO_AUTH = """
 key: no_auth_system
-name: نظام بلا مصادقة
+name: System without authentication
 reports:
   - key: public_report
-    title: تقرير عام
+    title: Public report
     url: "https://intranet.example.local/reports/public"
     download_selector: "#dl"
 """
@@ -97,8 +97,8 @@ reports:
 
 @pytest.fixture
 def isolated_env(tmp_path: Path, monkeypatch) -> Path:
-    """يبني إعدادات معزولة بالكامل داخل tmp_path عبر SMARTOPS_CONFIG، بدل
-    أي اعتماد على مجلد المشروع الحقيقي أو إعدادات المستخدم."""
+    """Build fully isolated settings inside tmp_path via SMARTOPS_CONFIG,
+    instead of depending on the real project folder or the user's settings."""
     systems_dir = tmp_path / "systems"
     systems_dir.mkdir()
     (systems_dir / "erp.yaml").write_text(SYSTEM_YAML_SESSION, encoding="utf-8")
@@ -127,7 +127,7 @@ def test_doctor_command_runs_and_prints_report(isolated_env: Path, capsys) -> No
     assert exit_code == 0
     assert "sessions_dir" in output
     assert "erp_demo" in output
-    assert "لا توجد جلسة محفوظة" in output
+    assert "no saved session" in output
 
 
 def test_systems_command_lists_systems_and_reports(isolated_env: Path, capsys) -> None:
@@ -153,4 +153,4 @@ def test_login_on_unknown_system_reports_configuration_error(isolated_env: Path,
     output = capsys.readouterr().out
 
     assert exit_code == 1
-    assert "خطأ" in output
+    assert "Error" in output

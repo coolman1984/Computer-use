@@ -1,10 +1,12 @@
-"""أرشفة تحليلية: يحوّل بيانات FileArtifact المتحقق منها إلى سجل Parquet
-مقسّم بالتاريخ والنظام والتقرير، مع استعلام DuckDB بسيط لمقارنة فترتين.
+"""Analytical archiving: turns validated FileArtifact data into a Parquet
+record, partitioned by date, system, and report, with a simple DuckDB query
+to compare two periods.
 
-هذه الطبقة تؤرشف بيانات وصفية عن الملف (الحجم، عدد الصفوف، نتيجة
-التحقق، البصمة...) لا محتوى التقرير نفسه؛ لكل تقرير مخطط بيانات مختلف
-تمامًا، فتحليل محتواه موضوع مستقل خارج نطاق هذه الحزمة (راجع D006:
-SQLite للتشغيل، DuckDB/Parquet للتحليل).
+This layer archives metadata about the file (size, row count, validation
+result, hash...), not the report's content itself; every report has a
+completely different data schema, so analyzing its content is a separate
+concern outside the scope of this package (see D006: SQLite for operations,
+DuckDB/Parquet for analytics).
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from ...storage.paths import slug
 
 @dataclass(frozen=True)
 class PeriodComparison:
-    """ملخص مقارنة إحصائية بسيطة بين فترتين لنفس النظام والتقرير."""
+    """A simple statistical comparison summary between two periods for the same system and report."""
 
     system: str
     report: str
@@ -43,7 +45,7 @@ def _utcnow() -> datetime:
 
 
 class HistoryArchiver:
-    """يكتب سجل كل FileArtifact كملف Parquet داخل قسمه، ويستعلم عبر DuckDB."""
+    """Writes each FileArtifact record as a Parquet file inside its partition, queried via DuckDB."""
 
     def __init__(self, base_dir: Path | str) -> None:
         self._base_dir = Path(base_dir)
@@ -59,10 +61,10 @@ class HistoryArchiver:
         )
 
     def archive(self, artifact: FileArtifact) -> Path:
-        """يكتب سجل ملف واحد كـ Parquet داخل قسمه (تاريخ/نظام/تقرير).
+        """Write one file's record as Parquet inside its partition (date/system/report).
 
-        كل سجل يُكتب في ملف مستقل باسم <file_id>.parquet، فلا تتنافس
-        عمليتا أرشفة متزامنتان على نفس الملف.
+        Each record is written to its own file named <file_id>.parquet, so
+        two concurrent archiving operations never contend over the same file.
         """
         when = artifact.created_at or _utcnow()
         partition = self._partition_dir(artifact, when)
@@ -103,7 +105,7 @@ class HistoryArchiver:
     def query(
         self, where_sql: str = "", params: list[Any] | None = None
     ) -> list[dict[str, Any]]:
-        """استعلام عام على كل السجلات المؤرشفة. يعيد [] لو الأرشيف فاضي."""
+        """A general query over every archived record. Returns [] if the archive is empty."""
         if not self._has_any_records():
             return []
         glob = self._dataset_glob()
@@ -121,8 +123,9 @@ class HistoryArchiver:
     def compare_periods(
         self, system: str, report: str, period_a: str, period_b: str
     ) -> PeriodComparison:
-        """يقارن العدد، متوسط الحجم، متوسط عدد الصفوف، وعدد حالات الرفض
-        بين فترتين لنفس النظام والتقرير. أرشيف فاضٍ = كل القيم صفر/None."""
+        """Compare the count, average size, average row count, and rejection
+        count between two periods for the same system and report. An empty
+        archive means every value is zero/None."""
         if not self._has_any_records():
             return PeriodComparison(
                 system=system,

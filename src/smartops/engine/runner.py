@@ -1,4 +1,4 @@
-"""محرك سير العمل: يشغّل الخطوات كحالة محفوظة، فيمكن استكمال أي تشغيل بعد أي توقف."""
+"""The workflow engine: runs steps as saved state, so any run can resume after any interruption."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from ..domain.models import Run, StepDefinition, StepRecord, WorkflowDefinition
 from .contracts import StepContext, StepOutcome, StepResult
 from .retry import policy_for
 
-# تأخير أقصر من هذا يُنتظر داخل نفس التشغيل، والأطول يُؤجل ويستكمل لاحقًا.
+# A delay shorter than this is waited out inline within the same run; a longer one is deferred and resumed later.
 INLINE_RETRY_CEILING_SECONDS = 30.0
 
 
@@ -39,7 +39,7 @@ class WorkflowRunner:
         self.sleeper = sleeper
         self.inline_retry_ceiling = inline_retry_ceiling
 
-    # ---------- إنشاء ----------
+    # ---------- creation ----------
 
     def create_run(
         self,
@@ -58,18 +58,18 @@ class WorkflowRunner:
         self.services.events.emit(
             EventType.RUN_CREATED,
             run_id=run.id,
-            message=f"تم إنشاء تشغيل لسير العمل {definition.title or definition.key}",
+            message=f"Run created for workflow {definition.title or definition.key}",
             payload={"params": run.params, "workflow": definition.key},
         )
         return run
 
-    # ---------- تنفيذ ----------
+    # ---------- execution ----------
 
     def execute(self, run_id: str, *, force: bool = False) -> Run:
-        """ينفّذ ما يمكن تنفيذه الآن ثم يعيد حالة التشغيل المحدثة."""
+        """Execute whatever can run right now, then return the updated run state."""
         run = self.services.runs.get(run_id)
         if run is None:
-            raise SmartOpsError(f"تشغيل غير موجود: {run_id}", error_class=ErrorClass.PERMANENT)
+            raise SmartOpsError(f"Run not found: {run_id}", error_class=ErrorClass.PERMANENT)
         if run.status in TERMINAL_RUN_STATUSES:
             return run
         now = self.clock.now()
@@ -103,7 +103,7 @@ class WorkflowRunner:
             self.services.runs.release(run.id, token)
 
     def drive(self, run_id: str, *, max_cycles: int = 20) -> Run:
-        """يستكمل التشغيل حتى ينتهي أو ينتظر وقتًا مستقبليًا. للتطوير والجدولة."""
+        """Resume the run until it finishes or starts waiting on a future time. For CLI use and scheduling."""
         run = self.execute(run_id)
         cycles = 1
         while run.status not in TERMINAL_RUN_STATUSES and cycles < max_cycles:
@@ -113,7 +113,7 @@ class WorkflowRunner:
             cycles += 1
         return run
 
-    # ---------- التفاصيل ----------
+    # ---------- internals ----------
 
     def _execute_locked(self, run: Run, definition: WorkflowDefinition) -> Run:
         first_start = run.started_at is None
@@ -125,7 +125,7 @@ class WorkflowRunner:
         self.services.events.emit(
             EventType.RUN_STARTED if first_start else EventType.RUN_RESUMED,
             run_id=run.id,
-            message=f"بدء تنفيذ {definition.key}" if first_start else "استكمال التنفيذ",
+            message=f"Starting execution of {definition.key}" if first_start else "Resuming execution",
         )
 
         for seq, step_def in enumerate(definition.steps):
@@ -145,7 +145,7 @@ class WorkflowRunner:
         self.services.events.emit(
             EventType.RUN_SUCCEEDED,
             run_id=run.id,
-            message="اكتمل التشغيل بنجاح",
+            message="Run completed successfully",
             payload={"steps": len(definition.steps)},
         )
         return run
@@ -158,7 +158,7 @@ class WorkflowRunner:
         seq: int,
         record: StepRecord | None,
     ) -> Run | None:
-        """يعيد None لو نجحت الخطوة، أو حالة التشغيل النهائية لو توقف التنفيذ."""
+        """Return None if the step succeeded, or the final run state if execution stopped."""
         step_callable = self.services.step_registry.get(step_def.uses)
         attempts_used = record.attempt if record else 0
 
@@ -180,7 +180,7 @@ class WorkflowRunner:
                 EventType.STEP_STARTED,
                 run_id=run.id,
                 step_name=step_def.name,
-                message=f"بدء الخطوة {step_def.title or step_def.name}",
+                message=f"Starting step {step_def.title or step_def.name}",
                 payload={"attempt": attempt_no},
             )
 
@@ -195,7 +195,7 @@ class WorkflowRunner:
             )
             try:
                 result = step_callable(ctx)
-            except Exception as exc:  # لا شيء يخرج غير مصنّف
+            except Exception as exc:  # nothing leaves this step unclassified
                 result = StepResult.fail(wrap_error(exc))
             if not isinstance(result, StepResult):
                 result = StepResult.ok()
@@ -220,13 +220,13 @@ class WorkflowRunner:
                     EventType.STEP_SUCCEEDED,
                     run_id=run.id,
                     step_name=step_def.name,
-                    message=f"نجحت الخطوة {step_def.title or step_def.name}",
+                    message=f"Step succeeded: {step_def.title or step_def.name}",
                     payload={"attempt": attempt_no, "output_keys": sorted(result.output or {})},
                 )
                 return None
 
             if result.outcome is StepOutcome.WAIT:
-                # الانتظار المقصود لا يستهلك محاولة.
+                # An intentional wait does not consume an attempt.
                 self.services.steps.save(
                     StepRecord(
                         run_id=run.id,
@@ -245,12 +245,12 @@ class WorkflowRunner:
                     EventType.RUN_WAITING,
                     run_id=run.id,
                     step_name=step_def.name,
-                    message=result.reason or "انتظار مؤقت",
+                    message=result.reason or "Temporary wait",
                     payload={"wait_seconds": result.wait_seconds},
                 )
                 return run
 
-            error = result.error or SmartOpsError("فشل غير موصوف")
+            error = result.error or SmartOpsError("Unspecified failure")
             attempts_used = attempt_no
             policy = policy_for(error.error_class, max_attempts=step_def.max_attempts)
             # Authentication failures need operator intervention; retrying a
@@ -278,7 +278,7 @@ class WorkflowRunner:
                 run_id=run.id,
                 step_name=step_def.name,
                 severity=Severity.WARNING,
-                message=f"إعادة محاولة بعد {round(delay, 1)} ثانية",
+                message=f"Retrying after {round(delay, 1)} seconds",
                 payload={"attempt": attempts_used, "delay": delay, **error.to_dict()},
             )
             if delay <= self.inline_retry_ceiling:
@@ -320,7 +320,7 @@ class WorkflowRunner:
             run_id=run.id,
             step_name=step_def.name,
             severity=Severity.ERROR,
-            message=f"فشلت الخطوة {step_def.title or step_def.name}",
+            message=f"Step failed: {step_def.title or step_def.name}",
             payload={"attempt": attempts_used, **error.to_dict()},
         )
         run.status = RunStatus.FAILED
@@ -334,7 +334,7 @@ class WorkflowRunner:
             run_id=run.id,
             step_name=step_def.name,
             severity=Severity.ERROR,
-            message="توقف التشغيل بسبب فشل خطوة",
+            message="Run stopped due to a step failure",
             payload=error.to_dict(),
         )
         self._open_incident(run, definition, step_def, error)
@@ -352,7 +352,7 @@ class WorkflowRunner:
             return
         signature = f"{definition.key}:{step_def.name}:{error.error_class.value}:{error.code}"
         incident = incidents.open(
-            title=f"فشل {definition.title or definition.key} عند {step_def.name}",
+            title=f"{definition.title or definition.key} failed at {step_def.name}",
             severity=Severity.ERROR,
             run_id=run.id,
             signature=signature,
@@ -362,7 +362,7 @@ class WorkflowRunner:
             run_id=run.id,
             step_name=step_def.name,
             severity=Severity.ERROR,
-            message="تم فتح حادثة للتشخيص",
+            message="Incident opened for diagnosis",
             payload={"incident_id": incident.id, "signature": signature},
         )
 

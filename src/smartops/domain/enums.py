@@ -1,4 +1,4 @@
-"""الحالات والأنواع الرسمية. أي حالة جديدة تُضاف هنا أولًا."""
+"""The official statuses and types. Any new status is added here first."""
 
 from __future__ import annotations
 

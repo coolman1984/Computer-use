@@ -1,4 +1,4 @@
-"""مستودعات البيانات: المكان الوحيد الذي يعرف SQL. باقي النظام يتعامل بنماذج فقط."""
+"""Data repositories: the only place that knows SQL. The rest of the system deals in models only."""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ class RecordingRepository(BaseRepository):
         return [self._step(r) for r in self.db.connection.execute("SELECT * FROM recording_steps WHERE recording_id=? ORDER BY seq", (recording_id,))]
 
     def purge(self, recording_id: str) -> None:
-        """يحذف صف السجل بعد أن أزال maintenance ملفاته الخاصة."""
+        """Delete the recording row after maintenance has removed its private files."""
         with self.db.transaction() as tx:
             tx.execute("DELETE FROM recordings WHERE id=? AND deleted_at IS NOT NULL", (recording_id,))
 
@@ -199,7 +199,7 @@ class RunRepository(BaseRepository):
         return [self._row_to_run(row) for row in self.db.connection.execute(sql, args)]
 
     def due(self, *, now: datetime | None = None, limit: int = 20) -> list[Run]:
-        """التشغيلات الجاهزة للاستكمال: منتظرة وحان وقتها، أو في الطابور."""
+        """Runs ready to resume: waiting and now due, or queued."""
         moment = to_iso(now or self.clock.now())
         rows = self.db.connection.execute(
             "SELECT * FROM runs WHERE status = 'queued'"
@@ -229,7 +229,7 @@ class RunRepository(BaseRepository):
         return run
 
     def claim(self, run_id: str, token: str, *, lease_seconds: int = 900) -> bool:
-        """قفل تفاؤلي: يمنع عاملين من تشغيل نفس الـ run في نفس الوقت."""
+        """Optimistic lock: stops two workers from driving the same run at once."""
         now = self.clock.now()
         expires = to_iso(now + timedelta(seconds=lease_seconds))
         with self.db.transaction() as tx:

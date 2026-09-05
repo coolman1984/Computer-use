@@ -1,4 +1,4 @@
-"""حاوية الخدمات: نقطة التركيب الوحيدة لكل مكونات المنصة."""
+"""The services container: the single wiring point for every platform component."""
 
 from __future__ import annotations
 
@@ -32,14 +32,14 @@ from .storage.repositories import (
 )
 from .workflows.profiles import SystemRegistry
 
-# أوضاع الوكيل المدعومة فعليًا في هذه المرحلة من التركيب. Experiment/Execute
-# تحتاجان Sandbox واختبار وموافقة بشرية قبل تفعيلهما (راجع docs/MASTER_PLAN.md
-# القسم 20)، فلا يُفعَّلان تلقائيًا هنا مهما كان الإعداد.
+# Agent modes actually supported at this stage of the build. Experiment/Execute
+# need a sandbox, testing, and human approval before they can be enabled (see
+# docs/MASTER_PLAN.md section 20), so they are never auto-enabled here regardless of settings.
 _SUPPORTED_AGENT_MODES = {"read_only"}
 
 
 class Services:
-    """يجمع الإعدادات وقاعدة البيانات والسجلات والمحرك في كائن واحد."""
+    """Gathers settings, the database, the repositories, and the engine into one object."""
 
     def __init__(
         self,
@@ -73,14 +73,15 @@ class Services:
         self.runner = WorkflowRunner(self, clock=self.clock, sleeper=sleeper)
         self.scheduler = Scheduler(self, clock=self.clock)
 
-        # محوّلات آمنة ومحلية بالكامل: تُركَّب دايمًا، لا تحتاج إعدادًا إضافيًا،
-        # ولا تلمس شبكة أو عملية خارجية إلا لو استُدعيت فعليًا من خطوة تشغيل.
+        # Fully local, safe adapters: always wired up, need no extra
+        # configuration, and never touch the network or an external process
+        # unless actually invoked from a run step.
         self.validator = LocalFileValidator(files_repo=self.files, now=lambda: self.clock.now().timestamp())
         self.credentials = credential_store or default_credential_store()
         self.browser = PlaywrightBrowserAdapter(self.settings.browser, credential_store=self.credentials)
         self.history = HistoryArchiver(self.settings.storage.history_dir)
-        # settings.storage.systems_dir، أو فاضي لو المجلد غير موجود. التعريفات
-        # الحقيقية تعيش خارج المستودع عبر SMARTOPS_SYSTEMS_DIR (D023).
+        # settings.storage.systems_dir, or empty if the folder does not
+        # exist. Real definitions live outside the repo via SMARTOPS_SYSTEMS_DIR (D023).
         self.systems = SystemRegistry.load(self.settings.storage.systems_dir)
 
         from .recordings.manager import RecordingManager
@@ -96,8 +97,9 @@ class Services:
             notifiers.append(WebhookNotifier(self.settings.notify.webhook_url))
         self.notifier: Any = CompositeNotifier(notifiers)
 
-        # وكيل الذكاء الاصطناعي: مطفأ افتراضيًا (agents.codex/claude.enabled=false).
-        # تفعيله قرار تشغيلي وأمني يخص المشغّل، وغير مُختبَر ضد CLI حقيقي هنا.
+        # AI agent: off by default (agents.codex/claude.enabled=false).
+        # Enabling it is an operational and security decision for the
+        # operator, and is not tested against a real CLI here.
         self.agent_runner: Any = self._build_agent_runner()
 
         from .workflows.builtin import register_builtins
@@ -105,18 +107,19 @@ class Services:
         register_builtins(self)
 
     def _build_agent_runner(self) -> Any:
-        """يبني CliAgentRunner لو مفعّل صراحة في الإعداد، وإلا يرجّع None.
+        """Build a CliAgentRunner if explicitly enabled in settings, otherwise return None.
 
-        claude له الأولوية لو الاثنان مفعّلان. أي mode غير read_only يرفض
-        بخطأ إعداد واضح بدل تفعيل صلاحية أوسع بصمت — Experiment وExecute
-        يحتاجان Sandbox واختبار وموافقة بشرية قبل بنائهما (D009، D010).
+        Claude takes priority if both are enabled. Any mode other than
+        read_only is rejected with a clear configuration error instead of
+        silently enabling broader permission — Experiment and Execute need a
+        sandbox, testing, and human approval before they can be built (D009, D010).
         """
         agent_name, agent_settings = self._chosen_agent()
         if agent_settings is None:
             return None
         if agent_settings.mode not in _SUPPORTED_AGENT_MODES:
             raise ConfigurationError(
-                f"وضع الوكيل غير مدعوم بعد في هذه المرحلة: {agent_settings.mode}",
+                f"Agent mode is not yet supported at this stage: {agent_settings.mode}",
                 details={"agent": agent_name, "supported_modes": sorted(_SUPPORTED_AGENT_MODES)},
             )
         executable = agent_settings.executable or agent_name

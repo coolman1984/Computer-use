@@ -58,7 +58,7 @@ class RecordingRecovery:
         settings = self.services.settings
         days = settings.storage.recordings_retention_days
         if not settings.safety.allow_recording_purge or days <= 0:
-            raise PermanentError("الحذف الدائم معطل؛ اضبط retention وأذن allow_recording_purge صراحةً")
+            raise PermanentError("Permanent delete is disabled; set a retention period and explicitly allow allow_recording_purge")
         threshold = self.services.clock.now() - timedelta(days=days)
         count = 0
         root = settings.storage.recordings_dir.resolve()
@@ -69,11 +69,11 @@ class RecordingRecovery:
             try:
                 artifact.relative_to(root)
             except ValueError as exc:
-                raise PermanentError("مسار أدلة التسجيل خارج مساحة التسجيل الخاصة") from exc
+                raise PermanentError("Recording artifact path is outside the private recordings area") from exc
             if artifact.exists():
                 shutil.rmtree(artifact)
             self.services.recordings.purge(record.id)
             self.services.events.emit(EventType.RECORDING_DELETED, severity=Severity.WARNING,
-                message="حُذف التسجيل نهائيًا حسب سياسة الاحتفاظ", payload={"recording_id": record.id, "permanent": True})
+                message="Recording permanently deleted per the retention policy", payload={"recording_id": record.id, "permanent": True})
             count += 1
         return count

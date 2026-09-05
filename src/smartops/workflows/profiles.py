@@ -1,14 +1,16 @@
-"""تعريفات الأنظمة والتقارير: تحميل config/systems/*.yaml وتحويلها إلى
-معطيات جاهزة لتشغيل سير العمل الجاهز collect.report.
+"""System and report definitions: load config/systems/*.yaml and turn them
+into ready-to-run parameters for the built-in collect.report workflow.
 
-كل نظام يوصف مرة واحدة بدل تكرار نفس الإعداد في كل تشغيل: الاسم، التقارير،
-قواعد التحقق، الزمن الطبيعي، وقواعد الإنذار (انظر المخطط في MASTER_PLAN.md
-القسم 7)، بالإضافة لطريقة المصادقة والجدولة (F-05). تعريف ناقص يرفع
-ConfigurationError برسالة واضحة فورًا بدل فشل غامض أثناء التنفيذ لاحقًا.
+Each system is described once instead of repeating the same setup on every
+run: name, reports, validation rules, normal duration, and alert rules (see
+the schema in MASTER_PLAN.md section 7), plus the authentication mode and
+schedule (F-05). An incomplete definition raises ConfigurationError with a
+clear message immediately, instead of failing obscurely later at runtime.
 
-ملاحظة: normal_duration_seconds وalert أصبحا يُستهلكان فعليًا من
-extract.download_report (F-07) لإطلاق إنذار بطء بعتبات ثابتة. اكتشاف
-الاتجاه/الخط الأساسي (baseline) يظل مؤجلًا لمرحلة الإنذار المبكر الكاملة (P5).
+Note: normal_duration_seconds and alert are now actually consumed by
+extract.download_report (F-07) to raise a slowness alert against fixed
+thresholds. Trend/baseline detection stays deferred to the full early-warning
+phase (P5).
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 @dataclass(frozen=True)
 class AlertRule:
-    """قاعدة إنذار تأخير بسيطة: عتبتا تحذير وحرجة بالثواني."""
+    """A simple lateness alert rule: warning and critical thresholds in seconds."""
 
     warn_after_seconds: float | None = None
     critical_after_seconds: float | None = None
@@ -51,7 +53,7 @@ class AuthProfile:
 
 @dataclass(frozen=True)
 class ScheduleProfile:
-    """جدولة تقرير: إما وقت يومي ثابت، أو كل عدد ثوانٍ. مش الاثنين معًا."""
+    """Report schedule: either a fixed daily time or an interval in seconds, never both."""
 
     daily_at: str = ""
     every_seconds: float | None = None
@@ -77,9 +79,9 @@ class ReportProfile:
     schedule: ScheduleProfile = field(default_factory=ScheduleProfile)
 
     def to_run_params(self, auth: "AuthProfile | None" = None) -> dict[str, Any]:
-        """يبني params جاهزة لـ runner.create_run("collect.report", params=...).
+        """Build params ready for runner.create_run("collect.report", params=...).
 
-        لا يضع مفتاح "system" هنا؛ يُضاف من SystemProfile.to_run_params.
+        The "system" key is not set here; SystemProfile.to_run_params adds it.
         """
         filters: dict[str, Any] = {}
         if self.url:
@@ -128,7 +130,7 @@ class SystemProfile:
             if candidate.key == report_key:
                 return candidate
         raise ConfigurationError(
-            f"التقرير غير معرّف في النظام {self.key}: {report_key}",
+            f"Report is not defined on system {self.key}: {report_key}",
             details={
                 "system": self.key,
                 "report": report_key,
@@ -146,7 +148,7 @@ def _require(data: dict[str, Any], field_name: str, *, context: str) -> Any:
     value = data.get(field_name)
     if value in (None, ""):
         raise ConfigurationError(
-            f"حقل مطلوب مفقود ({field_name}) في {context}",
+            f"Required field missing ({field_name}) in {context}",
             details={"field": field_name, "context": context},
         )
     return value
@@ -165,13 +167,13 @@ def _parse_auth(raw: dict[str, Any], *, system_key: str) -> AuthProfile:
     mode = raw.get("mode", "none") or "none"
     if mode not in ("none", "session", "unattended"):
         raise ConfigurationError(
-            f"وضع مصادقة غير معروف في النظام {system_key}: {mode}",
+            f"Unknown authentication mode on system {system_key}: {mode}",
             details={"system": system_key, "mode": mode, "allowed": ["none", "session", "unattended"]},
         )
     login_url = raw.get("login_url", "") or ""
     if mode in ("session", "unattended") and not login_url:
         raise ConfigurationError(
-            f"لازم login_url لأي نظام وضع مصادقته {mode} ({system_key})",
+            f"login_url is required for any system using auth mode {mode} ({system_key})",
             details={"system": system_key},
         )
     credential_ref = raw.get("credential_ref", system_key) or system_key
@@ -207,17 +209,17 @@ def _parse_schedule(raw: dict[str, Any], *, context: str) -> ScheduleProfile:
     every_seconds = raw.get("every_seconds")
     if daily_at and every_seconds is not None:
         raise ConfigurationError(
-            f"اختر daily_at أو every_seconds، مش الاثنين معًا، في {context}",
+            f"Choose either daily_at or every_seconds, not both, in {context}",
             details={"context": context},
         )
     if daily_at and not _TIME_RE.match(daily_at):
         raise ConfigurationError(
-            f"صيغة daily_at غير صحيحة (المطلوب HH:MM) في {context}: {daily_at}",
+            f"Invalid daily_at format (expected HH:MM) in {context}: {daily_at}",
             details={"context": context, "daily_at": daily_at},
         )
     if every_seconds is not None and float(every_seconds) <= 0:
         raise ConfigurationError(
-            f"every_seconds لازم يكون أكبر من صفر في {context}",
+            f"every_seconds must be greater than zero in {context}",
             details={"context": context, "every_seconds": every_seconds},
         )
     return ScheduleProfile(
@@ -230,17 +232,17 @@ def _parse_schedule(raw: dict[str, Any], *, context: str) -> ScheduleProfile:
 def _parse_report(raw: Any, *, system_key: str) -> ReportProfile:
     if not isinstance(raw, dict):
         raise ConfigurationError(
-            f"تعريف تقرير غير صحيح (يجب أن يكون كائنًا) في النظام {system_key}",
+            f"Invalid report definition (must be a mapping) on system {system_key}",
             details={"system": system_key},
         )
-    key = _require(raw, "key", context=f"تقرير داخل النظام {system_key}")
-    context = f"التقرير {system_key}.{key}"
+    key = _require(raw, "key", context=f"a report inside system {system_key}")
+    context = f"report {system_key}.{key}"
     url = _require(raw, "url", context=context)
     download_selector = raw.get("download_selector", "") or ""
     direct_download_url = raw.get("direct_download_url", "") or ""
     if not download_selector and not direct_download_url:
         raise ConfigurationError(
-            f"لازم download_selector أو direct_download_url في {context}",
+            f"Either download_selector or direct_download_url is required in {context}",
             details={"system": system_key, "report": key},
         )
     return ReportProfile(
@@ -259,17 +261,17 @@ def _parse_report(raw: Any, *, system_key: str) -> ReportProfile:
 
 
 def parse_system_profile(raw: Any, *, source: Path | None = None) -> SystemProfile:
-    """يحوّل قاموسًا محمّلًا من YAML إلى SystemProfile متحقق منه."""
-    source_label = str(source) if source else "(بلا مصدر)"
+    """Convert a dict loaded from YAML into a validated SystemProfile."""
+    source_label = str(source) if source else "(no source)"
     if not isinstance(raw, dict):
         raise ConfigurationError(
-            "تعريف النظام يجب أن يكون كائنًا (mapping)", details={"source": source_label}
+            "A system definition must be a mapping", details={"source": source_label}
         )
-    key = _require(raw, "key", context=f"تعريف نظام ({source_label})")
+    key = _require(raw, "key", context=f"system definition ({source_label})")
     reports_raw = raw.get("reports")
     if not reports_raw or not isinstance(reports_raw, list):
         raise ConfigurationError(
-            f"النظام {key} يحتاج قائمة reports غير فارغة", details={"system": key, "source": source_label}
+            f"System {key} needs a non-empty reports list", details={"system": key, "source": source_label}
         )
     reports = tuple(_parse_report(r, system_key=key) for r in reports_raw)
     auth = _parse_auth(raw.get("auth") or {}, system_key=key)
@@ -277,7 +279,7 @@ def parse_system_profile(raw: Any, *, source: Path | None = None) -> SystemProfi
 
 
 def load_system_profiles(directory: Path | str | None = None) -> dict[str, SystemProfile]:
-    """يحمّل كل ملفات *.yaml من مجلد الأنظمة. مجلد غير موجود = لا أنظمة، بلا خطأ."""
+    """Load every *.yaml in the systems directory. A missing directory means no systems, not an error."""
     base = Path(directory) if directory is not None else DEFAULT_SYSTEMS_DIR
     profiles: dict[str, SystemProfile] = {}
     if not base.exists():
@@ -289,7 +291,7 @@ def load_system_profiles(directory: Path | str | None = None) -> dict[str, Syste
         profile = parse_system_profile(loaded, source=path)
         if profile.key in profiles:
             raise ConfigurationError(
-                f"مفتاح نظام مكرر: {profile.key}",
+                f"Duplicate system key: {profile.key}",
                 details={"first": str(profiles[profile.key].source), "second": str(path)},
             )
         profiles[profile.key] = profile
@@ -297,7 +299,7 @@ def load_system_profiles(directory: Path | str | None = None) -> dict[str, Syste
 
 
 class SystemRegistry:
-    """سجل الأنظمة المحمّلة: نقطة دخول واحدة لبناء معطيات تشغيل collect.report."""
+    """Registry of loaded systems: one entry point for building collect.report run params."""
 
     def __init__(self, profiles: dict[str, SystemProfile] | None = None) -> None:
         self._profiles = dict(profiles or {})
@@ -309,7 +311,7 @@ class SystemRegistry:
     def get(self, system_key: str) -> SystemProfile:
         if system_key not in self._profiles:
             raise ConfigurationError(
-                f"نظام غير معرّف: {system_key}",
+                f"System is not defined: {system_key}",
                 details={"system": system_key, "available": sorted(self._profiles)},
             )
         return self._profiles[system_key]
@@ -321,7 +323,7 @@ class SystemRegistry:
         return self.get(system_key).to_run_params(report_key)
 
     def iter_scheduled(self) -> list[tuple[SystemProfile, ReportProfile]]:
-        """كل أزواج (نظام, تقرير) اللي جدولتها مفعّلة — مصدر بيانات الجدولة (F-08)."""
+        """Every (system, report) pair with an active schedule — the scheduler's data source (F-08)."""
         pairs: list[tuple[SystemProfile, ReportProfile]] = []
         for system in self.list():
             for report in system.reports:

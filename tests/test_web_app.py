@@ -1,9 +1,10 @@
-"""اختبار S-07 (تكاملي): غرفة القيادة الثابتة تشتغل فعليًا فوق خادم حقيقي.
+"""S-07 test (integration): the static operations center actually works on top of a real server.
 
-يشغّل خادم uvicorn حقيقي على منفذ محلي، ثم يفتح المتصفح (Playwright) على
-صفحات web/ الثابتة ويتفاعل معها كمستخدم حقيقي، للتأكد أنها تعمل على
-بيانات platform.selfcheck دون أي تعديل في الخلفية (كل الاتصال عبر
-نقاط API الموجودة بالفعل في api/app.py).
+Runs a real uvicorn server on a local port, then opens a browser
+(Playwright) on the static web/ pages and interacts with them like a real
+user, confirming they work against real platform.selfcheck data with no
+behind-the-scenes modification (all communication goes through the API
+endpoints already present in api/app.py).
 """
 
 from __future__ import annotations
@@ -55,7 +56,7 @@ class _LiveServer:
         deadline = time.monotonic() + 5.0
         while not self.server.started and time.monotonic() < deadline:
             time.sleep(0.02)
-        assert self.server.started, "خادم الاختبار لم يبدأ خلال المهلة"
+        assert self.server.started, "The test server did not start within the timeout"
 
     def stop(self) -> None:
         self.server.should_exit = True
@@ -84,7 +85,7 @@ def page(live_server):
         pg = context.new_page()
         errors: list[str] = []
         pg.on("pageerror", lambda exc: errors.append(str(exc)))
-        pg.errors_log = errors  # نلصقها بالكائن عشان تتفحص في الاختبار
+        pg.errors_log = errors  # attach it to the object so the test can inspect it
         yield pg
         browser.close()
 
@@ -102,7 +103,7 @@ def test_dashboard_runs_selfcheck_and_updates_live(page) -> None:
     status_badge = page.locator("#selfcheck-status .badge")
     assert status_badge.inner_text() == "Succeeded"
 
-    # لازم ظهر في جدول آخر التشغيلات كمان
+    # It must also show up in the recent-runs table
     page.wait_for_selector("#recent-runs td:has-text('platform.selfcheck')")
 
     assert page.errors_log == []

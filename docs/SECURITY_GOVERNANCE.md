@@ -1,43 +1,46 @@
-# الأمان والحوكمة
+# Security and Governance
 
-## الوضع الحالي للمستودع
+## Current state of the repository
 
-المستودع عام حاليًا، لذلك يمنع رفع أي بيانات أو تفاصيل داخلية حساسة.
+The repository is currently public, so uploading any sensitive internal data or details is prohibited.
 
-## ممنوع داخل Git
+## Forbidden inside Git
 
-- كلمات المرور أو رموز الدخول.
-- ملفات تعريف الارتباط والجلسات.
-- مفاتيح واجهات البرمجة.
-- عناوين أو روابط أنظمة داخلية خاصة.
-- بيانات موظفين أو عملاء أو موردين.
-- ملفات Raw Data حقيقية.
-- نسخ قواعد بيانات إنتاج.
-- لقطات شاشة تحتوي بيانات حساسة.
+- Passwords or login tokens.
+- Cookie and session files.
+- API keys.
+- Addresses or URLs of private internal systems.
+- Employee, customer, or supplier data.
+- Real raw data files.
+- Production database copies.
+- Screenshots containing sensitive data.
 
-## مبدأ أقل صلاحية
+## Least-privilege principle
 
-كل Worker أو Agent يحصل فقط على الأدوات اللازمة لمهمته.
+Every worker or agent gets only the tools its task needs.
 
-## مستويات الأفعال
+## Action levels
 
-### أخضر
-إعادة محاولة، إعادة فتح صفحة، إعادة تنزيل، فحص ملف.
+### Green
+Retry, reopen a page, redownload, check a file.
 
-### أصفر
-تعديل كود أو Workflow داخل Sandbox واختباره.
+### Yellow
+Modify code or a workflow inside a sandbox and test it.
 
-### أحمر
-تغييرات إنتاج، حذف بيانات، تغيير صلاحيات أو قواعد بيانات حساسة. تتطلب اعتمادًا بشريًا.
+### Red
+Production changes, data deletion, changing permissions or sensitive
+databases. Requires human approval.
 
-## قواعد الوكلاء
+## Agent rules
 
-- القراءة منفصلة عن الكتابة.
-- التنفيذ الإنتاجي منفصل عن التجربة.
-- كل تعديل له Diff وسجل واختبارات.
-- كل تعديل قابل للتراجع.
-- لا يسمح لوكيلين بتعديل نفس الجزء في نفس اللحظة دون قفل.
+- Reading is separate from writing.
+- Production execution is separate from experimentation.
+- Every change has a diff, a log, and tests.
+- Every change is reversible.
+- Two agents are never allowed to modify the same part at the same moment without a lock.
 
-## تشغيل داخل الشركة
+## Operating inside the company
 
-الوصول لأي نظام أو خدمة يجب أن يتم باستخدام حساب وصلاحيات مصرح بها رسميًا. المشروع لا يتضمن أي آلية لتجاوز سياسات الأجهزة أو الشبكة أو التحكم الأمني.
+Access to any system or service must use an officially authorized account
+and permissions. This project includes no mechanism to bypass device,
+network, or security-control policies.

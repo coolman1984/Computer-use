@@ -1,4 +1,4 @@
-"""واجهة HTTP المحلية. الواجهة الرسومية والشات يبنيان فوق هذه النقاط."""
+"""The local HTTP interface. The web UI and chat are built on these endpoints."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from pydantic import BaseModel, Field, SecretStr
 from ..adapters.notify.local import LocalLogNotifier
 from ..core.errors import SmartOpsError
 from ..domain.enums import IncidentStatus, RunStatus, TriggerType, RecordingStatus
-from ..recordings.artifacts import preview_path
+from ..recordings.artifacts import CONTENT_TYPES, preview_path
 from ..sessions import session_age_hours, session_exists
 from ..services import Services
 from .ws import create_ws_router
 
-# غرفة القيادة (واجهة الويب الثابتة) تعيش في web/ بجذر المستودع، بجانب src/.
+# The operations center (static web UI) lives in web/ at the repository root, next to src/.
 WEB_DIR = Path(__file__).resolve().parents[3] / "web"
 
 _services: Services | None = None
@@ -31,9 +31,9 @@ def get_services() -> Services:
 
 
 class CreateRunRequest(BaseModel):
-    workflow: str = Field(..., description="مفتاح سير العمل")
+    workflow: str = Field(..., description="Workflow key")
     params: dict[str, Any] = Field(default_factory=dict)
-    start: bool = Field(default=True, description="ابدأ التنفيذ فورًا")
+    start: bool = Field(default=True, description="Start executing immediately")
 
 
 class CreateRecordingRequest(BaseModel):
@@ -64,7 +64,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     app.include_router(create_ws_router(provide))
 
     if WEB_DIR.is_dir():
-        # غرفة القيادة: /app/index.html ولوحاتها. لا تأثير على أي نقطة API قائمة.
+        # Operations center: /app/index.html and its pages. No effect on any existing API endpoint.
         app.mount("/app", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     @app.get("/health")
@@ -111,13 +111,13 @@ def create_app(services: Services | None = None) -> FastAPI:
     def get_run(run_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
         run = svc.runs.get(run_id)
         if run is None:
-            raise HTTPException(status_code=404, detail="تشغيل غير موجود")
+            raise HTTPException(status_code=404, detail="Run not found")
         return {"run": run.to_dict(), "steps": [s.to_dict() for s in svc.steps.list(run_id)]}
 
     @app.post("/api/runs/{run_id}/start")
     def start_run(run_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
         if svc.runs.get(run_id) is None:
-            raise HTTPException(status_code=404, detail="تشغيل غير موجود")
+            raise HTTPException(status_code=404, detail="Run not found")
         return svc.runner.drive(run_id).to_dict()
 
     @app.get("/api/runs/{run_id}/events")
@@ -183,7 +183,11 @@ def create_app(services: Services | None = None) -> FastAPI:
                     ],
                 }
             )
-        return {"items": items}
+        # The directory is part of the answer: the most common cause of "no
+        # systems" is the server reading an unexpected directory
+        # (SMARTOPS_SYSTEMS_DIR not set in the same window), and the UI shows
+        # it so that is diagnosed immediately instead of guessed at.
+        return {"items": items, "directory": str(svc.settings.storage.systems_dir)}
 
     @app.get("/api/credentials")
     def list_credentials(svc: Services = Depends(provide)) -> dict[str, Any]:
@@ -252,7 +256,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.get("/api/recordings/{recording_id}")
     def recording_detail(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
         record = svc.recordings.get(recording_id)
-        if not record: raise HTTPException(status_code=404, detail="التسجيل غير موجود")
+        if not record: raise HTTPException(status_code=404, detail="Recording not found")
         return {"recording": record.to_dict(), "steps": [s.to_dict() for s in svc.recordings.steps(recording_id)]}
 
     def _recording_control(action: str, recording_id: str, svc: Services) -> dict[str, Any]:
@@ -279,11 +283,13 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.get("/api/recordings/{recording_id}/artifacts/{name:path}")
     def recording_artifact(recording_id: str, name: str, svc: Services = Depends(provide)) -> Response:
         record=svc.recordings.get(recording_id)
-        if not record: raise HTTPException(status_code=404, detail="التسجيل غير موجود")
+        # Soft-deleted recordings are in the trash, not gone — but their
+        # private artifacts (screenshots may show real report data) stop
+        # being servable until the recording is restored.
+        if not record or record.deleted_at: raise HTTPException(status_code=404, detail="Recording not found")
         path=preview_path(Path(record.artifact_dir), name)
-        if not path: raise HTTPException(status_code=404, detail="هذا الملف غير متاح للعرض")
-        media="application/json" if path.suffix == ".json" else "image/png"
-        return Response(path.read_bytes(), media_type=media)
+        if not path: raise HTTPException(status_code=404, detail="This file is not available for preview")
+        return Response(path.read_bytes(), media_type=CONTENT_TYPES[path.suffix.lower()])
 
     @app.get("/api/alerts")
     def list_alerts(limit: int = Query(default=100, le=1000), svc: Services = Depends(provide)) -> dict[str, Any]:

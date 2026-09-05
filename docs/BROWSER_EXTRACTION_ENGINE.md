@@ -1,69 +1,74 @@
-# محرك استخراج البيانات من المتصفح
+# Browser Data Extraction Engine
 
-## الهدف
+## Goal
 
-بناء محرك يتحمل اختلاف المواقع والتقنيات بدل الاعتماد على نوع واحد من الأتمتة.
+Build an engine that tolerates differences between sites and technologies, instead of relying on a single automation approach.
 
-## سلم الإدراك
+## The extraction ladder
 
-### 1. شبكة / تنزيل مباشر
-راقب طلبات الشبكة أثناء التصدير. لو أمكن تكرار طلب مصرح به بنفس جلسة المستخدم، استخدمه.
+### 1. Network / direct download
+Watch network requests during export. If an authorized request can be
+repeated with the same user session, use it.
 
-### 2. هيكل الصفحة
-استخدم Playwright للوصول للعناصر، الإطارات، النوافذ، التابات، التنزيلات والانتظار الذكي.
+### 2. Page structure
+Use Playwright to reach elements, frames, windows, tabs, downloads, and smart waiting.
 
-### 3. إصلاح الصفحات المتغيرة
-استفد من أساليب Stagehand: محاولة ثابتة أولًا ثم اكتشاف ذكي وتخزين المسار الجديد بعد التحقق.
+### 3. Self-healing for changing pages
+Draw on Stagehand-style techniques: try the fixed path first, then a smart
+fallback discovery, and cache the new path once verified.
 
-### 4. رؤية بصرية
-استخدم فكرة Midscene/Browser Use للصفحات التي لا يمكن قراءة عناصرها. اعتمد على الصورة والهدف الدلالي.
+### 4. Visual vision
+Use a Midscene/Browser Use-style approach for pages whose elements cannot
+be read. Rely on the image and the semantic goal.
 
-### 5. تحكم واجهة كامل
-استخدم أفكار UI-TARS/Agent TARS فقط للحالات التي لا يمكن التعامل معها من داخل المتصفح.
+### 5. Full UI control
+Use UI-TARS/Agent TARS-style ideas only for cases that cannot be handled
+from within the browser.
 
-## الدقة والشاشات
+## Resolution and screens
 
-- لا تخزن إحداثيات مطلقة.
-- استخدم العنصر الدلالي كلما أمكن.
-- في الوضع البصري استخدم إحداثيات نسبية.
-- اجعل المتصفح الخلفي يعمل بحجم عرض موحد عندما يكون ذلك مناسبًا.
+- Never store absolute coordinates.
+- Use the semantic element whenever possible.
+- In visual mode, use relative coordinates.
+- Run the background browser at a uniform viewport size when appropriate.
 
-## التابات الكثيرة
+## Many tabs
 
-لا تفتح عددًا غير محدود. استخدم:
+Do not open an unbounded number. Use:
 
-- طابور مهام.
-- حد تزامن ديناميكي.
-- جلسات معزولة.
-- مراقبة ذاكرة ومعالج.
-- زيادة أو تقليل التزامن تلقائيًا.
+- A task queue.
+- A dynamic concurrency limit.
+- Isolated sessions.
+- Memory and CPU monitoring.
+- Automatically raising or lowering concurrency.
 
-## صحة التنزيل
+## Download health
 
-لا تعتبر المهمة ناجحة لمجرد ظهور ملف.
+Never consider a task successful just because a file appeared.
 
-تحقق من:
-- وجود الملف.
-- حجم غير صفري.
-- إمكانية الفتح.
-- التاريخ المتوقع.
-- الأعمدة والأوراق.
-- عدد الصفوف ضمن نطاق منطقي.
-- عدم التكرار.
-- بصمة الملف.
+Verify:
+- The file exists.
+- Its size is non-zero.
+- It can be opened.
+- The expected date.
+- Columns and sheets.
+- Row count within a sane range.
+- No duplication.
+- The file's hash.
 
-## الأدلة عند الفشل
+## Evidence on failure
 
-احفظ:
-- لقطة شاشة.
-- تتبع المتصفح.
-- الطلبات المهمة.
-- آخر خطوات ناجحة.
-- أسماء التابات.
-- عنوان الصفحة.
-- زمن كل خطوة.
-- الملفات المتوقعة والفعلية.
+Save:
+- A screenshot.
+- The browser trace.
+- The important requests.
+- The last successful steps.
+- Tab names.
+- The page title.
+- Each step's duration.
+- The expected and actual files.
 
 ## Camoufox
 
-يظل خيارًا تجريبيًا أو ثانويًا، وليس المحرك الافتراضي. الأساس هو Playwright مع طبقات تكيفية.
+It remains an experimental or secondary option, not the default engine. The
+foundation is Playwright with adaptive layers.

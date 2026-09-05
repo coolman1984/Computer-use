@@ -1,10 +1,11 @@
-"""عامل خلفي: يسحب التشغيلات المستحقة وينفّذها بالتوازي المحدود.
+"""Background worker: pulls due runs and executes them with bounded concurrency.
 
-بدل انتظار نداء يدوي لكل تشغيل، الحلقة تستطلع runs.due() وترسل كل
-تشغيل مستحق إلى WorkflowRunner.execute داخل عدد عمال محدود بـ
-browser.max_concurrency. القفل الفعلي (منع تنفيذ نفس التشغيل مرتين)
-موجود بالفعل داخل WorkflowRunner.execute عبر runs.claim/release، فالعامل
-لا يعيد اختراعه؛ فقط يحترمه ويضيف حدًا للتوازي داخل نفس العملية.
+Instead of waiting for a manual call per run, the loop polls runs.due() and
+dispatches each due run to WorkflowRunner.execute within a worker count
+bounded by browser.max_concurrency. The actual lock (preventing the same run
+from executing twice) already lives inside WorkflowRunner.execute via
+runs.claim/release — the worker does not reinvent it, only respects it and
+adds a concurrency cap within this one process.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ logger = logging.getLogger("smartops.worker")
 
 
 class Worker:
-    """يستطلع التشغيلات المستحقة على فترات وينفّذها في مجمّع خيوط محدود."""
+    """Polls due runs on an interval and executes them in a bounded thread pool."""
 
     def __init__(
         self,
@@ -41,10 +42,10 @@ class Worker:
         self._in_flight_lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
-    # ---------- دورة الحياة ----------
+    # ---------- lifecycle ----------
 
     def start(self) -> None:
-        """يشغّل الحلقة في خيط خلفي منفصل. لا شيء لو كانت شغالة بالفعل."""
+        """Run the loop on a separate background thread. No-op if already running."""
         if self.is_running():
             return
         self._stop_event.clear()
@@ -52,7 +53,7 @@ class Worker:
         self._thread.start()
 
     def stop(self) -> None:
-        """طلب إيقاف نظيف: لا استطلاع جديد، والتشغيلات الجارية تكمل طبيعيًا."""
+        """Request a clean stop: no new polling, and in-flight runs finish normally."""
         self._stop_event.set()
 
     def join(self, timeout: float | None = None) -> None:
@@ -63,19 +64,19 @@ class Worker:
         return self._thread is not None and self._thread.is_alive()
 
     def run_forever(self) -> None:
-        """حلقة الاستطلاع، بمجمّع خيوط واحد يعيش طوال عمر الحلقة."""
+        """The polling loop, with one thread pool that lives for the loop's whole lifetime."""
         self._stop_event.clear()
         with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
             while not self._stop_event.is_set():
                 self._poll_once(executor)
                 self._stop_event.wait(self.poll_interval)
 
-    # ---------- الاستطلاع ----------
+    # ---------- polling ----------
 
     def poll_once(self) -> int:
-        """دورة استطلاع واحدة مكتفية بذاتها: تُنشئ مجمّعها وتنتظر اكتماله.
+        """One self-contained poll cycle: creates its own pool and waits for it to finish.
 
-        مفيدة للاختبار والتشغيل اليدوي دون تشغيل حلقة خلفية.
+        Useful for testing and manual runs without a background loop.
         """
         with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
             return self._poll_once(executor)
@@ -85,7 +86,7 @@ class Worker:
             try:
                 self.scheduler.tick()
             except Exception:
-                logger.exception("فشل تِك الجدولة — العامل يكمل استطلاعه بلا توقف")
+                logger.exception("Scheduler tick failed — the worker keeps polling regardless")
 
         with self._in_flight_lock:
             available_slots = self.max_concurrency - len(self._in_flight)
@@ -101,7 +102,7 @@ class Worker:
             executor.submit(self._execute_one, run.id)
         return dispatched
 
-    # ---------- تتبّع الشغل الجاري داخل نفس العملية ----------
+    # ---------- tracking in-flight work within this process ----------
 
     def _claim_slot(self, run_id: str) -> bool:
         with self._in_flight_lock:
@@ -119,8 +120,8 @@ class Worker:
             run = self.services.runner.execute(run_id)
             if self._on_run_done is not None:
                 self._on_run_done(run)
-        except Exception as exc:  # تشغيل واحد فاشل لا يُسقط العامل كله
-            logger.exception("فشل تنفيذ التشغيل %s", run_id)
+        except Exception as exc:  # one failed run must not take down the whole worker
+            logger.exception("Failed to execute run %s", run_id)
             if self._on_error is not None:
                 self._on_error(run_id, exc)
         finally:

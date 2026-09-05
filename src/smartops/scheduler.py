@@ -1,8 +1,9 @@
-"""جدولة تشغيلات collect.report من تعريفات الأنظمة (F-08).
+"""Schedule collect.report runs from the system definitions (F-08).
 
-لا سكيمة جديدة: الاستحقاق يُحسب من آخر تشغيل مسجّل لكل زوج (نظام، تقرير)
-داخل جدول runs الموجود بالفعل. الحجم المستهدف صغير (بضعة أنظمة وتقارير)،
-فالفلترة تتم في بايثون بدل استعلام SQL على JSON1 — أبسط وكفاية للمقياس الحالي.
+No new schema: due-ness is computed from the last recorded run for each
+(system, report) pair, inside the existing runs table. The target scale is
+small (a handful of systems and reports), so filtering happens in Python
+instead of a SQL query over JSON1 — simpler, and enough for the current scale.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ logger = logging.getLogger("smartops.scheduler")
 
 
 def is_due(schedule: ScheduleProfile, last_run_at: datetime | None, now: datetime) -> bool:
-    """يقرر استحقاق زوج (نظام، تقرير) وفق جدولته، بمعزل عن أي I/O."""
+    """Decide whether a (system, report) pair is due per its schedule, with no I/O involved."""
     if schedule.every_seconds is not None:
         if last_run_at is None:
             return True
@@ -40,7 +41,7 @@ def is_due(schedule: ScheduleProfile, last_run_at: datetime | None, now: datetim
 
 
 class Scheduler:
-    """يفحص تعريفات الأنظمة كل تِك وينشئ تشغيلات collect.report المستحقة."""
+    """Checks the system definitions on every tick and creates the due collect.report runs."""
 
     def __init__(self, services: Any, *, clock: Clock | None = None, lookback: int = 500) -> None:
         self.services = services
@@ -55,7 +56,7 @@ class Scheduler:
                 run = self._maybe_create_run(system.key, report.key, report.schedule, moment)
             except Exception:
                 logger.exception(
-                    "فشل فحص جدولة %s/%s — الجدولة تتجاهل هذا الزوج وتكمل الباقي",
+                    "Schedule check failed for %s/%s — the scheduler skips this pair and continues",
                     system.key,
                     report.key,
                 )
@@ -74,7 +75,7 @@ class Scheduler:
             if r.params.get("system") == system_key and r.params.get("report") == report_key
         ]
         if any(r.status not in TERMINAL_RUN_STATUSES for r in pair_runs):
-            return None  # تشغيل سابق لنفس الزوج لسه شغال أو مستني — لا نكرر
+            return None  # an earlier run for the same pair is still running or waiting — don't duplicate it
 
         last_run_at = pair_runs[0].created_at if pair_runs else None
         if not is_due(schedule, last_run_at, now):

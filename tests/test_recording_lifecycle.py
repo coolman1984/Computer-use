@@ -5,14 +5,14 @@ from smartops.domain.enums import RecordingStatus
 
 def test_recording_catalog_delete_restore_and_version(services) -> None:
     manager = services.recording_manager
-    first = manager.create("تقرير يومي", "local")
+    first = manager.create("daily report", "local")
     assert first.status is RecordingStatus.DRAFT
     assert services.recordings.get(first.id).artifact_dir.endswith(first.id)
     first.status = RecordingStatus.COMPLETED
     services.recordings.save(first)
     second = manager.create(first.name, first.system_key, first)
     assert second.version == 2 and second.parent_recording_id == first.id
-    # لا ننتظر Chrome في الاختبار؛ نتأكد من قواعد السلة فقط.
+    # We don't wait for Chrome in this test; we only confirm the trash-can rules.
     second.status = RecordingStatus.FAILED
     services.recordings.save(second)
     manager.delete(second.id)

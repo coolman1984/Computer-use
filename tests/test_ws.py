@@ -1,4 +1,4 @@
-"""اختبارات S-05: بث الأحداث الحي عبر WebSocket (/ws/events)."""
+"""S-05 tests: live event streaming over WebSocket (/ws/events)."""
 
 from __future__ import annotations
 
@@ -50,8 +50,8 @@ def test_ws_filters_by_run_id(services) -> None:
 
     with client.websocket_connect(f"/ws/events?run_id={run_a.id}") as ws:
         run_b = services.runner.create_run("platform.selfcheck")
-        services.runner.execute(run_b.id)  # يجب تجاهله بالكامل
-        services.runner.execute(run_a.id)  # ده اللي المفروض يوصل
+        services.runner.execute(run_b.id)  # must be completely ignored
+        services.runner.execute(run_a.id)  # this is the one that should arrive
 
         message = ws.receive_json()
 
@@ -59,7 +59,7 @@ def test_ws_filters_by_run_id(services) -> None:
 
 
 def test_ws_unsubscribes_on_disconnect(services) -> None:
-    assert len(services.bus._subscribers) == 0  # قاعدة نظيفة قبل أي اتصال
+    assert len(services.bus._subscribers) == 0  # a clean slate before any connection
 
     client = _client(services)
     with client.websocket_connect("/ws/events") as ws:

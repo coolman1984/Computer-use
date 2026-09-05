@@ -7,29 +7,21 @@
 <link rel="stylesheet" href="static/style.css" />
 </head>
 <body data-page="runs" data-title="Runs">
-<header class="top">
-  <h1>غرفة القيادة</h1>
-  <nav class="main">
-    <a href="index.html">لوحة الحالة</a>
-    <a href="runs.html" class="active">التشغيلات</a>
-    <a href="recordings.html">التسجيلات</a>
-    <a href="incidents.html">الحوادث</a>
-    <a href="files.html">الملفات</a>
-  </nav>
-</header>
+<header class="top"></header>
 <main>
   <div id="error"></div>
 
   <section class="panel">
-    <h2>Start a workflow</h2>
-    <p class="muted">Ready to use: <code>platform.selfcheck</code> verifies the local platform without any extra configuration.</p>
-    <div class="toolbar">
-      <input type="text" id="workflow-key" placeholder="Workflow key" value="platform.selfcheck" />
-      <button id="start-run">Start run</button>
-    </div>
+    <h2>How runs start</h2>
+    <p class="muted">A run is one execution: collecting a report, or a platform check. The normal way to start one is <strong>Collect now</strong> on a report in <a class="link" href="systems.html">Systems</a> — that fills in the system, report, validation rules, and alert thresholds for you. Runs also start on their own from each report's schedule.</p>
     <details>
-      <summary class="muted">Optional parameters</summary>
-      <textarea id="workflow-params" placeholder='Example: {"system": "erp_demo", "report": "daily_sales"}'></textarea>
+      <summary class="muted">Start a workflow by key (advanced)</summary>
+      <p class="muted">For platform workflows and debugging. <code>platform.selfcheck</code> needs no parameters; <code>collect.report</code> needs the full parameter set that Collect now builds automatically.</p>
+      <div class="toolbar">
+        <input type="text" id="workflow-key" placeholder="Workflow key" value="platform.selfcheck" />
+        <button id="start-run" type="button">Start run</button>
+      </div>
+      <textarea id="workflow-params" placeholder='Optional JSON parameters, e.g. {"system": "erp_demo", "report": "daily_sales"}'></textarea>
     </details>
   </section>
 

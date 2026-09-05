@@ -1,65 +1,65 @@
-# المعمارية المستهدفة
+# Target Architecture
 
 ```text
-واجهة ويب محلية
+Local web interface
 │
-├── العمليات
-├── المراقبة
-├── الحوادث
-├── التاريخ
-├── الوكلاء
-└── الشات
+├── Operations
+├── Monitoring
+├── Incidents
+├── History
+├── Agents
+└── Chat
         │
         ▼
-مركز التحكم المحلي
+Local control center
         │
  ┌──────┼────────┬───────────┬─────────────┐
  ▼      ▼        ▼           ▼             ▼
-سير   متصفح    بيانات      مراقبة        وكلاء
-عمل   تكيفي    وتاريخ      وإنذارات      ذكاء
+Work-  Adaptive Data &     Monitoring    AI
+flow   browser  history    & alerts      agents
  │      │        │           │             │
- │   API/DOM/   SQLite     حوادث        Codex
- │   Vision     DuckDB     تنبيه         Claude
- │   Desktop    Parquet    استباقي
+ │   API/DOM/   SQLite     Incidents    Codex
+ │   Vision     DuckDB     Proactive    Claude
+ │   Desktop    Parquet    alerting
  │
  ▼
-مشاريع أتمتة الإدارات وربطها
+Department automation projects and their linking
 ```
 
-## حدود المكونات
+## Component boundaries
 
 ### Control Plane
-المصدر الرسمي لحالة التشغيل. مسؤول عن الهوية، الحالة، الاعتماديات، القفل، إعادة المحاولة، الإيقاف والاستكمال.
+The official source of run state. Responsible for identity, status, dependencies, locking, retry, pausing, and resuming.
 
 ### Workflow Engine
-يشغّل الخطوات كحالة صريحة، وليس كسكربت طويل غير قابل للاسترجاع.
+Runs steps as explicit state, not as one long, unrecoverable script.
 
 ### Browser Engine
-ينفذ الوصول للمواقع والتنزيل بترتيب تكيفي.
+Executes site access and download in an adaptive order.
 
 ### Data Manager
-يحفظ الملفات الخام، البصمات، الجودة، التاريخ، والبيانات المشتقة.
+Stores raw files, hashes, quality results, history, and derived data.
 
 ### Observability
-يحفظ القياسات والتتبع والأخطاء والتدهور.
+Stores metrics, tracing, errors, and degradation.
 
 ### Incident Manager
-ينشئ حزمة حادثة كاملة ويوجهها للتشخيص.
+Builds a complete incident pack and routes it for diagnosis.
 
 ### Agent Manager
-يقرر أي وكيل وأي مستوى تفكير، ويسجل كل مدخلات ومخرجات وتعديلات.
+Decides which agent and what reasoning level to use, and logs every input, output, and change.
 
 ### Web App
-واجهة المستخدم الرئيسية. لا يجوز جعل الوظائف الجوهرية معتمدة على سطر الأوامر.
+The primary user interface. Core functionality must never depend on the command line.
 
-## قواعد الحالة
+## State rules
 
-كل تشغيل يمتلك معرفًا فريدًا وحالات مثل:
+Every run has a unique id and statuses such as:
 
 `queued → running → waiting → retrying → succeeded | failed | cancelled`
 
-كل خطوة تسجل البداية والنهاية والسبب والمخرجات.
+Every step records its start, end, reason, and output.
 
-## عدم التداخل
+## No overlap
 
-أي تعديل على كود أو سير عمل يستخدم قفلًا ونسخة عمل منفصلة قبل الدمج.
+Any change to code or a workflow uses a lock and a separate working copy before merging.

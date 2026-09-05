@@ -30,7 +30,7 @@ def test_startup_recovery_marks_stale_recording_interrupted(settings, clock, sle
     record = first.recording_manager.create("stale", "local")
     record.status = RecordingStatus.RECORDING
     first.recordings.save(record)
-    # تركيب خدمات جديد فوق القاعدة نفسها يحاكي إعادة التشغيل.
+    # A fresh Services wired onto the same database simulates a restart.
     second = Services(settings, db=first.db, clock=clock, sleeper=slept.append)
     assert second.recordings.get(record.id).status is RecordingStatus.INTERRUPTED
     second.close()

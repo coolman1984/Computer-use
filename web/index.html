@@ -7,18 +7,17 @@
 <link rel="stylesheet" href="static/style.css" />
 </head>
 <body data-page="overview" data-title="Overview">
-<header class="top">
-  <h1>غرفة القيادة</h1>
-  <nav class="main">
-    <a href="index.html" class="active">لوحة الحالة</a>
-    <a href="runs.html">التشغيلات</a>
-    <a href="recordings.html">التسجيلات</a>
-    <a href="incidents.html">الحوادث</a>
-    <a href="files.html">الملفات</a>
-  </nav>
-</header>
+<header class="top"></header>
 <main>
   <div id="error"></div>
+
+  <section class="panel">
+    <h2>Where you are</h2>
+    <p class="muted">Each step needs the one above it. The first step that is not done yet is the one to do next.</p>
+    <ol class="timeline" id="workflow-steps">
+      <li class="empty">Checking…</li>
+    </ol>
+  </section>
 
   <div class="grid">
     <div class="card">
@@ -36,26 +35,6 @@
   </div>
 
   <section class="panel">
-    <h2>Platform health check</h2>
-    <p class="muted">Confirm local storage is ready and write a health pulse to the event log.</p>
-    <div class="toolbar">
-      <button id="run-selfcheck">Run health check</button>
-      <span class="muted" id="selfcheck-hint"></span>
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>Connected systems</h2>
-    <p class="muted">Review each system session and collect a report on demand.</p>
-    <table>
-      <thead>
-        <tr><th>System</th><th>Session</th><th>Report</th><th></th></tr>
-      </thead>
-      <tbody id="systems-body"><tr><td colspan="4" class="empty">Loading systems…</td></tr></tbody>
-    </table>
-  </section>
-
-  <section class="panel">
     <h2>Recent runs</h2>
     <table>
       <thead>
@@ -71,177 +50,18 @@
       <li class="empty">No events yet</li>
     </ul>
   </section>
+
+  <section class="panel">
+    <h2>Platform health check</h2>
+    <p class="muted">Confirms local storage is ready and writes a health pulse to the event log. Useful when something looks wrong, not part of the normal workflow.</p>
+    <div class="toolbar">
+      <button id="run-selfcheck" class="secondary">Run health check</button>
+      <span class="muted" id="selfcheck-hint"></span>
+    </div>
+  </section>
 </main>
 
 <script src="static/app.js"></script>
-<script>
-const { getJSON, postJSON, formatDate, statusBadge, badge, RUN_STATUS_LABELS, EVENT_TYPE_LABELS, shortId, link, showError, connectEvents, el } = SmartOps;
-
-async function loadDashboard() {
-  try {
-    const [runs, incidents] = await Promise.all([
-      getJSON("/api/runs?limit=5"),
-      getJSON("/api/incidents?status=open&limit=50"),
-    ]);
-
-    const active = runs.items.filter(r => ["queued", "running", "waiting", "retrying"].includes(r.status));
-    document.getElementById("active-count").textContent = active.length;
-    document.getElementById("open-incidents-count").textContent = incidents.items.length;
-
-    const lastSelfcheck = runs.items.find(r => r.workflow_key === "platform.selfcheck");
-    const statusEl = document.getElementById("selfcheck-status");
-    statusEl.innerHTML = "";
-    if (lastSelfcheck) {
-      statusEl.appendChild(statusBadge(RUN_STATUS_LABELS, lastSelfcheck.status));
-    } else {
-      statusEl.textContent = "Not run yet";
-    }
-
-    const tbody = document.getElementById("recent-runs");
-    tbody.innerHTML = "";
-    if (runs.items.length === 0) {
-      tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["No runs yet"])]));
-    }
-    for (const run of runs.items) {
-      const tr = el("tr", {}, [
-        el("td", {}, [run.workflow_key]),
-        el("td", {}, [statusBadge(RUN_STATUS_LABELS, run.status)]),
-        el("td", {}, [formatDate(run.started_at || run.created_at)]),
-        el("td", {}, [link("View", `run.html?id=${encodeURIComponent(run.id)}`)]),
-      ]);
-      tbody.appendChild(tr);
-    }
-  } catch (err) {
-    showError(document.getElementById("error"), err);
-  }
-}
-
-async function loadSystems() {
-  const tbody = document.getElementById("systems-body");
-  try {
-    const systems = await getJSON("/api/systems");
-    tbody.innerHTML = "";
-    if (systems.items.length === 0) {
-      tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["No systems configured yet"])]));
-      return;
-    }
-    for (const system of systems.items) {
-      for (const [index, report] of system.reports.entries()) {
-        const button = el("button", {}, ["Collect now"]);
-        button.addEventListener("click", async () => {
-          button.disabled = true;
-          button.textContent = "Collecting…";
-          try {
-            await postJSON(`/api/systems/${encodeURIComponent(system.key)}/${encodeURIComponent(report.key)}/collect`, {});
-            await loadDashboard();
-            button.textContent = "Collected";
-          } catch (err) {
-            showError(document.getElementById("error"), err);
-            button.textContent = "Collect now";
-          } finally {
-            button.disabled = false;
-          }
-        });
-        // كل صف = ٤ خلايا دايمًا. اسم النظام وحالة الجلسة يظهروا في أول صف
-        // للنظام بس، والباقي فاضي — أبسط وأأمن من rowspan.
-        tbody.appendChild(
-          el("tr", {}, [
-            el("td", {}, [index === 0 ? (system.name || system.key) : ""]),
-            index === 0 ? sessionStatusCell(system) : el("td", {}, [""]),
-            el("td", {}, [report.title || report.key]),
-            el("td", {}, [button]),
-          ])
-        );
-      }
-    }
-  } catch (err) {
-    showError(document.getElementById("error"), err);
-  }
-}
-
-function sessionStatusCell(system) {
-  if (system.auth_mode !== "session") {
-    return el("td", {}, [badge("No authentication", "gray")]);
-  }
-  if (!system.session_exists) {
-    return el("td", {}, [
-      badge("Session expired", "red"),
-      el("div", { class: "muted hint" }, [`Sign in from the terminal: python -m smartops login ${system.key}`]),
-    ]);
-  }
-  const hours = system.session_age_hours != null ? system.session_age_hours.toFixed(1) : "؟";
-  return el("td", {}, [
-    badge("Connected", "green"),
-    el("div", { class: "muted hint" }, [`Session age: ${hours} hours`]),
-  ]);
-}
-
-document.getElementById("run-selfcheck").addEventListener("click", async (event) => {
-  const button = event.target;
-  button.disabled = true;
-  document.getElementById("selfcheck-hint").textContent = "Running…";
-  try {
-    const run = await postJSON("/api/runs", { workflow: "platform.selfcheck", start: true });
-    document.getElementById("selfcheck-hint").textContent =
-      run.status === "succeeded" ? "Completed" : `Status: ${run.status}`;
-    await loadDashboard();
-  } catch (err) {
-    showError(document.getElementById("error"), err);
-  } finally {
-    button.disabled = false;
-  }
-});
-
-const liveEvents = new Map();
-let liveEventOrder = 0;
-
-function renderLiveEvents() {
-  const list = document.getElementById("live-events");
-  list.innerHTML = "";
-  const events = [...liveEvents.values()]
-    .sort((a, b) => {
-      const byDate = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      return byDate || b._receivedOrder - a._receivedOrder;
-    })
-    .slice(0, 15);
-  if (events.length === 0) {
-    list.appendChild(el("li", { class: "empty" }, ["No events yet"]));
-    return;
-  }
-  for (const evt of events) {
-    const label = EVENT_TYPE_LABELS[evt.type] || evt.type;
-    list.appendChild(el("li", {}, [
-      el("span", { class: "msg" }, [`${label}${evt.run_id ? " — " + shortId(evt.run_id) : ""}`]),
-      el("span", { class: "time" }, [formatDate(evt.created_at)]),
-    ]));
-  }
-}
-
-function addLiveEvent(evt) {
-  const key = evt.id || `${evt.type}:${evt.run_id || ""}:${evt.created_at || ""}`;
-  if (liveEvents.has(key)) return;
-  liveEvents.set(key, { ...evt, _receivedOrder: liveEventOrder++ });
-  renderLiveEvents();
-}
-
-async function loadRecentEvents() {
-  try {
-    const events = await getJSON("/api/events?limit=15");
-    for (const evt of events.items) addLiveEvent(evt);
-  } catch (err) {
-    showError(document.getElementById("error"), err);
-  }
-}
-
-loadDashboard();
-loadSystems();
-loadRecentEvents();
-const socket = connectEvents(null, (evt) => {
-  document.getElementById("live-dot").classList.add("on");
-  addLiveEvent(evt);
-});
-socket.onopen = () => document.getElementById("live-dot").classList.add("on");
-socket.onclose = () => document.getElementById("live-dot").classList.remove("on");
-</script>
+<script src="static/overview.js"></script>
 </body>
 </html>

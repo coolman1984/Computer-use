@@ -1,27 +1,29 @@
-# مواد لم تُرفع لأن المستودع عام
+# Material not uploaded because the repository is public
 
-هذا الملف يضمن ألا نفقد سياق المشاريع السابقة، مع منع نشر مواد داخلية حساسة.
+This file makes sure we don't lose context from earlier projects, while
+preventing the publication of sensitive internal material.
 
-بعد تحويل المستودع إلى خاص، راجع واستورد النسخ المناسبة من:
+After turning the repository private, review and import the appropriate
+copies of:
 
-- الخطة التقنية المتكاملة لأتمتة الإدارات.
-- قاموس البيانات القياسي للإدارات.
-- ملفات البيانات التجريبية الصناعية.
-- خطة ربط الإنتاج والتخطيط والمخزون والجودة والصيانة والموارد البشرية والمالية.
-- خطط مشروع أتمتة الموارد البشرية كنموذج أول.
-- قوالب تحويل Excel إلى Web App محلي.
-- قواعد التاريخ والإصدارات وسجل تغييرات المشاريع السابقة.
-- خرائط الـ edge cases الخاصة بملفات Excel الكبيرة والمتغيرة.
-- خطط تشغيل Codex CLI وClaude Code CLI معًا.
-- أي Screenshots أو أمثلة لأنظمة داخلية بعد إزالة البيانات الحساسة أو داخل مستودع خاص فقط.
+- The integrated technical plan for department automation.
+- The standard department data dictionary.
+- Sample industrial test data files.
+- The plan linking production, planning, inventory, quality, maintenance, HR, and finance.
+- The HR automation project plans as a first model.
+- Templates for converting Excel to a local web app.
+- The dating, versioning, and changelog rules from earlier projects.
+- Edge-case maps specific to large and variable Excel files.
+- Plans for running Codex CLI and Claude Code CLI together.
+- Any screenshots or examples of internal systems, only after removing sensitive data or inside a private repository only.
 
-## قاعدة الاستيراد
+## Import rule
 
-قبل رفع أي ملف:
+Before uploading any file:
 
-1. هل يحتوي أسماء شركة أو أنظمة داخلية غير مناسبة للنشر؟
-2. هل يحتوي بيانات أعمال حقيقية؟
-3. هل يحتوي روابط أو أسرار أو جلسات؟
-4. هل المستودع أصبح خاصًا؟
+1. Does it contain a company name or internal system names unsuitable for publication?
+2. Does it contain real business data?
+3. Does it contain URLs, secrets, or sessions?
+4. Has the repository become private?
 
-إذا كانت الإجابة غير آمنة، لا ترفع الملف.
+If any answer is unsafe, do not upload the file.

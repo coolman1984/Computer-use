@@ -1,4 +1,4 @@
-"""اختبارات F-04: مسار الجلسة، عمرها، والتقاط تسجيل الدخول اليدوي."""
+"""F-04 tests: the session path, its age, and capturing a manual sign-in."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def test_capture_login_requires_login_url(tmp_path: Path) -> None:
         )
 
 
-# ---------- اختبار حقيقي بمتصفح مرئي على صفحة محلية ----------
+# ---------- A real test with a visible browser against a local page ----------
 
 pytestmark_playwright = pytest.importorskip("playwright.sync_api")
 
@@ -83,7 +83,7 @@ LOGIN_PAGE_HTML = """<!doctype html><html><body>
 
 @pytest.mark.skipif(
     os.environ.get("SMARTOPS_SKIP_HEADED_TESTS") == "1",
-    reason="بيئة بدون واجهة عرض (headless-only CI) لا تدعم متصفحًا مرئيًا",
+    reason="An environment with no display (headless-only CI) does not support a visible browser",
 )
 def test_capture_login_writes_valid_storage_state(tmp_path: Path) -> None:
     site_dir = tmp_path / "site"

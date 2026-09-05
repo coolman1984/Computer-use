@@ -1,4 +1,4 @@
-"""نماذج المجال. dataclasses بسيطة حتى تبقى النواة خفيفة وسهلة الاختبار."""
+"""Domain models. Plain dataclasses, to keep the core light and easy to test."""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ class RecordingStep:
 
 @dataclass(frozen=True)
 class StepDefinition:
-    """خطوة داخل سير عمل: اسم فريد + المنفّذ المسجّل + معطياته."""
+    """One step inside a workflow: a unique name, the registered executor, and its params."""
 
     name: str
     uses: str

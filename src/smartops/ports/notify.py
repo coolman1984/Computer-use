@@ -1,4 +1,4 @@
-"""عقد الإنذار: أي قناة (واجهة، بريد، ويب هوك) تلتزم بنفس الشكل."""
+"""Alerting contract: every channel (UI, email, webhook) follows the same shape."""
 
 from __future__ import annotations
 

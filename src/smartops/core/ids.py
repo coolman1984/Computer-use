@@ -1,4 +1,4 @@
-"""معرفات قصيرة مرتبة زمنيًا (شبيهة بـ ULID) لتسهيل الفرز والتتبع."""
+"""Short, time-ordered ids (ULID-like) to keep sorting and tracing easy."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _encode(value: int, length: int) -> str:
 
 
 def new_id(prefix: str) -> str:
-    """مثال: run_01JQ8Z4T2M9K7X"""
+    """Example: run_01JQ8Z4T2M9K7X"""
     timestamp = _encode(int(time.time() * 1000), 10)
     randomness = _encode(secrets.randbits(30), 6)
     return f"{prefix}_{timestamp}{randomness}"

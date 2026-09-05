@@ -1,4 +1,4 @@
-"""اختبارات S-02: محوّل Playwright، بطبقتي شبكة ثم DOM، على صفحة محلية فقط."""
+"""S-02 tests: the Playwright adapter, network then DOM layers, against a local page only."""
 
 from __future__ import annotations
 
@@ -93,8 +93,8 @@ def test_network_layer_is_tried_before_dom(tmp_path: Path) -> None:
             filters={
                 "url": f"{base_url}/page.html",
                 "direct_download_url": f"{base_url}/report.csv",
-                # لا يوجد download_selector هنا: لو حاول النظام DOM سيفشل،
-                # فنجاحه هنا دليل أن طبقة الشبكة هي اللي اشتغلت فعلًا.
+                # No download_selector here: if the system fell back to DOM
+                # it would fail, so success here proves the network layer is what actually ran.
             },
         )
         result = _adapter().extract(request)
@@ -180,7 +180,7 @@ def test_selector_not_found_captures_evidence(tmp_path: Path) -> None:
 
     assert not result.ok
     assert result.layer_used is ExtractionLayer.DOM
-    assert result.evidence  # لازم فيه دليل (رسالة + رابط، وربما لقطة شاشة)
+    assert result.evidence  # there must be evidence (a message + URL, and maybe a screenshot)
 
     evidence = adapter.capture_evidence("run_demo")
     assert evidence["run_id"] == "run_demo"

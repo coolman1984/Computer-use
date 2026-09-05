@@ -1,80 +1,80 @@
-# إدارة وكلاء الذكاء الاصطناعي
+# AI Agent Orchestration
 
-## الهدف
+## Goal
 
-تشغيل Codex CLI وClaude Code CLI كعمال خلفيين منظمين، وليس كأدوات مستقلة عشوائية.
+Run Codex CLI and Claude Code CLI as organized background workers, not as random standalone tools.
 
-## مستويات المهمة
+## Task levels
 
-### قراءة فقط
-تحليل السجلات والكود والحوادث بدون تعديل.
+### Read only
+Analyze logs, code, and incidents without modifying anything.
 
-### تجربة
-إنشاء نسخة عمل، تعديلها، وتشغيل الاختبارات.
+### Experiment
+Create a working branch, modify it, and run the tests.
 
-### تنفيذ
-نشر إصلاح نجح في الاختبارات وسمحت به السياسة.
+### Execute
+Deploy a fix that passed the tests and was allowed by policy.
 
-## التصعيد
+## Escalation
 
 ```text
-حل ثابت معروف
+Known fixed solution
 ↓
-وكيل اقتصادي
+Economical agent
 ↓
-Codex تفكير متوسط
+Codex, medium reasoning
 ↓
-Codex تفكير مرتفع
+Codex, high reasoning
 ↓
-Claude أقوى
+Claude, stronger
 ↓
-إنسان
+Human
 ```
 
-يجب أن يكون التصعيد مبنيًا على:
-- نوع المشكلة.
-- المخاطر.
-- عدد المحاولات.
-- تاريخ الحلول.
-- درجة الثقة.
-- تكلفة الوقت والحوسبة.
+Escalation must be based on:
+- The type of problem.
+- The risk.
+- The number of attempts.
+- The history of solutions.
+- The confidence level.
+- The cost in time and compute.
 
-## حزمة السياق للوكيل
+## The context pack for the agent
 
-لا ترسل "حدث خطأ" فقط.
+Never send just "an error occurred."
 
-أرسل:
-- وصف المهمة.
-- سجل التشغيل.
-- الخطوة الفاشلة.
-- لقطة الشاشة.
-- تتبع المتصفح.
-- النسخة الحالية.
-- آخر تغييرات.
-- تشغيلات ناجحة مشابهة.
-- حلول سابقة.
-- الاختبارات المطلوبة.
-- حدود الصلاحيات.
+Send:
+- A description of the task.
+- The run log.
+- The failed step.
+- A screenshot.
+- The browser trace.
+- The current version.
+- The latest changes.
+- Similar successful runs.
+- Past solutions.
+- The tests required.
+- The permission boundaries.
 
-## سجل الوكيل
+## Agent log
 
-لكل تشغيل وكيل:
-- من استدعاه.
-- لماذا.
-- النموذج.
-- مستوى التفكير.
-- الملفات المقروءة.
-- الأوامر.
-- الملفات المعدلة.
-- الاختبارات.
-- النتيجة.
-- زمن التنفيذ.
-- التصعيد التالي إن وجد.
+For every agent run:
+- Who invoked it.
+- Why.
+- The model.
+- The reasoning level.
+- The files read.
+- The commands.
+- The files modified.
+- The tests.
+- The result.
+- The execution time.
+- The next escalation, if any.
 
-## الحماية
+## Safeguards
 
-- لا تعديل مباشر على الإنتاج دون سياسة.
-- لا حذف بيانات.
-- لا تغيير صلاحيات.
-- لا لمس أسرار.
-- أي تعديل يجب أن يكون قابلًا للتراجع.
+- No direct production modification without policy.
+- No data deletion.
+- No permission changes.
+- No touching secrets.
+- Any modification must be reversible.

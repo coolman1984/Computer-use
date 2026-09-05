@@ -1,63 +1,68 @@
-# سياق المشروع
+# Project Context
 
-## لماذا المشروع موجود؟
+## Why does this project exist?
 
-الهدف هو التخلص من العمل اليدوي والبطيء في الوصول لتقارير كثيرة عبر أنظمة ويب متعددة، وتنزيل البيانات الخام، ثم تشغيل مشاريع أتمتة وتحليل مترابطة.
+The goal is to eliminate the slow, manual work of reaching many reports
+across multiple web systems, downloading the raw data, then running
+interconnected automation and analysis projects.
 
-المشروع تطور من فكرة إضافة متصفح إلى منصة تشغيل كاملة للأتمتة والصيانة الرقمية.
+The project grew from the idea of adding a browser into a complete
+operating platform for automation and digital maintenance.
 
-## المشاكل الواقعية التي يجب أن يفهمها أي وكيل
+## Real problems any agent must understand
 
-- هناك أنظمة كثيرة وتابات كثيرة.
-- بعض الصفحات يمكن قراءتها من هيكل الصفحة.
-- بعض الصفحات لا تُظهر مكوناتها برمجيًا.
-- بعض الأنظمة قد تحتاج التعامل بالصورة والرؤية.
-- دقات الشاشات مختلفة.
-- بعض التقارير يمكن الوصول لملفها من طلب الشبكة بدل الضغط اليدوي.
-- بعض الصفحات تفتح نوافذ أو تابات جديدة.
-- جلسات الدخول قد تنتهي.
-- أسماء الملفات والتقارير قد تتغير.
-- ملفات التنزيل قد تكون ناقصة أو قديمة أو مكررة.
-- العملية يجب أن تظل قابلة للمراجعة والتراجع.
+- There are many systems and many tabs.
+- Some pages can be read from the page structure.
+- Some pages do not expose their components programmatically.
+- Some systems may need to be handled through image and vision.
+- Screen resolutions differ.
+- Some reports' files can be reached from a network request instead of a manual click.
+- Some pages open new windows or tabs.
+- Login sessions can expire.
+- File and report names can change.
+- Downloaded files can be incomplete, outdated, or duplicated.
+- The process must remain reviewable and reversible.
 
-## الهدف الكبير
+## The big goal
 
-المنصة تصبح مركزًا واحدًا لإدارة:
+The platform becomes one center for managing:
 
-1. جمع البيانات الخام.
-2. تشغيل أتمتة كل إدارة.
-3. ربط الإدارات والاعتماديات.
-4. مراقبة المواقع والخدمات المصرح بها.
-5. اكتشاف البطء والمشاكل استباقيًا.
-6. تشغيل وكلاء ذكاء اصطناعي للتشخيص والإصلاح.
-7. حفظ تاريخ كل تشغيل وكل تعديل.
-8. التعلم من المشاكل السابقة والحلول الناجحة.
+1. Collecting raw data.
+2. Running each department's automation.
+3. Linking departments and their dependencies.
+4. Monitoring authorized sites and services.
+5. Proactively detecting slowness and problems.
+6. Running AI agents for diagnosis and repair.
+7. Keeping a history of every run and every change.
+8. Learning from past problems and successful fixes.
 
-## فلسفة التنفيذ
+## Execution philosophy
 
-الترتيب الافتراضي لأي مهمة متصفح:
+The default order for any browser task:
 
-1. تنزيل مباشر أو طلب بيانات إن أمكن.
-2. عناصر الصفحة عبر Playwright.
-3. طبقة ذكية للصفحات المتغيرة.
-4. رؤية بصرية.
-5. تحكم واجهة كامل كحل أخير.
+1. Direct download or data request if possible.
+2. Page elements via Playwright.
+3. A smart layer for changing pages.
+4. Visual vision.
+5. Full UI control as a last resort.
 
-لا تستخدم الذكاء الاصطناعي إذا كان الحل الحتمي الثابت يعمل.
+Do not use AI if a deterministic, fixed solution already works.
 
-## المستخدم النهائي
+## The end user
 
-المستخدم النهائي غير تقني. الويب آب يجب أن يكون غرفة القيادة الأساسية، وليس الطرفية أو ملفات الكود.
+The end user is non-technical. The web app must be the primary operations
+center, not the terminal or code files.
 
-## الذكاء الاصطناعي
+## AI
 
-Codex CLI وClaude Code CLI يعملان كعمال خلفيين تحت مدير وكلاء مركزي.
+Codex CLI and Claude Code CLI work as background workers under a central agent manager.
 
-الوكلاء لا يملكون صلاحية مطلقة. توجد مستويات صلاحيات واختبارات وتراجع واعتماد بشري للعمليات الحساسة.
+Agents hold no absolute authority. There are permission levels, testing,
+rollback, and human approval for sensitive operations.
 
-## قيود الأمان
+## Security constraints
 
-- لا تجاوز لسياسات الشركة أو صلاحيات المستخدم.
-- لا تخزين أسرار في المستودع.
-- لا رفع بيانات خام حساسة إلى مستودع عام.
-- أي إصلاح حساس يحتاج موافقة.
+- No bypassing company policy or user permissions.
+- No storing secrets in the repository.
+- No uploading sensitive raw data to a public repository.
+- Any sensitive fix requires approval.

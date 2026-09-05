@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Systems — SmartOps</title>
+<link rel="stylesheet" href="static/style.css" />
+</head>
+<body data-page="systems" data-title="Systems">
+<header class="top"></header>
+<main>
+  <div id="error"></div>
+
+  <section class="panel">
+    <h2>What a system is</h2>
+    <p class="muted">A system is one target site plus the reports you collect from it. Everything else in SmartOps keys off a system: you sign in to a system, you record a workflow against a system, and every run and file belongs to one. Systems are defined in YAML files, never in this interface, so that no internal URL or selector is ever stored in the app database.</p>
+    <p class="muted">SmartOps reads them from <code id="systems-dir">the configured systems directory</code>. Point <code>SMARTOPS_SYSTEMS_DIR</code> at a private folder outside the repository, put one <code>.yaml</code> file per system in it, and restart the server.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Defined systems</h2>
+    <p class="muted">Sign-in state is checked live. A system must be connected before its reports can be collected or recorded.</p>
+    <table>
+      <thead>
+        <tr><th>System</th><th>Sign-in mode</th><th>Status</th><th>Reports</th></tr>
+      </thead>
+      <tbody id="systems-body"><tr><td colspan="4" class="empty">Loading systems…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>Reports</h2>
+    <p class="muted">Collect a report now to test it end to end. A collection run downloads the file, validates it, and opens an incident automatically if anything fails.</p>
+    <table>
+      <thead>
+        <tr><th>System</th><th>Report</th><th>Schedule</th><th></th></tr>
+      </thead>
+      <tbody id="reports-body"><tr><td colspan="4" class="empty">Loading reports…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="static/app.js"></script>
+<script src="static/systems.js"></script>
+</body>
+</html>

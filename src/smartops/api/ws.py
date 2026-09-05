@@ -1,7 +1,8 @@
-"""بث حي للأحداث عبر WebSocket: /ws/events[?run_id=...] (انظر events/bus.py).
+"""Live event streaming over WebSocket: /ws/events[?run_id=...] (see events/bus.py).
 
-المسار يشترك في services.bus وقت الاتصال وينقل كل حدث جديد فورًا للعميل،
-ويلغي الاشتراك تلقائيًا عند قطع الاتصال حتى لا يتسرّب مستمع بلا فائدة.
+The route subscribes to services.bus on connect and forwards every new event
+to the client immediately, unsubscribing automatically on disconnect so no
+useless listener leaks.
 """
 
 from __future__ import annotations
@@ -16,10 +17,11 @@ from ..services import Services
 
 
 def create_ws_router(get_services: Callable[[], Services]) -> APIRouter:
-    """يبني راوتر /ws/events مربوطًا بمزوّد خدمات معيّن.
+    """Build the /ws/events router bound to a specific services provider.
 
-    مزوّد منفصل (بدل استيراد api.app.get_services مباشرة) لتفادي استيراد
-    دائري بين app.py وws.py، ولتسهيل الاختبار بخدمات معزولة.
+    A separate provider (instead of importing api.app.get_services directly)
+    avoids a circular import between app.py and ws.py, and makes testing with
+    isolated services easier.
     """
     router = APIRouter()
 
@@ -32,7 +34,7 @@ def create_ws_router(get_services: Callable[[], Services]) -> APIRouter:
         queue: asyncio.Queue[Event] = asyncio.Queue()
 
         def on_event(event: Event) -> None:
-            # ينادى من أي خيط متزامن (المحرك/العامل)؛ ننقله بأمان لحلقة asyncio.
+            # Called from any synchronous thread (engine/worker); hand it safely to the asyncio loop.
             loop.call_soon_threadsafe(queue.put_nowait, event)
 
         svc = get_services()

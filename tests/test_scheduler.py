@@ -1,4 +1,4 @@
-"""اختبارات F-08: is_due النقي، وTick يخلق تشغيلات بلا تكرار أو تعليق."""
+"""F-08 tests: the pure is_due logic, and that tick() creates runs without duplicating or hanging."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from smartops.workflows.profiles import ScheduleProfile
 UTC = timezone.utc
 
 
-# ---------- is_due: اختبارات نقية بلا أي I/O ----------
+# ---------- is_due: pure tests with no I/O ----------
 
 
 def test_every_seconds_due_when_never_run() -> None:
@@ -37,9 +37,10 @@ def test_every_seconds_due_after_interval() -> None:
 
 
 
-# daily_at يُفسَّر بتوقيت الجهاز المحلي (astimezone()). نترك بايثون يربط
-# كل تاريخ بالـ offset المحلي الصحيح لذلك اليوم؛ نسخ tzinfo من "اليوم" فقط
-# يثبّت Offset التوقيت الصيفي وقد يغيّر الساعة في تاريخ شتوي على Windows.
+# daily_at is interpreted in the machine's local time (astimezone()). We let
+# Python attach the correct local offset for that specific day; copying
+# tzinfo from "today" alone would freeze the DST offset and could shift the
+# hour on a winter date on Windows.
 def _local_datetime(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetime:
     return datetime(year, month, day, hour, minute).astimezone()
 
@@ -75,20 +76,20 @@ def test_inactive_schedule_never_due() -> None:
     assert is_due(schedule, None, datetime(2026, 1, 1, tzinfo=UTC)) is False
 
 
-# ---------- Scheduler.tick: تكامل مع services حقيقية (ساعة مزيّفة) ----------
+# ---------- Scheduler.tick: integration with real services (a fake clock) ----------
 
 SYSTEM_YAML = """
 key: erp_demo
-name: نظام تجريبي
+name: Demo system
 reports:
   - key: hourly_report
-    title: تقرير كل ساعة
+    title: Hourly report
     url: "https://intranet.example.local/reports/hourly"
     download_selector: "#dl"
     schedule:
       every_seconds: 3600
   - key: no_schedule_report
-    title: تقرير بلا جدولة
+    title: Report with no schedule
     url: "https://intranet.example.local/reports/none"
     download_selector: "#dl"
 """
@@ -123,7 +124,7 @@ def test_tick_skips_pair_with_non_terminal_run(scheduled_services, clock) -> Non
     scheduler = Scheduler(scheduled_services, clock=clock)
     first = scheduler.tick()
     assert len(first) == 1
-    # التشغيل لسه queued (مفيش execute) — تِك تاني ميجبش حاجة.
+    # The run is still queued (execute was never called) — a second tick should not create anything.
     assert scheduled_services.runs.get(first[0].id).status is RunStatus.QUEUED
     assert scheduler.tick() == []
 
@@ -132,7 +133,7 @@ def test_tick_creates_again_after_run_finished_and_interval_passed(scheduled_ser
     scheduler = Scheduler(scheduled_services, clock=clock)
     first = scheduler.tick()
     run = first[0]
-    # نخلّص التشغيل يدويًا (بدل تنفيذه فعليًا) عشان نختبر منطق الجدولة بمعزل.
+    # Finish the run manually (instead of actually executing it) to test the scheduling logic in isolation.
     run.status = RunStatus.SUCCEEDED
     scheduled_services.runs.update(run)
 
@@ -148,9 +149,9 @@ def test_broken_profile_does_not_stop_others(scheduled_services, clock, monkeypa
 
     def _boom(system_key, report_key):
         if report_key == "hourly_report":
-            raise RuntimeError("عطل مصطنع")
+            raise RuntimeError("Artificial fault")
         return original(system_key, report_key)
 
     monkeypatch.setattr(scheduled_services.systems, "run_params", _boom)
     created = scheduler.tick()
-    assert created == []  # الزوج التاني مالوش جدولة أصلًا، فمفيش تشغيلات، لكن مفيش استثناء طلع برا tick()
+    assert created == []  # the second pair has no schedule at all, so no runs — but no exception escapes tick() either

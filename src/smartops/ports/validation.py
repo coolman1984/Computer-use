@@ -1,4 +1,4 @@
-"""عقد التحقق من الملفات: التنزيل ليس نجاحًا حتى يثبت أن الملف سليم."""
+"""File validation contract: a download is not a success until the file proves valid."""
 
 from __future__ import annotations
 

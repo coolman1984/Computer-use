@@ -1,4 +1,4 @@
-"""اختبارات S-01: مدقق الملفات المحلي (CSV/Excel) بلا اعتماديات جديدة."""
+"""S-01 tests: the local file validator (CSV/Excel), no new dependencies."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ _XLSX_WORKBOOK_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 
 
 def _make_xlsx(path: Path, rows: list[list[str]]) -> None:
-    """يبني ملف xlsx صالح يدويًا (بلا openpyxl) بخلايا نصية مضمّنة (inlineStr)."""
+    """Builds a valid xlsx file by hand (no openpyxl), with inline text cells (inlineStr)."""
     ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
     row_xml_parts = []
     for r_idx, row in enumerate(rows, start=1):
@@ -101,7 +101,7 @@ def test_empty_file_fails_min_size(tmp_path: Path) -> None:
     report = LocalFileValidator().validate(path, ValidationRules(min_size_bytes=1))
 
     assert not report.passed
-    assert any("صغير" in failure for failure in report.failures)
+    assert any("too small" in failure for failure in report.failures)
 
 
 def test_wrong_extension_is_rejected(tmp_path: Path) -> None:
@@ -113,7 +113,7 @@ def test_wrong_extension_is_rejected(tmp_path: Path) -> None:
     )
 
     assert not report.passed
-    assert any("امتداد" in failure for failure in report.failures)
+    assert any("Unexpected extension" in failure for failure in report.failures)
 
 
 def test_missing_required_column_fails(tmp_path: Path) -> None:
@@ -135,23 +135,23 @@ def test_below_min_rows_fails(tmp_path: Path) -> None:
     report = LocalFileValidator().validate(path, ValidationRules(min_rows=5))
 
     assert not report.passed
-    assert any("عدد الصفوف" in failure for failure in report.failures)
+    assert any("Row count" in failure for failure in report.failures)
 
 
 def test_stale_file_fails_max_age(tmp_path: Path) -> None:
     path = tmp_path / "report.csv"
     path.write_text("col_a\n1\n", encoding="utf-8")
 
-    fixed_now = path.stat().st_mtime + 3 * 3600  # الآن بعد 3 ساعات من وقت التعديل
+    fixed_now = path.stat().st_mtime + 3 * 3600  # "now" is 3 hours after the modification time
     validator = LocalFileValidator(now=lambda: fixed_now)
     report = validator.validate(path, ValidationRules(max_age_hours=1.0))
 
     assert not report.passed
-    assert any("قديم" in failure for failure in report.failures)
+    assert any("too old" in failure for failure in report.failures)
 
 
 class _FakeFilesRepo:
-    """يحاكي RunRepository.find_by_hash دون الحاجة لقاعدة بيانات حقيقية."""
+    """Simulates RunRepository.find_by_hash without needing a real database."""
 
     def __init__(self, existing: list) -> None:
         self._existing = existing
@@ -174,20 +174,20 @@ def test_duplicate_hash_is_rejected(tmp_path: Path) -> None:
 
     import hashlib
 
-    # بصمة المدقق للبايتات الفعلية. write_text يترجم LF إلى CRLF على Windows،
-    # لذلك حساب البصمة من النص الأصلي يجعل الاختبار يختبر بصمة مختلفة.
+    # The validator hashes the actual bytes. write_text translates LF to CRLF
+    # on Windows, so hashing the original string would test a different hash.
     sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
     repo = _FakeFilesRepo([_Existing("file_old", sha256, str(tmp_path / "old_report.csv"))])
 
     report = LocalFileValidator(files_repo=repo).validate(path, ValidationRules())
 
     assert not report.passed
-    assert any("مكرر" in failure for failure in report.failures)
+    assert any("duplicate hash" in failure for failure in report.failures)
     assert report.details["duplicate_of"] == "file_old"
 
 
 def test_same_file_is_not_flagged_as_its_own_duplicate(tmp_path: Path) -> None:
-    """لو الملف نفسه (بنفس المسار) موجود في المستودع، ده مش تكرار."""
+    """If the same file (same path) is already in the repository, that is not a duplicate."""
     content = "col_a\n1\n"
     path = tmp_path / "report.csv"
     path.write_text(content, encoding="utf-8")
@@ -205,7 +205,7 @@ def test_same_file_is_not_flagged_as_its_own_duplicate(tmp_path: Path) -> None:
 def test_missing_file_fails_clearly(tmp_path: Path) -> None:
     report = LocalFileValidator().validate(tmp_path / "ghost.csv", ValidationRules())
     assert not report.passed
-    assert report.failures == ["الملف غير موجود"]
+    assert report.failures == ["File does not exist"]
 
 
 def test_bad_xlsx_reports_clear_failure(tmp_path: Path) -> None:

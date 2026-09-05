@@ -1,5 +1,5 @@
-"""اختبارات F-03: الجلسات المحفوظة، كشف انتهاء الجلسة، والدليل المفتاح
-بـ run_id بدل نظام:تقرير — كله على صفحات محلية فقط، بلا أي موقع حقيقي.
+"""F-03 tests: saved sessions, session-expiry detection, and evidence keyed by
+run_id instead of system:report — all against local pages only, never a real site.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ DASHBOARD_PAGE_HTML = """<!doctype html><html><body>
 </body></html>"""
 
 NO_DASHBOARD_PAGE_HTML = """<!doctype html><html><body>
-<p>لا يوجد لوحة تحكم هنا</p>
+<p>No dashboard here</p>
 </body></html>"""
 
 
@@ -86,7 +86,7 @@ def test_login_form_present_means_session_expired(tmp_path: Path) -> None:
 
     assert not result.ok
     assert result.auth_required is True
-    assert "login" in result.message.lower() or "الجلسة" in result.message
+    assert "login" in result.message.lower() or "session" in result.message.lower()
 
 
 def test_missing_logged_in_marker_means_session_expired(tmp_path: Path) -> None:
@@ -180,8 +180,8 @@ def test_concurrent_runs_do_not_mix_evidence(tmp_path: Path) -> None:
 
 def test_direct_download_url_serving_html_falls_back_to_dom(tmp_path: Path) -> None:
     site_dir = _site(tmp_path, "site6", DASHBOARD_PAGE_HTML)
-    # لا يوجد ملف .csv فعلي على هذا الرابط، فيرد السيرفر بصفحة HTML (الصفحة
-    # نفسها) بدل الملف المطلوب — بالظبط زي تحويلة لصفحة الدخول.
+    # No actual .csv file exists at this URL, so the server responds with the
+    # HTML page itself instead of the requested file — exactly like a redirect to a login page.
     with _local_server(site_dir) as base_url:
         request = ExtractionRequest(
             system="erp",

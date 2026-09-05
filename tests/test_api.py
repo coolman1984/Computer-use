@@ -50,17 +50,17 @@ def test_unknown_run_returns_404(client) -> None:
     assert client.get("/api/runs/run_missing").status_code == 404
 
 
-# ---------- اختبارات F-11: /api/systems، /api/alerts، وجمع فوري ----------
+# ---------- F-11 tests: /api/systems, /api/alerts, and on-demand collection ----------
 
 SYSTEM_YAML = """
 key: erp_demo
-name: نظام تجريبي
+name: Demo system
 auth:
   mode: session
   login_url: "https://intranet.example.local/login"
 reports:
   - key: daily_sales
-    title: تقرير المبيعات
+    title: Daily sales report
     url: "https://intranet.example.local/reports/daily-sales"
     download_selector: "#dl"
     schedule:

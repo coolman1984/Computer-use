@@ -1,4 +1,4 @@
-"""تصنيف الأخطاء: أساس قرارات إعادة المحاولة والتصعيد وفتح الحوادث."""
+"""Error classification: the basis for retry, escalation, and incident decisions."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from typing import Any
 
 
 class ErrorClass(StrEnum):
-    TRANSIENT = "transient"        # عطل مؤقت: شبكة، بطء، انقطاع
-    RATE_LIMIT = "rate_limit"      # الموقع يطلب تهدئة
-    AUTH = "auth"                  # جلسة منتهية أو صلاحية ناقصة
-    TARGET_NOT_FOUND = "target_not_found"  # عنصر/صفحة/تقرير غير موجود
-    DATA_QUALITY = "data_quality"  # الملف وصل لكنه غير صالح
-    PERMANENT = "permanent"        # خطأ في التعريف أو المنطق، الإعادة بلا فائدة
-    INTERNAL = "internal"          # خطأ غير متوقع داخل المنصة
+    TRANSIENT = "transient"        # temporary fault: network, slowness, dropout
+    RATE_LIMIT = "rate_limit"      # the site is asking us to slow down
+    AUTH = "auth"                  # expired session or missing permission
+    TARGET_NOT_FOUND = "target_not_found"  # element/page/report does not exist
+    DATA_QUALITY = "data_quality"  # the file arrived but is not valid
+    PERMANENT = "permanent"        # definition or logic error, retrying is pointless
+    INTERNAL = "internal"          # unexpected error inside the platform
 
 
 RETRYABLE_CLASSES = frozenset(
@@ -22,7 +22,7 @@ RETRYABLE_CLASSES = frozenset(
 
 
 class SmartOpsError(Exception):
-    """خطأ معروف التصنيف داخل المنصة."""
+    """An error with a known classification inside the platform."""
 
     error_class: ErrorClass = ErrorClass.INTERNAL
 
@@ -79,11 +79,11 @@ class PermanentError(SmartOpsError):
 
 
 class ConfigurationError(PermanentError):
-    """تعريف ناقص أو غير صحيح: لا تعيد المحاولة، أصلح التعريف."""
+    """Missing or invalid definition: do not retry, fix the definition."""
 
 
 class ConcurrencyError(TransientError):
-    """التشغيل محجوز بواسطة عامل آخر."""
+    """The run is locked by another worker."""
 
 
 _BUILTIN_MAP: dict[type[BaseException], ErrorClass] = {
@@ -97,7 +97,7 @@ _BUILTIN_MAP: dict[type[BaseException], ErrorClass] = {
 
 
 def wrap_error(exc: BaseException) -> SmartOpsError:
-    """يحوّل أي استثناء إلى خطأ مصنّف حتى لا يضيع سبب الفشل."""
+    """Convert any exception into a classified error so the cause is never lost."""
     if isinstance(exc, SmartOpsError):
         return exc
     error_class = ErrorClass.INTERNAL

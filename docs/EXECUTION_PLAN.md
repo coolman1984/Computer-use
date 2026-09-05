@@ -1,144 +1,171 @@
-# خطة التنفيذ الكبيرة (مرحلتان: تخطيط ثم تنفيذ)
+# The Big Execution Plan (Two Phases: Plan Then Execute)
 
-**حالة Recording Center:** نُفذت نواة التسجيل والواجهة ودورة الحياة والمراجعة
-والاستعادة ومسودة الأتمتة محليًا؛ يبقى اختبار G-MES الإنتاجي التفاعلي قبل اعتمادها اليومي.
+**Recording Center status:** the recording core, UI, lifecycle, review,
+recovery, and automation draft are implemented locally; what remains is an
+interactive production G-MES test before daily adoption.
 
-هذه الوثيقة هي المرجع الأول قبل أي شغل جديد. الهدف منها ثلاث حاجات:
-كيف نبني، مين يبني كل جزء، وإزاي نصرف أقل توكنز ممكن من غير ما نضحّي بالجودة.
-
----
-
-## 1. الخلاصة في خمس نقاط
-
-1. **SmartOps نظام تشغيل للأتمتة**، مش مجموعة سكربتات: يعرف المفروض يحصل إيه، وإمتى، وإيه الطبيعي، وإيه غير الطبيعي، وإزاي يتعافى.
-2. **القلب اتبنى بالفعل**: إعدادات، قاعدة بيانات، سجل أحداث، محرك سير عمل قابل للاستكمال، عقود واضحة، وواجهة HTTP.
-3. **الباقي عبارة عن "ملء فراغات" داخل عقود جاهزة** (متصفح، تحقق من ملفات، وكلاء، إنذار، واجهة).
-4. **تقسيم العمل**: القرارات المعمارية والعقود والحالات المعقدة → Opus 5 High. التنفيذ المتكرر داخل عقد جاهز → Sonnet 5 Medium.
-5. **معيار التوقف دائمًا اختبار أخضر**، مش رأي أو تقرير.
+This document is the primary reference before any new work. Its purpose is
+three things: how we build, who builds each part, and how to spend the
+fewest tokens possible without sacrificing quality.
 
 ---
 
-## 2. التقنيات المعتمدة (وليه)
+## 1. Summary in five points
 
-| التقنية | دورها | ليه هي بالذات |
+1. **SmartOps is an operating system for automation**, not a collection of
+   scripts: it knows what should happen, when, what is normal, what is not,
+   and how to recover.
+2. **The core is already built**: settings, a database, an event log, a
+   resumable workflow engine, clear contracts, and an HTTP interface.
+3. **What remains is "filling in the blanks"** inside ready-made contracts
+   (browser, file validation, agents, alerting, UI).
+4. **Division of labor**: architectural decisions, contracts, and complex
+   cases → Opus 5 High. Repetitive implementation inside a ready contract →
+   Sonnet 5 Medium.
+5. **The stopping criterion is always a green test**, not an opinion or a report.
+
+---
+
+## 2. Adopted technologies (and why)
+
+| Technology | Role | Why this one specifically |
 |---|---|---|
-| Python 3.11 | لغة المنصة | أقوى تكامل مع الملفات، المتصفح، التحليل، والوكلاء |
-| FastAPI | الخدمة المحلية وواجهة الويب | سريعة، بسيطة، وتوثيق تلقائي للواجهة |
-| WebSocket | تحديث مباشر + الشات الجانبي | المستخدم يشوف التشغيل لحظة بلحظة |
-| SQLite | الحالة التشغيلية والسجلات | ملف واحد، بلا خادم، يشتغل محلي على ويندوز |
-| DuckDB + Parquet | التحليل والتاريخ الطويل | تحليل سريع لملفات كبيرة بدون قاعدة بيانات ضخمة |
-| Playwright | محرك المتصفح | تحكم موثوق في التابات والجلسات والتنزيلات والتتبع |
-| Codex CLI / Claude Code CLI | الوكلاء الخلفيون | تشخيص وإصلاح داخل سياسة وصلاحيات |
-| OpenTelemetry (لاحقًا) | القياس والتتبع | لما يكبر النظام نحتاج قياس موحد |
+| Python 3.11 | The platform language | Strongest integration with files, the browser, analysis, and agents |
+| FastAPI | The local service and web interface | Fast, simple, and automatic interface documentation |
+| WebSocket | Live updates + the side chat | The user watches the run happen moment by moment |
+| SQLite | Operational state and logs | One file, no server, runs locally on Windows |
+| DuckDB + Parquet | Analytics and long-term history | Fast analysis of large files without a heavy database |
+| Playwright | The browser engine | Reliable control of tabs, sessions, downloads, and tracing |
+| Codex CLI / Claude Code CLI | Background agents | Diagnosis and repair within policy and permissions |
+| OpenTelemetry (later) | Metrics and tracing | Once the system grows we need unified measurement |
 
-**قاعدة ثابتة:** أي مكوّن ذكي أو بصري (Vision، Camoufox، أدوات خارجية) يدخل كـ"محوّل اختياري" خلف عقد، مش كأساس للنظام. لو اتشال، النواة تفضل شغالة.
+**A fixed rule:** any smart or visual component (Vision, Camoufox, external
+tools) enters as an "optional adapter" behind a contract, never as the
+system's foundation. If it were removed, the core keeps working.
 
 ---
 
-## 3. سلم الاستخراج (أرخص وأثبت طريقة أولًا)
+## 3. The extraction ladder (cheapest and most reliable method first)
 
 ```
-1) شبكة/تنزيل مباشر  →  2) DOM عبر Playwright  →  3) إصلاح ذاتي للمسارات
-   →  4) رؤية (صور)  →  5) تحكم سطح المكتب
+1) Network/direct download  →  2) DOM via Playwright  →  3) Self-healing paths
+   →  4) Vision (images)  →  5) Desktop control
 ```
-ما ننزلش لطبقة أغلى إلا لما الأرخص تفشل. ونفس المنطق بالظبط بنطبقه على اختيار النموذج في الجزء الجاي.
+We never drop to a more expensive layer unless the cheaper one fails. We
+apply the exact same logic to choosing a model in the next section.
 
 ---
 
-## 4. تقسيم العمل بين النموذجين
+## 4. Division of labor between the two models
 
-### مرحلة "خطّط" — Opus 5 High (أنا)
-- المعمارية وحدود المكونات.
-- العقود (الواجهات) وشكل البيانات وقاعدة البيانات.
-- محرك سير العمل، القفل، الاستكمال، تصنيف الأخطاء، سياسة إعادة المحاولة.
-- سياسة التصعيد والأمان والصلاحيات.
-- كتابة الاختبارات المرجعية اللي تحدد "الصح".
-- مراجعة أي شغل يمس عقدًا أو سكيمة.
+### The "plan" phase — Opus 5 High (me)
+- Architecture and component boundaries.
+- Contracts (interfaces), data shapes, and the database.
+- The workflow engine, locking, resumption, error classification, retry policy.
+- Escalation, security, and permission policy.
+- Writing the reference tests that define "correct."
+- Reviewing any work that touches a contract or schema.
 
-### مرحلة "نفّذ" — Sonnet 5 Medium
-- تنفيذ محوّل خلف عقد موجود (Playwright، مدقق ملفات، مرسل إنذار).
-- شاشات الواجهة وربطها بنقاط API جاهزة.
-- تعريفات الأنظمة والتقارير في ملفات YAML.
-- اختبارات إضافية، تنظيف، توثيق، رسائل خطأ.
-- إصلاحات صغيرة محددة الأثر.
+### The "execute" phase — Sonnet 5 Medium
+- Implementing an adapter behind an existing contract (Playwright, a file
+  validator, an alert sender).
+- UI screens and wiring them to ready API endpoints.
+- System and report definitions in YAML files.
+- Additional tests, cleanup, documentation, error messages.
+- Small, scoped fixes.
 
-### جدول القرار السريع
+### Quick decision table
 
-| السؤال | الإجابة | النموذج |
+| Question | Answer | Model |
 |---|---|---|
-| هل المهمة تغيّر عقدًا أو جدولًا في قاعدة البيانات؟ | نعم | Opus High |
-| هل فيها حالة تزامن/استكمال/فشل جزئي جديدة؟ | نعم | Opus High |
-| هل فيها قرار أمان أو صلاحية أو تصعيد؟ | نعم | Opus High |
-| هل العقد موجود والاختبار مكتوب والمطلوب "املأ الجسم"؟ | نعم | Sonnet Medium |
-| هل هي شاشة/ربط/تعريف/تنظيف؟ | نعم | Sonnet Medium |
-| فشل Sonnet مرتين على نفس المهمة؟ | — | صعّد لـ Opus High |
+| Does the task change a contract or a database table? | Yes | Opus High |
+| Is there a new concurrency/resumption/partial-failure case? | Yes | Opus High |
+| Is there a security, permission, or escalation decision? | Yes | Opus High |
+| Does the contract exist, is the test written, and it's "fill in the body"? | Yes | Sonnet Medium |
+| Is it a screen/wiring/definition/cleanup? | Yes | Sonnet Medium |
+| Did Sonnet fail twice on the same task? | — | Escalate to Opus High |
 
 ---
 
-## 5. المراحل والمخرجات
+## 5. Phases and deliverables
 
-| المرحلة | المخرج | المسؤول | معيار القبول |
+| Phase | Deliverable | Owner | Acceptance criterion |
 |---|---|---|---|
-| P0 — التأسيس | توثيق ورؤية وقواعد | تم ✅ | الوثائق موجودة |
-| **P1 — النواة** | إعدادات، SQLite + ترحيلات، سجل أحداث، محرك سير عمل قابل للاستكمال، عقود ports، واجهة HTTP | **Opus (تم ✅)** | `pytest` أخضر (18 اختبار) |
-| **P2 — المحوّلات** | مدقق ملفات، محوّل Playwright، عامل تشغيل وجدولة، أرشفة Parquet/DuckDB، تعريفات الأنظمة | **Sonnet (تم ✅)** | حزم S-01..S-06 خضراء (97 اختبارًا) |
-| **P3 — الويب آب** | لوحة، تشغيلات، أحداث، حوادث، بث حي | **Sonnet (تم ✅)** | الشاشات تعمل فعليًا على API الحالي (اختبار Playwright حقيقي) |
-| **P4 — مدير الوكلاء** | تشغيل Codex/Claude، وضع تحليل فقط، سجل كامل | **العقد: Opus — التنفيذ: Sonnet (تم ✅)** | تشغيل وكيل بوضع تحليل فقط لا يكتب أي ملف (مُثبَت باختبار) |
-| P5 — الإنذار المبكر | خطوط أساس، كشف تدهور، مستويات إنذار | المنطق: Opus — القواعد: Sonnet | **جزئي ✅ (F-07):** إنذار بطء بعتبات ثابتة يشتغل فعليًا. المتبقي: خطوط أساس ديناميكية وكشف اتجاه/تدهور تدريجي |
-| P6 — الإصلاح الذاتي | حلول معروفة، Sandbox، اختبار، رجوع | Opus | لا نشر بدون اختبار ناجح |
-| P7 — الرؤية | محوّل صور بإحداثيات نسبية | العقد: Opus — التنفيذ: Sonnet | حالة صعبة واحدة تنجح |
-| P8 — ربط الإدارات | جراف اعتماديات وتشغيل متسلسل | Opus | تأثير عطل يظهر على العمليات التابعة |
+| P0 — Foundation | Documentation, vision, and rules | Done ✅ | The docs exist |
+| **P1 — Core** | Settings, SQLite + migrations, event log, resumable workflow engine, port contracts, HTTP interface | **Opus (done ✅)** | `pytest` is green (18 tests) |
+| **P2 — Adapters** | File validator, Playwright adapter, run worker and scheduling, Parquet/DuckDB archiving, system definitions | **Sonnet (done ✅)** | Packets S-01..S-06 are green (97 tests) |
+| **P3 — The web app** | Dashboard, runs, events, incidents, live streaming | **Sonnet (done ✅)** | The screens actually work against the current API (a real Playwright test) |
+| **P4 — Agent manager** | Running Codex/Claude, analysis-only mode, a full log | **Contract: Opus — Execution: Sonnet (done ✅)** | Running an agent in analyze-only mode writes no file (proven by a test) |
+| P5 — Early warning | Baselines, degradation detection, alert levels | Logic: Opus — Rules: Sonnet | **Partial ✅ (F-07):** slowness alerting with fixed thresholds actually works. Remaining: dynamic baselines and gradual trend/degradation detection |
+| P6 — Self-healing | Known fixes, sandbox, testing, rollback | Opus | No deployment without a successful test |
+| P7 — Vision | An image adapter with relative coordinates | Contract: Opus — Execution: Sonnet | One difficult case succeeds |
+| P8 — Linking departments | A dependency graph and chained execution | Opus | A failure's impact shows up on dependent processes |
 
-**النطاق التجريبي المستهدف:** 3 أنظمة، 5 تقارير، مشروع أتمتة واحد، إنذار تأخير واحد، حادثة واحدة كاملة، ووكيل في وضع تحليل فقط. **هذا النطاق مكتمل الآن (P1-P4 تمت).**
+**Target pilot scope:** 3 systems, 5 reports, one automation project, one
+lateness alert, one complete incident, and an agent in analysis-only mode.
+**This scope is now complete (P1-P4 done).**
 
-**متبقٍّ من P4 عمدًا:** وضعا التجربة (Experiment) والتنفيذ (Execute) — الحزمة الحالية تثبت فقط أن وضع التحليل لا يكتب أي ملف. تفعيل الوضعين الآخرين قرار أمان (Sandbox + اختبار + موافقة بشرية) يحتاج تصميم Opus قبل أي تنفيذ.
+**Deliberately left out of P4:** Experiment and Execute modes — the current
+packet only proves that analyze mode writes no file. Enabling the other two
+modes is a security decision (sandbox + testing + human approval) that
+needs Opus design before any implementation.
 
-**قرار التركيب (تم ✅):** كل المحوّلات الآمنة والمحلية (مدقق الملفات، محرك المتصفح،
-السجل المحلي، الأرشيف التحليلي، سجل الأنظمة) مركّبة الآن افتراضيًا في `Services` —
-`collect.report` يعمل حقيقيًا بلا أي محوّل وهمي. وكيل الذكاء الاصطناعي مطفأ افتراضيًا
-ولا يُفعَّل إلا صراحةً بوضع `read_only` (D018، D019). التفاصيل في `docs/DECISION_LOG.md`
-واختبارات `tests/test_services_wiring.py`.
+**The wiring decision (done ✅):** every safe, local adapter (the file
+validator, browser engine, local log, analytical archive, system registry)
+is now wired up by default in `Services` — `collect.report` actually works
+with no fake adapter. The AI agent is off by default and is only enabled
+explicitly in `read_only` mode (D018, D019). Details in
+`docs/DECISION_LOG.md` and the tests in `tests/test_services_wiring.py`.
 
-**حزمة F-01..F-12 (تم ✅):** جلسات دخول محفوظة وكشف انتهاء جلسة (D020)، أدلة
-فشل على القرص بمفتاح run_id (D021)، تعريفات أنظمة بمصادقة وجدولة، جدولة
-تلقائية داخل العامل الخلفي (D022)، إنذار بطء بعتبات ثابتة (F-07)، واجهة سطر
-أوامر (`python -m smartops`)، ونقاط API وويب لعرض حالة الجلسات والجمع الفوري.
-راجع `docs/FINISH_PACKET_SONNET.md` للتفاصيل الكاملة. **لم يُشغَّل بعد ضد نظام
-إنتاج حقيقي** — هذا هو المتبقي الفعلي قبل توسيع النطاق.
-
----
-
-## 6. سياسة توفير التوكنز (إلزامية)
-
-1. **العقد قبل الكود**: Opus يكتب الواجهة + الاختبار، وSonnet يكتب الجسم فقط. مفيش استكشاف عشوائي.
-2. **مهمة معلّبة**: كل مهمة في `AGENT_TASK_PACKETS.md` فيها بالظبط: الملفات المسموح قراءتها، العقد، وأمر اختبار واحد. ممنوع قراءة المستودع كله.
-3. **ممنوع المسح الشامل**: لا قراءة كل الوثائق، ولا بحث عام. الحزمة فيها السياق الكافي.
-4. **ملفات صغيرة بمسؤولية واحدة**: كل ما الملف أصغر، كل ما السياق المطلوب أقل.
-5. **تجميع المهام المتقاربة في جلسة واحدة** (نفس الوحدة) لاستغلال ذاكرة الجلسة بدل إعادة الشرح.
-6. **تعديل موضعي لا إعادة كتابة**: ممنوع إعادة توليد ملف كامل لتغيير سطر.
-7. **الاختبار هو نقطة التوقف**: أول ما يخضر، نقف. لا تقارير طويلة ولا شروحات زائدة.
-8. **التصعيد بشروط مكتوبة فقط** (الجدول فوق)، مش بالحس.
-9. **الوثائق تتحدث بإضافة سطر**، لا بإعادة صياغة صفحات.
+**The F-01..F-12 packet (done ✅):** saved login sessions and session-expiry
+detection (D020), failure evidence on disk keyed by run_id (D021), system
+definitions with authentication and scheduling, automatic scheduling inside
+the background worker (D022), slowness alerting with fixed thresholds
+(F-07), a command-line interface (`python -m smartops`), and API/web
+endpoints to show session status and trigger on-demand collection. See
+`docs/FINISH_PACKET_SONNET.md` for full details. **Not yet run against a
+real production system** — that is the actual remaining step before
+expanding scope.
 
 ---
 
-## 7. تعريف "تم"
+## 6. Token-saving policy (mandatory)
 
-- الاختبارات خضراء.
-- كل خطوة مهمة بتسجل حدث في السجل.
-- أي تنزيل متحقق منه قبل اعتباره ناجحًا.
-- أي فشل بيفتح حادثة بأدلة.
-- مفيش أسرار ولا بيانات شركة في المستودع.
-- التغيير موثق في سطر واحد في `DECISION_LOG.md` لو مسّ قرارًا معماريًا.
+1. **Contract before code**: Opus writes the interface + the test, and
+   Sonnet writes only the body. No random exploration.
+2. **Packaged tasks**: every task in `AGENT_TASK_PACKETS.md` states exactly:
+   the files allowed to be read, the contract, and one test command. Reading
+   the whole repository is forbidden.
+3. **No broad sweeps**: no reading every document, no general search. The
+   packet has enough context.
+4. **Small, single-responsibility files**: the smaller the file, the less context is required.
+5. **Batch related tasks into one session** (the same unit) to reuse the
+   session's memory instead of re-explaining.
+6. **Local edits, never rewrites**: regenerating a whole file to change one line is forbidden.
+7. **The test is the stopping point**: the moment it goes green, stop. No
+   long reports, no extra explanations.
+8. **Escalation only on written conditions** (the table above), never on a hunch.
+9. **Docs are updated by adding a line**, not by rewording whole pages.
 
 ---
 
-## 8. أكبر المخاطر وكيف نتعامل معها
+## 7. Definition of "done"
 
-| الخطر | العلاج |
+- The tests are green.
+- Every meaningful step logs an event.
+- Any download is validated before being considered successful.
+- Any failure opens an incident with evidence.
+- No secrets and no company data in the repository.
+- The change is documented in one line in `DECISION_LOG.md` if it touched an architectural decision.
+
+---
+
+## 8. The biggest risks and how we handle them
+
+| Risk | Mitigation |
 |---|---|
-| تغيّر واجهات المواقع | سلم الاستخراج + إصلاح ذاتي + حفظ المسار الجديد بعد التحقق |
-| ملف ينزل ناقص أو قديم | التحقق إلزامي: حجم، فتح، تاريخ، أعمدة، صفوف، تكرار |
-| توقف التشغيل في النص | كل خطوة محفوظة، الاستكمال يكمل من عند آخر نجاح |
-| وكيل يعمل تغييرًا خطيرًا | أوضاع صلاحية + Sandbox + اختبار + موافقة بشرية للحساس |
-| انفجار التكلفة | سلم التصعيد من الأرخص للأغلى + سياسة التوكنز أعلاه |
+| Site interfaces change | The extraction ladder + self-healing + caching the new path once verified |
+| A file downloads incomplete or outdated | Validation is mandatory: size, opening, date, columns, rows, duplication |
+| A run stops midway | Every step is saved; resumption continues from the last success |
+| An agent makes a dangerous change | Permission modes + sandbox + testing + human approval for sensitive cases |
+| Cost explosion | The escalation ladder from cheapest to most expensive + the token policy above |

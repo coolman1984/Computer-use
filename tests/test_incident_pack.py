@@ -1,4 +1,4 @@
-"""اختبارات S-10: بناء حزمة الحادثة (ملخص + خطوات + أحداث + ملفات + حوادث مشابهة)."""
+"""S-10 tests: building the incident pack (summary + steps + events + files + similar incidents)."""
 
 from __future__ import annotations
 
@@ -27,13 +27,13 @@ def _builder(services, tmp_path: Path) -> IncidentPackBuilder:
 
 def _register_broken_workflow(services, key: str = "test.broken_flow") -> None:
     def broken(ctx):
-        raise PermanentError("تعريف التقرير خاطئ", code="bad_definition")
+        raise PermanentError("Bad report definition", code="bad_definition")
 
     services.step_registry.add(f"{key}.step", broken)
     services.workflows.register(
         WorkflowDefinition(
             key=key,
-            title="سير عمل معطوب",
+            title="Broken workflow",
             steps=(StepDefinition(name="only", uses=f"{key}.step"),),
         )
     )
@@ -56,7 +56,7 @@ def test_build_pack_for_failed_run(services, tmp_path: Path) -> None:
     assert summary["incident"]["id"] == incident.id
     assert summary["run"]["id"] == run.id
     assert summary["error"]["error_class"] == "permanent"
-    assert summary["error"]["message"] == "تعريف التقرير خاطئ"
+    assert summary["error"]["message"] == "Bad report definition"
     assert [s["name"] for s in summary["steps"]] == ["only"]
     assert summary["steps"][0]["status"] == "failed"
     assert any(e["type"] == "incident_opened" for e in summary["events"])
@@ -86,7 +86,7 @@ def test_similar_incidents_found_by_signature(services, tmp_path: Path) -> None:
 
     incidents = services.incidents.list(status=IncidentStatus.OPEN)
     assert len(incidents) == 2
-    # الأحدث أولًا في list()، فحادثة run2 هي [0] وrun1 هي [1]
+    # Newest first in list(), so run2's incident is [0] and run1's is [1]
     newest, oldest = incidents[0], incidents[1]
     assert newest.signature == oldest.signature
 
@@ -139,5 +139,5 @@ def test_extra_evidence_is_attached_when_given(services, tmp_path: Path) -> None
 
 
 def test_missing_incident_raises_clear_error(services, tmp_path: Path) -> None:
-    with pytest.raises(SmartOpsError, match="غير موجودة"):
+    with pytest.raises(SmartOpsError, match="not found"):
         _builder(services, tmp_path).build("inc_does_not_exist")

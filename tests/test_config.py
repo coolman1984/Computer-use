@@ -1,4 +1,4 @@
-"""اختبارات F-01: مجلد الجلسات ومجلد الأنظمة الخارجي في الإعدادات."""
+"""F-01 tests: the sessions directory and the external systems directory in settings."""
 
 from __future__ import annotations
 

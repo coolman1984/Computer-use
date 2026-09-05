@@ -1,4 +1,4 @@
-"""سجلّان: منفّذو الخطوات، وتعريفات سير العمل."""
+"""Two registries: step executors, and workflow definitions."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class StepRegistry:
 
     def get(self, key: str) -> Step:
         if key not in self._steps:
-            raise ConfigurationError(f"منفّذ الخطوة غير مسجل: {key}", details={"uses": key})
+            raise ConfigurationError(f"Step executor is not registered: {key}", details={"uses": key})
         return self._steps[key]
 
     def keys(self) -> list[str]:
@@ -42,7 +42,7 @@ class WorkflowRegistry:
 
     def get(self, key: str) -> WorkflowDefinition:
         if key not in self._workflows:
-            raise ConfigurationError(f"سير العمل غير معرّف: {key}", details={"workflow": key})
+            raise ConfigurationError(f"Workflow is not defined: {key}", details={"workflow": key})
         return self._workflows[key]
 
     def list(self) -> list[WorkflowDefinition]:

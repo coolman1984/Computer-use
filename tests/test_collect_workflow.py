@@ -1,4 +1,4 @@
-"""مثال مرجعي: تركيب محوّلات وهمية على عقود ports وتشغيل سير عمل الجمع."""
+"""A reference example: wiring fake adapters onto the ports contracts and running the collection workflow."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ class FakeValidator:
             sha256="abc123",
             size_bytes=path.stat().st_size,
             row_count=1,
-            failures=[] if self.passed else ["عدد الصفوف أقل من المتوقع"],
+            failures=[] if self.passed else ["Row count is lower than expected"],
         )
 
 
@@ -82,13 +82,13 @@ def test_bad_file_fails_run_and_records_rejection(services) -> None:
 
 
 class AuthExpiredBrowser:
-    """يحاكي جلسة منتهية: extract() يرجع auth_required=True بلا أي ملف."""
+    """Simulates an expired session: extract() returns auth_required=True with no file."""
 
     def extract(self, request: ExtractionRequest) -> ExtractionResult:
         return ExtractionResult(
             ok=False,
             layer_used=ExtractionLayer.DOM,
-            message="الجلسة منتهية أو غير مسجّلة الدخول للنظام erp",
+            message="Session expired or not signed in for system erp",
             auth_required=True,
         )
 
@@ -112,9 +112,9 @@ def test_expired_session_fails_run_with_auth_error_and_opens_incident(services) 
 
 
 def test_missing_adapter_is_configuration_error(services) -> None:
-    # منذ قرار التركيب (services.browser مركّب افتراضيًا)، نحاكي هنا صراحةً
-    # حالة عدم تركيب أي محوّل متصفح، للتأكد أن الحماية الدفاعية في
-    # download_report ما زالت تعمل.
+    # Since the wiring decision (services.browser is wired up by default), we
+    # explicitly simulate here the case of no browser adapter being wired up,
+    # to confirm the defensive guard in download_report still works.
     services.browser = None
     run = services.runner.create_run(
         "collect.report", params={"system": "erp", "report": "daily_sales"}

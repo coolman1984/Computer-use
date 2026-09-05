@@ -3,13 +3,20 @@
 function mountAppShell() {
   const page = document.body.dataset.page || "overview";
   const title = document.body.dataset.title || "Overview";
+  // Ordered by the actual dependency chain, because every step here is
+  // useless until the one above it is done: you define a system, you sign
+  // in to it, you teach it a workflow by recording one, you run it, you
+  // read the files it produced, and you deal with incidents when a run
+  // breaks. The previous order (Runs second, Credentials after Recordings)
+  // put executions before the setup they depend on.
   const nav = [
-    ["overview", "Overview", "index.html", "⌂"],
-    ["runs", "Runs", "runs.html", "↗"],
-    ["recordings", "Recordings", "recordings.html", "●"],
-    ["credentials", "Credentials", "credentials.html", "▣"],
-    ["incidents", "Incidents", "incidents.html", "!"],
-    ["files", "Files", "files.html", "□"],
+    ["overview", "1 · Overview", "index.html", "⌂"],
+    ["systems", "2 · Systems", "systems.html", "▤"],
+    ["credentials", "3 · Sign-in", "credentials.html", "▣"],
+    ["recordings", "4 · Recordings", "recordings.html", "●"],
+    ["runs", "5 · Runs", "runs.html", "↗"],
+    ["files", "6 · Files", "files.html", "□"],
+    ["incidents", "7 · Incidents", "incidents.html", "!"],
   ];
   const links = nav.map(([key, label, href, icon]) =>
     `<a class="side-nav-link${key === page ? " active" : ""}" href="${href}"${key === page ? ' aria-current="page"' : ""}><span class="nav-icon" aria-hidden="true">${icon}</span>${label}</a>`
@@ -35,18 +42,30 @@ function mountAppShell() {
 mountAppShell();
 
 const SmartOps = (() => {
+  // Turns a FastAPI error body into one readable string. `detail` shows up
+  // in three different shapes depending on where the error came from: a
+  // plain string (Starlette's own HTTPException default), our own
+  // {message, error_class, ...} dict (SmartOpsError.to_dict()), or — this is
+  // the one earlier code missed — an ARRAY of {msg, loc, type} objects,
+  // which is what FastAPI sends automatically when request body validation
+  // fails before our handler ever runs. Falling through to
+  // `String(detail)` on that array silently produced "[object Object]".
+  async function errorMessage(res) {
+    let body = null;
+    try { body = await res.json(); } catch (_) { /* body wasn't JSON */ }
+    const detail = body?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail) && detail.length) {
+      return detail.map(d => (d && typeof d.msg === "string") ? d.msg : JSON.stringify(d)).join("; ");
+    }
+    if (detail && typeof detail.message === "string") return detail.message;
+    if (detail) return JSON.stringify(detail);
+    return res.statusText || "Request failed.";
+  }
+
   async function getJSON(url) {
     const res = await fetch(url);
-    if (!res.ok) {
-      let detail = res.statusText;
-      try {
-        const body = await res.json();
-        detail = body.detail?.message || body.detail || detail;
-      } catch (_) {
-        /* تجاهل: مفيش تفاصيل إضافية */
-      }
-      throw new Error(detail || "Could not connect to SmartOps.");
-    }
+    if (!res.ok) throw new Error(await errorMessage(res));
     return res.json();
   }
 
@@ -56,17 +75,12 @@ const SmartOps = (() => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload || {}),
     });
-    let body = null;
+    if (!res.ok) throw new Error(await errorMessage(res));
     try {
-      body = await res.json();
+      return await res.json();
     } catch (_) {
-      /* بلا محتوى */
+      return null; // 2xx with no body
     }
-    if (!res.ok) {
-      const message = body?.detail?.message || body?.detail || "Request failed.";
-      throw new Error(message);
-    }
-    return body;
   }
 
   const RUN_STATUS_LABELS = {
@@ -157,7 +171,14 @@ const SmartOps = (() => {
 
   function showError(container, error) {
     container.innerHTML = "";
-    container.appendChild(el("div", { class: "error-box", text: error.message || String(error) }));
+    // error is usually an Error (with a real .message string by now, thanks
+    // to errorMessage above) but guard the other cases too, so a bug
+    // elsewhere throwing a bare object/array never regresses to
+    // "[object Object]" again.
+    const text = error instanceof Error ? error.message
+      : typeof error === "string" ? error
+      : (() => { try { return JSON.stringify(error); } catch (_) { return String(error); } })();
+    container.appendChild(el("div", { class: "error-box", text }));
   }
 
   function connectEvents(runId, onEvent) {
@@ -168,7 +189,7 @@ const SmartOps = (() => {
       try {
         onEvent(JSON.parse(msg.data));
       } catch (_) {
-        /* رسالة غير متوقعة، تجاهلها */
+        /* Unexpected message shape — ignore it. */
       }
     };
     return socket;
@@ -177,6 +198,7 @@ const SmartOps = (() => {
   return {
     getJSON,
     postJSON,
+    errorMessage,
     RUN_STATUS_LABELS,
     STEP_STATUS_LABELS,
     VALIDATION_STATUS_LABELS,

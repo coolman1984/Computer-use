@@ -1,11 +1,12 @@
-"""محوّل Playwright لعقد BrowserPort: طبقة الشبكة أولًا ثم DOM (D004، القاعدة الذهبية).
+"""Playwright adapter for the BrowserPort contract: network layer first, then DOM (D004, the golden rule).
 
-بقية سلم الاستخراج (إصلاح ذاتي، رؤية، سطح مكتب) مؤجّلة لمراحل لاحقة.
+The rest of the extraction ladder (self-healing, vision, desktop) is deferred to later stages.
 
-ملاحظة معمارية: عقد BrowserPort الحالي (ExtractionRequest) لا يحمل بعد حقل
-"نقطة دخول" عامًا لكل نظام، لذلك تُمرَّر معلومات الملاحة (الرابط، محدد
-التنزيل...) عبر request.filters إلى أن تُبنى ملفات تعريف الأنظمة (S-03)
-وتُحسَم صيغة الحقل النهائية على مستوى العقد.
+Architecture note: the current BrowserPort contract (ExtractionRequest) does
+not yet carry a generic "entry point" field per system, so navigation info
+(the URL, the download selector...) is passed through request.filters until
+the system definition files are built (S-03) and the final field shape is
+settled at the contract level.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from ...storage.paths import slug
 
 
 class PlaywrightBrowserAdapter:
-    """ينفّذ طلب استخراج واحد: يجرّب الشبكة إن أمكن، ثم DOM."""
+    """Executes one extraction request: tries the network layer if possible, then DOM."""
 
     def __init__(
         self,
@@ -38,7 +39,7 @@ class PlaywrightBrowserAdapter:
         self._executable_path = executable_path
         self._clock = clock or time.time
         self._credential_store = credential_store
-        # آخر دليل فشل لكل (نظام, تقرير) — يُستخدم من capture_evidence.
+        # Last failure evidence per (system, report) — used by capture_evidence.
         self._last_evidence: dict[str, dict[str, Any]] = {}
 
     def _launch(self, playwright: Playwright):
@@ -51,8 +52,9 @@ class PlaywrightBrowserAdapter:
         started = self._clock()
         Path(request.destination_dir).mkdir(parents=True, exist_ok=True)
 
-        # ارفض الطلب غير القابل للتنفيذ قبل تشغيل Chromium. ده يحافظ على
-        # رسالة الخطأ الأصلية ويمنع استهلاك عملية متصفح كاملة بلا داعٍ.
+        # Reject an unexecutable request before launching Chromium. This
+        # keeps the original error message and avoids spinning up a whole
+        # browser process for nothing.
         filters = request.filters or {}
         has_network_path = bool(filters.get("direct_download_url")) and (
             ExtractionLayer.NETWORK in request.allowed_layers
@@ -62,14 +64,14 @@ class PlaywrightBrowserAdapter:
                 return self._failure(
                     request,
                     ExtractionLayer.DOM,
-                    "لا يوجد رابط دخول (filters['url'])",
+                    "No entry URL (filters['url'])",
                     started,
                 )
             if not filters.get("download_selector"):
                 return self._failure(
                     request,
                     ExtractionLayer.DOM,
-                    "لا يوجد محدد للتنزيل (filters['download_selector'])",
+                    "No download selector (filters['download_selector'])",
                     started,
                 )
 
@@ -91,21 +93,21 @@ class PlaywrightBrowserAdapter:
                     try:
                         context.tracing.start(screenshots=True, snapshots=True)
                     except Exception:
-                        pass  # التتبع دعم إضافي، ما ينفعش يوقف الاستخراج لو فشل
+                        pass  # tracing is a bonus, it must never stop the extraction if it fails
                     result = self._extract_with_context(context, request, started)
                     self._finish_tracing(context, request, result)
                     return result
                 finally:
                     browser.close()
         except PlaywrightTimeoutError as exc:
-            return self._failure(request, ExtractionLayer.DOM, f"انتهت المهلة: {exc}", started)
-        except Exception as exc:  # لا نُسقط العملية بصمت على أي خطأ غير متوقع
-            return self._failure(request, ExtractionLayer.DOM, f"فشل غير متوقع: {exc}", started)
+            return self._failure(request, ExtractionLayer.DOM, f"Timed out: {exc}", started)
+        except Exception as exc:  # never fail silently on an unexpected error
+            return self._failure(request, ExtractionLayer.DOM, f"Unexpected failure: {exc}", started)
 
     def _finish_tracing(
         self, context, request: ExtractionRequest, result: ExtractionResult
     ) -> None:
-        """يحفظ التتبع عند الفشل فقط، في مجلد الأدلة، وإلا يتجاهله."""
+        """Save the trace only on failure, into the evidence folder; otherwise discard it."""
         try:
             if not result.ok and request.evidence_dir is not None:
                 evidence_dir = Path(request.evidence_dir)
@@ -116,7 +118,7 @@ class PlaywrightBrowserAdapter:
             else:
                 context.tracing.stop()
         except Exception:
-            pass  # نفس منطق البداية: التتبع لا يجب أن يُسقط النتيجة أبدًا
+            pass  # same rule as the start: tracing must never take down the result
 
     def _extract_with_context(
         self, context, request: ExtractionRequest, started: float
@@ -140,16 +142,16 @@ class PlaywrightBrowserAdapter:
             network_result = self._try_network(context, request, direct_url, started)
             if network_result is not None:
                 return network_result
-            # فشلت طبقة الشبكة، ننزل لطبقة DOM إن كانت مسموحة.
+            # The network layer failed, fall through to the DOM layer if allowed.
 
         if ExtractionLayer.DOM not in request.allowed_layers:
             return self._failure(
-                request, ExtractionLayer.NETWORK, "طبقة الشبكة فشلت ولا توجد طبقة DOM مسموحة", started
+                request, ExtractionLayer.NETWORK, "Network layer failed and no DOM layer is allowed", started
             )
         return self._extract_via_dom(context, request, filters, started)
 
     def _evidence_key(self, request: ExtractionRequest) -> str:
-        """مفتاح الدليل: run_id لو موجود (يمنع تداخل تشغيلات متوازية)، وإلا نظام:تقرير."""
+        """Evidence key: run_id if present (prevents parallel runs colliding), otherwise system:report."""
         return slug(request.run_id) if request.run_id else f"{slug(request.system)}:{slug(request.report)}"
 
     def _try_network(
@@ -161,8 +163,9 @@ class PlaywrightBrowserAdapter:
                 return None
             content_type = (response.headers.get("content-type") or "").lower()
             if "text/html" in content_type:
-                # على الأرجح تحويل لصفحة الدخول (جلسة منتهية) أو صفحة خطأ،
-                # مش الملف المطلوب. ننزل لطبقة DOM بدل اعتبارها نجاحًا كاذبًا.
+                # Most likely a redirect to a login page (session expired) or
+                # an error page, not the requested file. Fall through to the
+                # DOM layer instead of treating this as a false success.
                 return None
             body = response.body()
             name = Path(direct_url.split("?")[0]).name or f"{request.report}"
@@ -180,8 +183,8 @@ class PlaywrightBrowserAdapter:
             return None
 
     def _session_expired(self, page, filters: dict[str, Any]) -> bool:
-        """يفحص علامات انتهاء الجلسة بعد أي goto: فورم دخول ظاهر، أو عنصر
-        ما بعد الدخول غائب."""
+        """Check for session-expiry signs after any goto: a visible login form, or a
+        post-login element that is missing."""
         login_selector = filters.get("login_selector")
         logged_in_selector = filters.get("logged_in_selector")
         if login_selector and page.locator(login_selector).count() > 0:
@@ -262,12 +265,12 @@ class PlaywrightBrowserAdapter:
     ) -> ExtractionResult:
         entry_url = filters.get("url")
         if not entry_url:
-            return self._failure(request, ExtractionLayer.DOM, "لا يوجد رابط دخول (filters['url'])", started)
+            return self._failure(request, ExtractionLayer.DOM, "No entry URL (filters['url'])", started)
 
         download_selector = filters.get("download_selector")
         if not download_selector:
             return self._failure(
-                request, ExtractionLayer.DOM, "لا يوجد محدد للتنزيل (filters['download_selector'])", started
+                request, ExtractionLayer.DOM, "No download selector (filters['download_selector'])", started
             )
 
         page = context.new_page()
@@ -305,11 +308,11 @@ class PlaywrightBrowserAdapter:
                 duration_seconds=self._clock() - started,
             )
         except PlaywrightTimeoutError as exc:
-            self._capture_failure_evidence(page, request, f"انتهت المهلة أثناء DOM: {exc}")
-            return self._failure(request, ExtractionLayer.DOM, f"انتهت المهلة أثناء DOM: {exc}", started)
+            self._capture_failure_evidence(page, request, f"Timed out during DOM interaction: {exc}")
+            return self._failure(request, ExtractionLayer.DOM, f"Timed out during DOM interaction: {exc}", started)
         except Exception as exc:
             self._capture_failure_evidence(page, request, str(exc))
-            return self._failure(request, ExtractionLayer.DOM, f"فشل تفاعل DOM: {exc}", started)
+            return self._failure(request, ExtractionLayer.DOM, f"DOM interaction failed: {exc}", started)
         finally:
             page.close()
 
@@ -347,8 +350,8 @@ class PlaywrightBrowserAdapter:
         )
 
     def capture_evidence(self, run_id: str) -> dict[str, Any]:
-        """يعيد دليل الفشل الخاص بهذا التشغيل تحديدًا، وإلا آخر دليل مسجّل
-        (توافقًا مع نداءات لا تمرر run_id مطابقًا)."""
+        """Return the failure evidence for this exact run, otherwise the last recorded
+        evidence (for calls that do not pass a matching run_id)."""
         key = slug(run_id) if run_id else ""
         if key and key in self._last_evidence:
             return {"run_id": run_id, **self._last_evidence[key]}

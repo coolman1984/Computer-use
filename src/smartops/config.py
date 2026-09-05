@@ -1,4 +1,4 @@
-"""تحميل إعدادات SmartOps من ملف YAML مع إمكانية التجاوز عبر متغيرات البيئة."""
+"""Load SmartOps settings from a YAML file, overridable via environment variables."""
 
 from __future__ import annotations
 
@@ -27,17 +27,19 @@ class StorageSettings:
     raw_data_dir: Path = Path("data/raw")
     incidents_dir: Path = Path("incidents")
     logs_dir: Path = Path("logs")
-    history_dir: Path = Path("data/history")  # أرشيف Parquet التحليلي (S-06)
-    # جلسات الدخول المحفوظة (storage_state لكل نظام). محتواها حسّاس: كوكيز
-    # وتوكنز جلسة حقيقية، فهو مستبعد من Git ولا يُرفع أبدًا.
+    history_dir: Path = Path("data/history")  # analytical Parquet archive (S-06)
+    # Saved login sessions (storage_state per system). Their content is
+    # sensitive — real cookies and session tokens — so this is excluded from
+    # Git and must never be committed.
     sessions_dir: Path = Path("data/sessions")
-    # تعريفات الأنظمة. الافتراضي داخل المستودع (أمثلة فقط)؛ التعريفات
-    # الحقيقية توضع في مجلد خارج المستودع عبر SMARTOPS_SYSTEMS_DIR (D023).
+    # System definitions. The default lives inside the repo (examples only);
+    # real definitions go in a folder outside the repo via
+    # SMARTOPS_SYSTEMS_DIR (D023).
     systems_dir: Path = Path("config/systems")
-    # تسجيلات المتصفح قد تضم لقطات وtrace وHAR؛ الإنتاج يضعها خارج المستودع.
+    # Browser recordings may include screenshots, traces, and HAR files; production puts them outside the repo.
     recordings_dir: Path = Path("data/recordings")
     recordings_backup_dir: Path = Path("data/recording-backups")
-    # صفر = لا حذف دائم تلقائيًا. لا يُنفذ purge إلا مع إعداد الأمان الصريح.
+    # Zero = no automatic permanent deletion. Purge never runs without the explicit safety setting.
     recordings_retention_days: int = 0
 
 
@@ -60,12 +62,12 @@ class SafetySettings:
 
 @dataclass(frozen=True)
 class AgentSettings:
-    """إعداد وكيل واحد (codex أو claude). mode غير read_only غير مدعوم بعد
-    في هذه المرحلة من التركيب — راجع Services._build_agent_runner."""
+    """Settings for one agent (codex or claude). A mode other than read_only
+    is not yet supported at this stage of the build — see Services._build_agent_runner."""
 
     enabled: bool = False
     mode: str = "read_only"
-    executable: str = ""  # فاضي = استخدم اسم الوكيل نفسه كأمر تشغيل (codex/claude)
+    executable: str = ""  # empty = use the agent's own name as the launch command (codex/claude)
 
 
 @dataclass(frozen=True)
@@ -76,7 +78,7 @@ class AgentsSettings:
 
 @dataclass(frozen=True)
 class NotifySettings:
-    webhook_url: str = ""  # فاضي = بدون قناة Webhook، السجل المحلي دايمًا شغّال
+    webhook_url: str = ""  # empty = no webhook channel; the local log always runs
 
 
 @dataclass(frozen=True)
@@ -109,7 +111,7 @@ def _resolve_config_path(path: Path | str | None) -> Path | None:
 
 
 def load_settings(path: Path | str | None = None) -> Settings:
-    """يقرأ الإعدادات. لو الملف غير موجود نستخدم القيم الافتراضية الآمنة."""
+    """Read the settings. If the file does not exist, use safe defaults."""
     config_path = _resolve_config_path(path)
     raw: dict[str, Any] = {}
     if config_path is not None and config_path.exists():
@@ -190,7 +192,7 @@ def load_settings(path: Path | str | None = None) -> Settings:
 
 
 def ensure_directories(settings: Settings) -> None:
-    """ينشئ المجلدات المطلوبة للتشغيل المحلي."""
+    """Create the directories required for local operation."""
     settings.storage.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
     for directory in (
         settings.storage.raw_data_dir,
@@ -205,4 +207,4 @@ def ensure_directories(settings: Settings) -> None:
     try:
         os.chmod(settings.storage.sessions_dir, 0o700)
     except OSError:
-        pass  # على ويندوز أو أنظمة ملفات لا تدعم صلاحيات POSIX هذا لا يفيد ولا يضر
+        pass  # on Windows or a filesystem without POSIX permissions this neither helps nor hurts

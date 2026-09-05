@@ -1,201 +1,209 @@
 # SmartOps Master Plan
 
-## 1. الفكرة الأساسية
+## 1. The core idea
 
-SmartOps هو مركز عمليات محلي ذكي يجمع البيانات الخام من أنظمة ويب متعددة، يتحقق منها، يشغل أتمتة الأعمال، يربط الإدارات والعمليات، يراقب الأداء والمواقع، يكتشف الأعطال والتدهور مبكرًا، ثم يستخدم وكلاء ذكاء اصطناعي للتشخيص والإصلاح والتصعيد المنظم.
+SmartOps is a local, smart operations center that collects raw data from
+multiple web systems, validates it, runs business automations, links
+departments and processes, monitors performance and sites, detects failures
+and degradation early, then uses AI agents for diagnosis, repair, and
+organized escalation.
 
-الهدف ليس بناء سكربتات منفصلة، بل **نظام تشغيل للأتمتة** يعرف ما الذي يجب أن يحدث، ومتى، وما الطبيعي، وما غير الطبيعي، وكيف يتعافى من المشاكل، ومتى يحتاج تدخلًا بشريًا.
+The goal is not to build separate scripts, but an **operating system for
+automation** that knows what should happen, when, what is normal, what is
+not, how to recover from problems, and when it needs human intervention.
 
 ---
 
-## 2. رحلة العملية الكاملة
+## 2. The full process journey
 
 ```text
-مصادر وأنظمة متعددة
+Multiple sources and systems
 ↓
-استخراج البيانات بأفضل طريقة متاحة
+Extract data by the best available method
 ↓
-تنزيل وتجميع Raw Data
+Download and collect raw data
 ↓
-فحص صحة الملفات وجودة البيانات
+Check file health and data quality
 ↓
-تشغيل Workflow الإدارة
+Run the department's workflow
 ↓
-ربط Workflow بإدارات وبيانات أخرى
+Link the workflow to other departments and data
 ↓
-تحديث التاريخ ولوحات المتابعة
+Update history and monitoring dashboards
 ↓
-مراقبة الأداء والتأخير والشذوذ
+Monitor performance, lateness, and anomalies
 ↓
-إنذار مبكر أو Incident عند الحاجة
+Early warning or an incident when needed
 ↓
-استرجاع الأدلة والسياق
+Retrieve evidence and context
 ↓
-حل معروف أو وكيل ذكاء اصطناعي
+A known fix or an AI agent
 ↓
-تجربة واختبار
+Experiment and test
 ↓
-نشر آمن أو Rollback
+Safe deployment or rollback
 ↓
-تسجيل الدرس في قاعدة المعرفة
+Record the lesson in the knowledge base
 ```
 
 ---
 
-## 3. الويب آب هو غرفة القيادة
+## 3. The web app is the operations center
 
-المستخدم غير التقني يتعامل أساسًا مع واجهة ويب محلية تحتوي على:
+The non-technical user works primarily with a local web interface containing:
 
-- Dashboard للحالة العامة.
-- قائمة Workflows.
-- تشغيل وإيقاف وإعادة محاولة.
-- إنشاء عملية جديدة.
-- جدولة واعتماديات.
-- مراقبة مباشرة.
-- Logs قابلة للبحث.
+- A dashboard for overall status.
+- A workflow list.
+- Start, stop, and retry.
+- Creating a new process.
+- Scheduling and dependencies.
+- Live monitoring.
+- Searchable logs.
 - Incidents.
 - History.
 - Agents.
-- Knowledge Base.
-- Chat جانبي.
+- A knowledge base.
+- A side chat.
 
-الشات يتيح أوامر مثل:
+The chat supports commands such as:
 
-- لماذا تقرير معين بطيء اليوم؟
-- شغّل عمليات الاجتماع الصباحي.
-- اجمع ملفات نظامين وقارنها بالتاريخ.
-- أنشئ Workflow جديدًا.
-- حل المشكلة على نسخة تجريبية واختبرها.
-- اعرض ما تغير منذ أمس.
+- Why is a particular report slow today?
+- Run the morning meeting processes.
+- Collect two systems' files and compare them by date.
+- Create a new workflow.
+- Fix the problem on a test branch and test it.
+- Show what changed since yesterday.
 
-أوضاع الشات:
+Chat modes:
 
-1. **Analyze**: قراءة وتحليل فقط.
-2. **Experiment**: تعديل Sandbox واختبار.
-3. **Execute**: تنفيذ مسموح به وفق السياسة.
-
----
-
-## 4. محرك المتصفح التكيفي
-
-لا توجد أداة واحدة مثالية لكل المواقع، لذلك نستخدم سلمًا من خمس طبقات:
-
-### الطبقة 1 — Network / Direct Download
-إذا زر التصدير يولد طلبًا يمكن فهمه وإعادة تنفيذه بنفس الجلسة المصرح بها، نستخدم الطلب مباشرة.
-
-### الطبقة 2 — DOM / Playwright
-للعناصر، الإطارات، النوافذ، التابات، الفلاتر والتنزيلات.
-
-### الطبقة 3 — Self-Healing Web Actions
-عند تغير الصفحة، نستخدم نهج شبيه Stagehand: الطريقة الثابتة أولًا، ثم اكتشاف ذكي، ثم حفظ المسار الجديد بعد التحقق.
-
-### الطبقة 4 — Vision
-للصفحات التي لا تعرض عناصر قابلة للقراءة. نستفيد من أفكار Midscene وBrowser Use.
-
-### الطبقة 5 — Desktop-Level Vision
-للحالات النادرة التي تحتاج تحكم واجهة كامل، باستخدام أفكار UI-TARS وAgent TARS.
-
-Camoufox يظل خيارًا ثانويًا وتجريبيًا، وليس المحرك الأساسي.
+1. **Analyze**: read and analyze only.
+2. **Experiment**: modify a sandbox branch and test.
+3. **Execute**: run what policy permits.
 
 ---
 
-## 5. اختلاف دقة الشاشات
+## 4. The adaptive browser engine
 
-ممنوع الاعتماد على إحداثيات شاشة ثابتة.
+No single tool is ideal for every site, so we use a five-layer ladder:
 
-الأولوية:
+### Layer 1 — Network / Direct Download
+If the export button generates a request that can be understood and
+replayed within the same authorized session, we use that request directly.
 
-1. عنصر دلالي.
-2. منطقة داخل العنصر.
-3. إحداثيات نسبية داخل لقطة الشاشة.
+### Layer 2 — DOM / Playwright
+For elements, frames, windows, tabs, filters, and downloads.
 
-كما يمكن تشغيل المتصفح الخلفي بحجم Viewport موحد.
+### Layer 3 — Self-Healing Web Actions
+When the page changes, we use a Stagehand-like approach: the fixed method
+first, then smart discovery, then caching the new path once verified.
 
----
+### Layer 4 — Vision
+For pages that expose no readable elements. We draw on Midscene and Browser Use ideas.
 
-## 6. التابات والجلسات الكثيرة
+### Layer 5 — Desktop-Level Vision
+For the rare cases needing full UI control, using UI-TARS and Agent TARS ideas.
 
-نستخدم:
-
-- Queue مركزي.
-- Concurrency محدود وديناميكي.
-- Browser Contexts معزولة.
-- مراقبة الذاكرة والمعالج.
-- Backpressure لو النظام أو المواقع بطيئة.
-- Retry Policies مختلفة حسب نوع الخطأ.
-
-لا يوجد هدف اسمه عدد لا نهائي من التابات؛ الهدف هو أعلى إنتاجية مستقرة.
+Camoufox remains a secondary, experimental option, not the primary engine.
 
 ---
 
-## 7. تعريف كل نظام
+## 5. Different screen resolutions
 
-لكل نظام أو موقع Profile يحفظ:
+Relying on fixed screen coordinates is forbidden.
 
-- الاسم.
-- نقطة الدخول.
-- طريقة المصادقة المصرح بها.
-- الصفحات والتقارير.
-- أفضل طريقة استخراج.
-- هل DOM متاح؟
-- هل Vision مطلوب؟
-- هل Direct Download ممكن؟
-- الملفات المتوقعة.
-- الزمن الطبيعي.
-- قواعد إعادة المحاولة.
-- قواعد الإنذار.
-- المشاكل المعروفة وحلولها.
+Priority order:
+
+1. A semantic element.
+2. A region within the element.
+3. Relative coordinates within a screenshot.
+
+The background browser can also be run at a uniform viewport size.
 
 ---
 
-## 8. Raw Data Center
+## 6. Many tabs and sessions
 
-كل تنزيل يسجل معه Metadata:
+We use:
 
-- النظام.
-- التقرير.
-- وقت الطلب والتنزيل.
-- الفترة المطلوبة.
-- الاسم الأصلي والاسم القياسي.
-- الحجم.
-- Hash.
-- عدد الصفوف إن أمكن.
-- نتيجة التحقق.
+- A central queue.
+- Bounded, dynamic concurrency.
+- Isolated browser contexts.
+- Memory and CPU monitoring.
+- Backpressure if the system or sites are slow.
+- Different retry policies depending on the error type.
 
-تنظيم مقترح:
+There is no goal of an unlimited number of tabs; the goal is the highest stable throughput.
+
+---
+
+## 7. Defining each system
+
+Every system or site has a profile that stores:
+
+- The name.
+- The entry point.
+- The authorized authentication method.
+- The pages and reports.
+- The best extraction method.
+- Is DOM available?
+- Is vision required?
+- Is direct download possible?
+- The expected files.
+- The normal duration.
+- Retry rules.
+- Alert rules.
+- Known problems and their fixes.
+
+---
+
+## 8. The Raw Data Center
+
+Every download is recorded with metadata:
+
+- The system.
+- The report.
+- The request and download time.
+- The requested period.
+- The original name and the standard name.
+- The size.
+- The hash.
+- The row count, if available.
+- The validation result.
+
+Proposed layout:
 
 ```text
 data/raw/YYYY/MM/DD/<system>/<report>/
 ```
 
-البيانات الخام لا تُرفع إلى GitHub.
+Raw data is never uploaded to GitHub.
 
 ---
 
-## 9. التحقق من الملفات
+## 9. File validation
 
-نجاح التنزيل لا يعني نجاح العملية.
+A successful download does not mean a successful process.
 
-يجب فحص:
+Must check:
 
-- الملف موجود.
-- ليس صفرًا.
-- يفتح بدون تلف.
-- التاريخ صحيح.
-- الأوراق أو الأعمدة المتوقعة موجودة.
-- عدد الصفوف منطقي.
-- ليس مكررًا.
-- ليس نسخة قديمة بالخطأ.
+- The file exists.
+- It is not zero-sized.
+- It opens without corruption.
+- The date is correct.
+- The expected sheets or columns exist.
+- The row count is sane.
+- It is not a duplicate.
+- It is not an old copy by mistake.
 
-الفشل في أي شرط يولد Event واضحًا وقد يفتح Incident.
+Failing any condition generates a clear event and may open an incident.
 
 ---
 
-## 10. Workflow Engine
+## 10. The Workflow Engine
 
-كل عملية يتم تعريفها كحالة قابلة للاستكمال بدل سكربت متسلسل هش.
+Every process is defined as resumable state instead of a fragile sequential script.
 
-الحالات الأساسية:
+The core statuses:
 
 ```text
 queued
@@ -207,7 +215,7 @@ failed
 cancelled
 ```
 
-كل Step له:
+Every step has:
 
 - input.
 - output.
@@ -219,56 +227,57 @@ cancelled
 
 ---
 
-## 11. تشغيل أتمتة الإدارات
+## 11. Running department automation
 
-بعد وصول المدخلات والتحقق منها:
+After the inputs arrive and are validated:
 
 ```text
-Raw Data Ready
+Raw data ready
 ↓
-Transform / Clean
+Transform / clean
 ↓
-Business Rules
+Business rules
 ↓
-KPIs / Insights
+KPIs / insights
 ↓
-History Update
+History update
 ↓
-Dashboard / Reports
+Dashboard / reports
 ```
 
-وتكون مشاريع الإدارات Plugins أو Workflows متصلة بنفس Control Plane بدل أن تكون برامج منفصلة معزولة.
+Department projects are plugins or workflows connected to the same control
+plane rather than separate, isolated programs.
 
 ---
 
-## 12. ربط الإدارات
+## 12. Linking departments
 
-يتم تمثيل الاعتماديات كـ Dependency Graph.
+Dependencies are represented as a dependency graph.
 
-أمثلة عامة:
+General examples:
 
 ```text
-Demand / Plan
+Demand / plan
 ↓
 Production
 ↓
-Material Need
+Material need
 ↓
-Inventory / Purchasing
+Inventory / purchasing
 ↓
-Workforce / Maintenance / Quality
+Workforce / maintenance / quality
 ↓
-Cost / Finance
+Cost / finance
 ```
 
-الهدف هو كشف تأثير مشكلة في عملية على العمليات التابعة لها.
+The goal is detecting the impact of a problem in one process on its dependent processes.
 
 ---
 
-## 13. قاعدة البيانات والتاريخ
+## 13. Database and history
 
 ### SQLite
-للحالة التشغيلية:
+For operational state:
 - workflows
 - runs
 - steps
@@ -281,16 +290,16 @@ Cost / Finance
 - versions
 
 ### DuckDB
-للتحليل المحلي السريع والربط بين ملفات تاريخية كبيرة.
+For fast local analysis and joining across large historical files.
 
 ### Parquet
-للتاريخ التحليلي طويل الأجل.
+For long-term analytical history.
 
 ---
 
 ## 14. Event Log
 
-كل ما يحدث يسجل كحدث، مثل:
+Everything that happens is logged as an event, such as:
 
 ```text
 08:00:02 run_started
@@ -305,44 +314,44 @@ Cost / Finance
 08:01:40 run_succeeded
 ```
 
-السجل قابل للبحث داخل الويب آب، وليس مجرد ملفات نصية مخفية.
+The log is searchable inside the web app, not just hidden text files.
 
 ---
 
-## 15. Incident Pack
+## 15. The Incident Pack
 
-عند مشكلة مهمة، يتم تجميد الأدلة في حزمة تشمل:
+On a significant problem, evidence is frozen into a pack that includes:
 
-- summary.
-- error.
-- workflow version.
-- screenshot.
-- browser trace.
-- network evidence.
-- expected vs actual files.
-- environment snapshot.
-- previous similar runs.
-- previous agent attempts.
+- A summary.
+- The error.
+- The workflow version.
+- A screenshot.
+- The browser trace.
+- Network evidence.
+- Expected vs. actual files.
+- An environment snapshot.
+- Previous similar runs.
+- Previous agent attempts.
 
-هذه هي المدخلات الأساسية للوكيل الذكي.
+This is the AI agent's primary input.
 
 ---
 
-## 16. الإنذار المبكر
+## 16. Early warning
 
-لا ننتظر الفشل.
+We do not wait for the failure.
 
-نراقب الاتجاهات مثل:
+We watch trends such as:
 
-- زيادة زمن الصفحة.
-- زيادة زمن التنزيل.
-- زيادة retries.
-- انخفاض أو تضخم غير طبيعي في حجم الملف.
-- تأخر وصول بيانات.
-- تكرار انتهاء الجلسة.
-- ارتفاع معدل الخطأ.
+- Increasing page load time.
+- Increasing download time.
+- Increasing retries.
+- An abnormal drop or spike in file size.
+- Delayed data arrival.
+- Repeated session expiry.
+- A rising error rate.
 
-مستويات الإنذار:
+Alert levels:
 
 - Green.
 - Yellow.
@@ -352,63 +361,63 @@ Cost / Finance
 
 ---
 
-## 17. AI Agent Manager
+## 17. The AI Agent Manager
 
-المنصة يمكنها تشغيل Codex CLI أو Claude Code CLI في الخلفية وعرض التقدم داخل الشات والـ Logs.
+The platform can run Codex CLI or Claude Code CLI in the background and show progress in the chat and logs.
 
-لكل Agent Run نسجل:
+For every agent run we record:
 
-- السبب.
-- الوكيل والنموذج.
-- مستوى التفكير.
-- السياق المرسل.
-- الملفات المقروءة.
-- الأدوات المستخدمة.
-- التغييرات.
-- الاختبارات.
-- النتيجة.
-- الزمن.
-- هل تم التصعيد؟
+- The reason.
+- The agent and model.
+- The reasoning level.
+- The context sent.
+- The files read.
+- The tools used.
+- The changes.
+- The tests.
+- The result.
+- The time taken.
+- Whether it was escalated.
 
 ---
 
-## 18. سلم التصعيد
+## 18. The escalation ladder
 
 ```text
-Known Fix
+Known fix
 ↓
-Cheap Agent
+Cheap agent
 ↓
-Codex Medium
+Codex, medium reasoning
 ↓
-Codex High
+Codex, high reasoning
 ↓
-Strong Claude Model
+A stronger Claude model
 ↓
 Human
 ```
 
-التصعيد لا يعتمد فقط على الفشل، بل على المخاطر والثقة والتاريخ.
+Escalation depends not only on failure, but on risk, confidence, and history.
 
 ---
 
-## 19. التعلم من الحوادث السابقة
+## 19. Learning from past incidents
 
-قبل استدعاء نموذج كبير:
+Before calling a large model:
 
-1. ابحث عن Incident مشابه.
-2. اعرف Root Cause السابق.
-3. اعرف الإصلاح المستخدم.
-4. اعرف نسبة نجاحه.
-5. جرّبه إذا كان آمنًا ومناسبًا.
+1. Search for a similar incident.
+2. Learn its earlier root cause.
+3. Learn the fix that was used.
+4. Learn its success rate.
+5. Try it if it is safe and appropriate.
 
-كل حادثة محلولة تضيف Knowledge Entry جديدة.
+Every resolved incident adds a new knowledge entry.
 
 ---
 
 ## 20. Self-Healing
 
-الإصلاحات ثلاثة مستويات:
+Fixes have three levels:
 
 ### Auto-Safe
 - retry.
@@ -423,7 +432,7 @@ Human
 - timeout adjustment.
 - code patch.
 
-يُجرّب في Sandbox أولًا.
+Tried in a sandbox first.
 
 ### Human Approval
 - destructive data changes.
@@ -433,9 +442,9 @@ Human
 
 ---
 
-## 21. Versioning وRollback
+## 21. Versioning and Rollback
 
-أي Agent يعدل Workflow أو كود:
+Any agent that modifies a workflow or code:
 
 ```text
 v117
@@ -449,13 +458,13 @@ tests
 release or rollback
 ```
 
-إذا تدهورت النتائج بعد النشر، يمكن الرجوع تلقائيًا حسب السياسة.
+If results degrade after deployment, an automatic rollback can occur per policy.
 
 ---
 
-## 22. صيانة المواقع والخدمات
+## 22. Maintaining sites and services
 
-بإذن ووصول رسمي يمكن للمنصة مراقبة مواقع وخدمات داخلية عبر:
+With official permission and access, the platform can monitor internal sites and services via:
 
 - availability.
 - latency.
@@ -463,15 +472,15 @@ release or rollback
 - login health.
 - report generation.
 - download success.
-- service/database health عند توفر واجهات مصرح بها.
+- service/database health, when authorized endpoints are available.
 
-المنصة لا تحاول تجاوز الصلاحيات للوصول للسيرفرات.
+The platform never attempts to bypass permissions to reach servers.
 
 ---
 
 ## 23. Watchdog
 
-المنصة نفسها تحتاج مراقبة:
+The platform itself needs monitoring:
 
 - API service.
 - database.
@@ -481,71 +490,71 @@ release or rollback
 - disk space.
 - event writer.
 
-أي عطل في منصة المراقبة نفسها يجب أن يكتشف من Watchdog مستقل قدر الإمكان.
+Any failure in the monitoring platform itself must be detected by as independent a watchdog as possible.
 
 ---
 
-## 24. قواعد الأمان
+## 24. Security rules
 
-- لا أسرار في Git.
-- لا بيانات شركة خام في المستودع العام.
-- لا إرسال بيانات خارجية بدون سياسة معتمدة.
-- أقل صلاحية ممكنة.
-- كل Action حساس قابل للمراجعة.
-- فصل Production عن Sandbox.
-- منع العمليات التدميرية افتراضيًا.
-
----
-
-## 25. التقنية الأساسية
-
-- Python: القلب.
-- FastAPI: API والخدمة المحلية.
-- WebSocket: تحديثات مباشرة وشات.
-- Playwright: المحرك الأساسي للمتصفح.
-- SQLite: التشغيل والسجلات.
-- DuckDB: التحليل المحلي.
-- Parquet: التاريخ الكبير.
-- OpenTelemetry: طبقة قياسات وتتبع لاحقًا.
-
-المكونات البصرية أو الذكية الأخرى تظل Adapters اختيارية وليست Dependencies أساسية في البداية.
+- No secrets in Git.
+- No raw company data in the public repository.
+- No sending external data without an approved policy.
+- The least privilege possible.
+- Every sensitive action is reviewable.
+- Production is separated from the sandbox.
+- Destructive operations are disabled by default.
 
 ---
 
-## 26. أول نسخة عملية
+## 25. The core technology
 
-نبدأ بنطاق صغير قوي بدل محاولة بناء المدينة كلها مرة واحدة:
+- Python: the core.
+- FastAPI: the API and local service.
+- WebSocket: live updates and chat.
+- Playwright: the primary browser engine.
+- SQLite: operations and logs.
+- DuckDB: local analysis.
+- Parquet: large-scale history.
+- OpenTelemetry: a metrics and tracing layer, later.
 
-- 3 أنظمة.
-- 5 تقارير.
-- Browser Queue.
-- تنزيل وتحقق.
-- Raw Data Store.
-- SQLite Events.
-- Dashboard بسيط.
-- إنذار تأخير.
-- Incident Pack.
-- Codex في وضع تحليل فقط.
-
-بعد ثبات هذه النواة نفتح التعديل الذاتي والرؤية وربط الإدارات تدريجيًا.
+Other visual or smart components remain optional adapters, not core dependencies at the start.
 
 ---
 
-## 27. مؤشرات النجاح
+## 26. The first working version
 
-- نسبة نجاح التشغيل.
-- نسبة صحة الملفات.
-- زمن جمع البيانات.
-- عدد الخطوات اليدوية الملغاة.
-- زمن اكتشاف المشكلة.
-- زمن التعافي.
-- نسبة الحوادث المحلولة تلقائيًا.
-- عدد الحوادث المتكررة.
-- عدد مرات الحاجة لتدخل بشري.
-- استقرار الأداء عبر الزمن.
+We start with a small, solid scope instead of trying to build the whole city at once:
+
+- 3 systems.
+- 5 reports.
+- A browser queue.
+- Download and validation.
+- A raw data store.
+- SQLite events.
+- A simple dashboard.
+- A lateness alert.
+- An incident pack.
+- Codex in analysis-only mode.
+
+Once this core is stable, we gradually open up self-modification, vision, and linking departments.
 
 ---
 
-## 28. القاعدة الذهبية
+## 27. Success metrics
 
-**أسرع طريقة موثوقة أولًا، ثم الذكاء عند الحاجة، وكل خطوة قابلة للمراجعة والاختبار والتراجع.**
+- Run success rate.
+- File health rate.
+- Data collection time.
+- Number of manual steps eliminated.
+- Time to detect a problem.
+- Time to recover.
+- Rate of incidents resolved automatically.
+- Number of recurring incidents.
+- Number of times human intervention was needed.
+- Performance stability over time.
+
+---
+
+## 28. The golden rule
+
+**The fastest reliable method first, then intelligence when needed, and every step is reviewable, testable, and reversible.**

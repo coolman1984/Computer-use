@@ -1,10 +1,11 @@
-"""إدارة جلسات الدخول المحفوظة (storage_state) لكل نظام.
+"""Management of saved login sessions (storage_state) per system.
 
-المبدأ: المنصة لا ترى كلمة مرور أبدًا. الإنسان يسجّل الدخول مرة واحدة في
-متصفح مرئي (headed)، ثم نحفظ حالة الجلسة (كوكيز + توكنز) في ملف خارج
-المستودع، وبعدها المتصفح التلقائي يعيد استخدامها بدل الدخول من جديد
-(D020). جلسة منتهية أثناء التشغيل تُكتشف وتُرفع كـ AuthError (راجع
-adapters/browser/playwright_engine.py و workflows/builtin.py).
+Principle: the platform never sees a password. A human signs in once in a
+visible (headed) browser, then we save the session state (cookies + tokens)
+to a file outside the repo, and afterwards the automated browser reuses it
+instead of signing in again (D020). A session that expires mid-run is
+detected and raised as an AuthError (see
+adapters/browser/playwright_engine.py and workflows/builtin.py).
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from .storage.paths import slug
 
 
 def session_path(sessions_dir: Path | str, system_key: str) -> Path:
-    """مسار ملف الجلسة لنظام بعينه: <sessions_dir>/<slug(system_key)>.json"""
+    """Session file path for one system: <sessions_dir>/<slug(system_key)>.json"""
     return Path(sessions_dir) / f"{slug(system_key)}.json"
 
 
@@ -31,7 +32,7 @@ def session_exists(sessions_dir: Path | str, system_key: str) -> bool:
 def session_age_hours(
     sessions_dir: Path | str, system_key: str, *, now: Clock | None = None
 ) -> float | None:
-    """عمر الجلسة بالساعات، أو None لو الملف غير موجود."""
+    """Session age in hours, or None if the file does not exist."""
     path = session_path(sessions_dir, system_key)
     if not path.exists():
         return None
@@ -52,19 +53,20 @@ def capture_login(
     wait_for_enter: Callable[[], None] | None = None,
     timeout_seconds: float = 600.0,
 ) -> Path:
-    """يفتح متصفحًا مرئيًا لتسجيل دخول يدوي، ثم يحفظ storage_state.
+    """Open a visible browser for manual sign-in, then save storage_state.
 
-    لا يُدخل أي كلمة مرور برمجيًا؛ الإنسان هو من يسجّل الدخول في النافذة
-    المفتوحة. لو فيه جلسة سابقة (حتى جزئية الصلاحية) نحمّلها أولًا حتى لا
-    يضطر المستخدم لتسجيل دخول كامل من الصفر في كل مرة.
+    No password is ever entered programmatically; the human signs in inside
+    the open window. If a previous session exists (even partially expired) it
+    is loaded first, so the user does not have to sign in completely from
+    scratch every time.
     """
     if not login_url:
         raise ConfigurationError(
-            f"لا يوجد login_url لتسجيل الدخول للنظام {system_key}",
+            f"No login_url to sign in to system {system_key}",
             details={"system": system_key},
         )
 
-    from playwright.sync_api import sync_playwright  # استيراد مؤجل: لا حاجة له في كل الوحدات
+    from playwright.sync_api import sync_playwright  # deferred import: not needed by every module
 
     target_path = session_path(sessions_dir, system_key)
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,9 +89,9 @@ def capture_login(
             page = context.new_page()
             page.goto(login_url)
 
-            print(  # noqa: T201 — رسالة تفاعلية مقصودة للمشغّل، مش سجل أحداث
-                f"سجّل الدخول يدويًا للنظام {system_key} في النافذة المفتوحة، "
-                "ثم ارجع هنا واضغط Enter لما تخلص."
+            print(  # noqa: T201 — an intentional interactive message for the operator, not an event log entry
+                f"Sign in manually to system {system_key} in the open window, "
+                "then come back here and press Enter when you're done."
             )
             if logged_in_selector:
                 page.wait_for_selector(logged_in_selector, timeout=timeout_seconds * 1000)
@@ -103,6 +105,6 @@ def capture_login(
     try:
         os.chmod(target_path, 0o600)
     except OSError:
-        pass  # ويندوز أو نظام ملفات لا يدعم صلاحيات POSIX
+        pass  # Windows or a filesystem without POSIX permissions
 
     return target_path

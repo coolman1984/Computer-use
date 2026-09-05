@@ -1,10 +1,11 @@
-"""محوّل تشغيل وكلاء الذكاء الاصطناعي كعمليات فرعية (Codex CLI / Claude
-Code CLI)، مع بث مخرجات حي، مهلة زمنية، وتسجيل توكنز، واحترام صارم
-لوضع AgentMode.ANALYZE: قراءة وتحليل فقط، بلا أي تعديل ملفات.
+"""Adapter that runs AI agents as subprocesses (Codex CLI / Claude Code CLI),
+with live output streaming, a timeout, token accounting, and strict
+enforcement of AgentMode.ANALYZE: read and analyze only, never modify a file.
 
-الوكيل يطبع سطر JSON أخير على مخرجه القياسي يلخّص النتيجة (توكنز، ملفات
-معدّلة، هل نجحت الاختبارات، هل يُنصح بالتصعيد). أي سطر آخر يُعامل كمخرج
-حي عادي يُبث عبر on_output فقط.
+The agent prints a final JSON line on its standard output summarizing the
+result (tokens, changed files, whether tests passed, whether escalation is
+advised). Every other line is treated as ordinary live output, streamed only
+through on_output.
 """
 
 from __future__ import annotations
@@ -26,11 +27,11 @@ OutputSink = Callable[[str], None]
 
 
 class AgentSafetyViolation(PermanentError):
-    """رُفعت لأن الوكيل ادّعى تعديل ملفات وهو في وضع Analyze — ممنوع إطلاقًا."""
+    """Raised because the agent claimed to modify files while in Analyze mode — never permitted."""
 
 
 def _extract_last_json(lines: list[str]) -> dict[str, Any]:
-    """يبحث من آخر الأسطر للأول عن أول سطر JSON صالح (يبدأ بـ '{')."""
+    """Search from the last line backward for the first valid JSON line (starting with '{')."""
     for line in reversed(lines):
         stripped = line.strip()
         if not stripped.startswith("{"):
@@ -45,7 +46,7 @@ def _extract_last_json(lines: list[str]) -> dict[str, Any]:
 
 
 class CliAgentRunner:
-    """ينفّذ AgentRunnerPort: يشغّل الوكيل كعملية فرعية ويبني AgentResponse."""
+    """Implements AgentRunnerPort: runs the agent as a subprocess and builds an AgentResponse."""
 
     def __init__(
         self,
@@ -67,9 +68,10 @@ class CliAgentRunner:
         env = {
             **os.environ,
             **self._env,
-            # مخرجات الوكيل بروتوكول نصي/JSON وقد تحتوي العربية. على Windows
-            # الترميز الافتراضي للعملية الفرعية قد يكون cp1252، فيفشل الوكيل
-            # نفسه قبل أن يطبع النتيجة. نفرض UTF-8 على الطرفين.
+            # The agent's output is a text/JSON protocol and may contain
+            # non-ASCII text. On Windows the subprocess's default encoding
+            # may be cp1252, which can make the agent itself fail before it
+            # ever prints its result. Force UTF-8 on both ends.
             "PYTHONIOENCODING": "utf-8",
             "SMARTOPS_AGENT_MODE": request.mode.value,
         }
@@ -88,7 +90,7 @@ class CliAgentRunner:
                 bufsize=1,
             )
         except OSError as exc:
-            return AgentResponse(ok=False, summary=f"تعذّر تشغيل الوكيل: {exc}")
+            return AgentResponse(ok=False, summary=f"Could not launch the agent: {exc}")
 
         lines: list[str] = []
 
@@ -100,7 +102,7 @@ class CliAgentRunner:
                     try:
                         self._on_output(line)
                     except Exception:
-                        pass  # مستمع البث لا يُسقط تشغيل الوكيل أبدًا
+                        pass  # a streaming listener must never take down the agent run
 
         reader_thread = threading.Thread(target=_reader, daemon=True)
         reader_thread.start()
@@ -118,7 +120,7 @@ class CliAgentRunner:
         if timed_out:
             return AgentResponse(
                 ok=False,
-                summary=f"انتهت المهلة الزمنية ({request.timeout_seconds:.0f} ثانية) قبل أن ينهي الوكيل عمله",
+                summary=f"Timed out ({request.timeout_seconds:.0f} seconds) before the agent finished its work",
                 raw_output=raw_output,
                 should_escalate=True,
             )
@@ -128,7 +130,7 @@ class CliAgentRunner:
 
         if request.mode is AgentMode.ANALYZE and response.changed_files:
             raise AgentSafetyViolation(
-                "الوكيل ادّعى تعديل ملفات وهو في وضع التحليل فقط (Analyze) — غير مسموح إطلاقًا",
+                "The agent claimed to modify files while in analyze-only mode (Analyze) — never permitted",
                 details={"changed_files": response.changed_files, "reason": request.reason},
             )
 

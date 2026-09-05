@@ -1,40 +1,40 @@
 # SmartOps — Intelligent Automation & Operations Control Center
 
-منصة محلية موحدة لجمع البيانات من أنظمة الويب، تشغيل أتمتة الأعمال، مراقبة العمليات والمواقع، تسجيل التاريخ الكامل، واستخدام وكلاء ذكاء اصطناعي للتشخيص والإصلاح والتصعيد الآمن.
+A unified local platform for collecting data from web systems, running business automations, monitoring processes and sites, keeping a full history log, and using AI agents for diagnosis, safe repair, and escalation.
 
-> ⚠️ هذا المستودع عام حاليًا. لا تضع فيه بيانات شركة حساسة، روابط داخلية، أسرار، كلمات مرور، ملفات خام حقيقية، أو تفاصيل بنية داخلية خاصة.
+> ⚠️ This repository is currently public. Do not put sensitive company data, internal URLs, secrets, passwords, real raw files, or private internal architecture details in it.
 
-## الرؤية
+## Vision
 
 ```text
-أنظمة ومواقع
+Systems and sites
     ↓
-استخراج وتنزيل
+Extraction and download
     ↓
-تحقق من جودة الملفات
+File quality validation
     ↓
-تشغيل أتمتة الإدارات
+Department automation
     ↓
-ربط العمليات والبيانات
+Linking processes and data
     ↓
-مراقبة + تاريخ + إنذارات
+Monitoring + history + alerts
     ↓
-تشخيص وإصلاح بالذكاء الاصطناعي
+AI diagnosis and repair
 ```
 
-## المكونات الرئيسية
+## Main components
 
-- محرك متصفح تكيفي متعدد الطبقات.
-- مركز عمليات وسير عمل.
-- إدارة ملفات خام وتاريخ بيانات.
-- سجل أحداث وحوادث كامل.
-- إنذار مبكر ومراقبة أداء.
-- مدير وكلاء لتشغيل Codex CLI وClaude Code CLI.
-- تصعيد ذكي حسب صعوبة المشكلة.
-- اختبار وتراجع قبل نشر أي إصلاح.
-- واجهة ويب محلية مع شات جانبي للتحكم.
+- Adaptive multi-layer browser engine.
+- Operations and workflow center.
+- Raw file management and data history.
+- Full event and incident log.
+- Early warning and performance monitoring.
+- Agent manager to run Codex CLI and Claude Code CLI.
+- Smart escalation based on problem difficulty.
+- Testing and rollback before deploying any fix.
+- Local web interface with a side chat for control.
 
-## البداية التقنية
+## Technical foundation
 
 - Python
 - FastAPI
@@ -43,9 +43,9 @@
 - DuckDB
 - Parquet
 - WebSocket
-- OpenTelemetry لاحقًا
+- OpenTelemetry later
 
-## اقرأ بالترتيب
+## Read in order
 
 1. `docs/PROJECT_CONTEXT.md`
 2. `docs/MASTER_PLAN.md`
@@ -58,39 +58,56 @@
 9. `docs/AGENT_TASK_PACKETS.md`
 10. `AGENTS.md`
 
-## أول هدف تنفيذي
+## First execution goal
 
-نسخة تجريبية صغيرة:
+A small pilot version:
 
-- 3 أنظمة
-- 5 تقارير
-- تنزيل تلقائي
-- تحقق من الملفات
-- سجل كامل
-- لوحة مراقبة
-- إنذار تأخير
-- تشغيل Codex لتحليل حادثة
+- 3 systems
+- 5 reports
+- Automatic download
+- File validation
+- Full logging
+- Monitoring dashboard
+- Lateness alert
+- Running Codex to analyze an incident
 
-بعد إثبات الثبات نوسع المنصة.
+After proving stability, we expand the platform.
 
-## التشغيل المحلي
+## Running locally
 
-### تشغيل بنقرة واحدة على Windows
+### One-click run on Windows
 
-اعمل double-click على `START.cmd` في جذر المشروع. الملف يفحص Python والمتطلبات،
-يشغّل خادم SmartOps مرة واحدة فقط، ينتظر نجاح `/health`، ثم يفتح غرفة القيادة
-في Google Chrome. سجلات التشغيل وملف PID محفوظة خارج المستودع في
+Double-click `START.cmd` at the project root. It checks Python and the
+requirements, starts the SmartOps server exactly once, waits for `/health`
+to succeed, then opens the operations center in Google Chrome. Run logs and
+the PID file are kept outside the repository, in
 `%LOCALAPPDATA%\SmartOps\launcher`.
 
-للتشغيل اليدوي أو التطوير:
+For manual runs or development:
 
 ```bash
 pip install -e ".[dev]"
 pytest -q
-uvicorn smartops.main:app --reload --port 8765   # أو: python -m smartops serve
+uvicorn smartops.main:app --reload --port 8765   # or: python -m smartops serve
 ```
 
-## التشغيل الأول (نظام حقيقي)
+## Workflow order (the UI follows the same order)
+
+Every step depends on the one before it, and the UI is ordered to match:
+
+| # | Step | Where | Done when |
+| --- | --- | --- | --- |
+| 1 | Define the system (YAML outside the repo) | `SMARTOPS_SYSTEMS_DIR` then the **Systems** page | The system shows up in the list |
+| 2 | Sign in to the system | `python -m smartops login <system>` or the **Sign-in** page | Status is **Connected** |
+| 3 | Record the workflow once | The **Recordings** page | The recording is **Completed** and has a draft |
+| 4 | Run collection | **Collect now** button in **Systems** | A file downloaded and passed validation |
+| 5 | Review the results | **Runs** then **Files** | The file's status is Valid |
+| 6 | Handle failures | **Incidents** | No open incidents |
+
+The **Overview** page shows the first four steps with their real status, and
+the first incomplete step is the one you should do next.
+
+## First run (a real system)
 
 ```bash
 pip install -e ".[dev]"
@@ -102,35 +119,42 @@ python -m smartops collect <system> <report>
 python -m smartops work
 ```
 
-`SMARTOPS_SYSTEMS_DIR` لازم يشاور على مجلد **خارج هذا المستودع العام**
-(راجع D012 وD023) فيه ملفات `*.yaml` بتعريفات أنظمتك الحقيقية على نمط
-`config/systems/example.yaml`. `smartops login` يفتح متصفحًا مرئيًا لتسجّل
-دخولك يدويًا مرة واحدة؛ المنصة لا ترى كلمة مرورك أبدًا (D020).
+`SMARTOPS_SYSTEMS_DIR` must point at a folder **outside this public
+repository** (see D012 and D023) containing `*.yaml` files with your real
+system definitions, following the pattern in
+`config/systems/example.yaml`. `smartops login` opens a visible browser for
+you to sign in manually once; the platform never sees your password (D020).
 
-للتشغيل الليلي بدون وجودك، عرّف النظام خارجيًا بوضع `auth.mode: unattended`
-ومحددات username/password/submit فقط، ثم افتح `/app/credentials.html` واحفظ
-البيانات مرة واحدة. تُحفظ في Windows Credential Manager تحت حساب Windows نفسه؛
-لا تُحفظ في YAML أو SQLite أو السجلات أو التسجيلات. راجع
-`docs/UNATTENDED_LOGIN.md`. هذا المسار يفترض عدم وجود MFA/CAPTCHA، وأن الجهاز
-والـVPN والعامل يظلّوا شغّالين أثناء الليل.
+For unattended overnight runs with no one present, define the system
+externally with `auth.mode: unattended` and only the username/password/submit
+selectors, then open `/app/credentials.html` and save the credential once.
+It is stored in Windows Credential Manager under your own Windows account;
+it is never saved in YAML, SQLite, logs, or recordings. See
+`docs/UNATTENDED_LOGIN.md`. This path assumes no MFA/CAPTCHA, and that the
+machine, VPN, and worker all stay running overnight.
 
-نقاط الواجهة الحالية: `/health`، `/api/workflows`، `/api/runs`، `/api/runs/{id}`،
-`/api/runs/{id}/events`، `/api/events`، `/api/incidents`، `/api/files`،
-`/api/systems`، `/api/alerts`، `/api/systems/{system}/{report}/collect`.
+Current interface endpoints: `/health`, `/api/workflows`, `/api/runs`,
+`/api/runs/{id}`, `/api/runs/{id}/events`, `/api/events`, `/api/incidents`,
+`/api/files`, `/api/systems`, `/api/alerts`,
+`/api/systems/{system}/{report}/collect`.
 
-## حالة البناء
+## Build status
 
-النواة مكتملة ومختبَرة محليًا: إعدادات، قاعدة SQLite بترحيلات، سجل أحداث،
-محرك سير عمل قابل للاستكمال مع قفل وإعادة محاولة مصنّفة، فتح حوادث تلقائي
-بحزمة أدلة كاملة (لقطات وتتبع على القرص، لا base64 في القاعدة)، تنبيهات محلية
-وWebhook، بث حي عبر WebSocket، محوّل Playwright بجلسات دخول محفوظة وكشف
-انتهاء جلسة، مدقق ملفات، تعريفات أنظمة من YAML (مع مصادقة وجدولة)، جدولة
-تلقائية + عامل خلفي بتوازي محدود، إنذار بطء بعتبات ثابتة، أرشفة تحليلية
-Parquet/DuckDB، تشغيل وكيل ذكاء اصطناعي بوضع تحليل فقط، واجهة سطر أوامر
-(`python -m smartops`)، وواجهة ويب (`web/`, متاحة على `/app`).
+The core is complete and tested locally: settings, a migrated SQLite
+database, an event log, a resumable workflow engine with locking and
+classified retry, automatic incident opening with a full evidence pack
+(screenshots and traces on disk, no base64 in the database), local and
+webhook notifications, live streaming over WebSocket, a Playwright adapter
+with saved login sessions and session-expiry detection, a file validator,
+system definitions from YAML (with authentication and scheduling), automatic
+scheduling + a background worker with bounded concurrency, slowness alerting
+with fixed thresholds, analytical Parquet/DuckDB archiving, an AI agent
+runner in analyze-only mode, a command-line interface
+(`python -m smartops`), and a web interface (`web/`, available at `/app`).
 
-**لم يُشغَّل بعد ضد نظام إنتاج حقيقي.** كل ما سبق مبني ومختبَر محليًا بصفحات
-ومحاكيات، لكن أول تشغيل فعلي على نظام حقيقي لم يحدث بعد — هو الخطوة التالية
-الفعلية، وأي مشاكل تظهر فيه هي المدخل الحقيقي لمرحلتَي الإنذار المبكر الكامل
-والإصلاح الذاتي (P5، P6). التفاصيل في `docs/EXECUTION_PLAN.md` و
-`docs/AGENT_TASK_PACKETS.md` و`docs/FINISH_PACKET_SONNET.md`.
+**Not yet run against a real production system.** Everything above is built
+and tested locally with pages and mocks, but the first real run against a
+real system has not happened yet — that is the actual next step, and any
+problems it surfaces are the real entry point into the full early-warning
+and self-healing phases (P5, P6). Details in `docs/EXECUTION_PLAN.md`,
+`docs/AGENT_TASK_PACKETS.md`, and `docs/FINISH_PACKET_SONNET.md`.

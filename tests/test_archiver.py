@@ -1,4 +1,4 @@
-"""اختبارات S-06: أرشفة تحليلية (Parquet مقسّم + استعلام DuckDB لمقارنة فترتين)."""
+"""S-06 tests: analytical archiving (partitioned Parquet + a DuckDB query to compare two periods)."""
 
 from __future__ import annotations
 
@@ -88,13 +88,13 @@ def test_compare_periods_on_empty_archive_returns_zeros(tmp_path: Path) -> None:
 def test_compare_periods_computes_stats_correctly(tmp_path: Path) -> None:
     archiver = HistoryArchiver(tmp_path)
 
-    # فترة 1: يومين، حجم وصفوف صغيرة نسبيًا، وملف واحد مرفوض
+    # Period 1: two days, relatively small size and row count, one rejected file
     archiver.archive(_artifact(size_bytes=1000, row_count=50, period="p1"))
     archiver.archive(
         _artifact(size_bytes=2000, row_count=100, period="p1", validation_status=ValidationStatus.FAILED)
     )
 
-    # فترة 2: حجم وصفوف أكبر بوضوح، كلها سليمة
+    # Period 2: clearly larger size and row count, all valid
     archiver.archive(
         _artifact(
             size_bytes=4000,

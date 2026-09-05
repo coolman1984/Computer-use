@@ -1,7 +1,8 @@
-"""تنفيذ محلي لعقد FileValidatorPort: بمكتبات المعيار القياسي فقط.
+"""Local implementation of the FileValidatorPort contract, standard library only.
 
-نتجنّب اعتماديات جديدة (مثل openpyxl) لأن csv وzipfile وxml.etree
-تكفي لقراءة عناوين الأعمدة وعدد الصفوف من CSV وExcel (.xlsx).
+We avoid new dependencies (such as openpyxl) because csv, zipfile, and
+xml.etree are enough to read column headers and row counts from CSV and
+Excel (.xlsx) files.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ def _read_csv_header_and_count(path: Path) -> tuple[list[str], int]:
 
 
 def _col_index(cell_ref: str) -> int:
-    """يحوّل مرجع خلية مثل C3 إلى رقم عمود بادئ من صفر."""
+    """Convert a cell reference such as C3 into a zero-based column index."""
     match = _COL_LETTERS_RE.match(cell_ref)
     letters = match.group(0) if match else "A"
     index = 0
@@ -68,7 +69,7 @@ def _first_sheet_xml_name(archive: zipfile.ZipFile) -> str:
         if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
     )
     if not sheets:
-        raise ValueError("لا توجد أوراق داخل ملف Excel")
+        raise ValueError("no sheets inside the Excel file")
     return sheets[0]
 
 
@@ -105,11 +106,12 @@ def _read_xlsx_header_and_count(path: Path) -> tuple[list[str], int]:
 
 
 class LocalFileValidator:
-    """يفحص الوجود، الحجم، الامتداد، البصمة، الأعمدة، عدد الصفوف، العمر، والتكرار."""
+    """Checks existence, size, extension, hash, columns, row count, age, and duplicates."""
 
     def __init__(self, files_repo: Any = None, *, now: Any = None) -> None:
-        # files_repo اختياري: أي كائن له find_by_hash(sha256) -> list[FileArtifact]
-        # (مثل services.files). بدونه يتم تخطي فحص التكرار.
+        # files_repo is optional: any object with find_by_hash(sha256) ->
+        # list[FileArtifact] (such as services.files). Without it the
+        # duplicate check is skipped.
         self._files_repo = files_repo
         self._now = now or time.time
 
@@ -119,11 +121,11 @@ class LocalFileValidator:
         details: dict[str, Any] = {}
 
         if not path.exists():
-            return ValidationReport(passed=False, failures=["الملف غير موجود"])
+            return ValidationReport(passed=False, failures=["File does not exist"])
 
         size_bytes = path.stat().st_size
         if size_bytes < rules.min_size_bytes:
-            failures.append(f"حجم الملف صغير جدًا ({size_bytes} بايت)")
+            failures.append(f"File is too small ({size_bytes} bytes)")
 
         suffix = path.suffix.lower()
         if rules.expected_extensions:
@@ -132,7 +134,7 @@ class LocalFileValidator:
                 for ext in rules.expected_extensions
             }
             if suffix not in allowed:
-                failures.append(f"امتداد غير متوقع: {suffix or '(بدون امتداد)'}")
+                failures.append(f"Unexpected extension: {suffix or '(no extension)'}")
 
         sha256 = _sha256_of(path)
 
@@ -143,32 +145,32 @@ class LocalFileValidator:
             try:
                 header, row_count = _read_csv_header_and_count(path)
             except (OSError, UnicodeDecodeError) as exc:
-                failures.append(f"تعذر فتح الملف كـ CSV: {exc}")
+                failures.append(f"Could not open the file as CSV: {exc}")
         elif suffix == ".xlsx":
             try:
                 header, row_count = _read_xlsx_header_and_count(path)
             except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError) as exc:
-                failures.append(f"تعذر فتح ملف Excel: {exc}")
+                failures.append(f"Could not open the Excel file: {exc}")
         elif needs_content:
-            failures.append(f"لا يمكن التحقق من محتوى امتداد غير مدعوم: {suffix}")
+            failures.append(f"Cannot validate the content of an unsupported extension: {suffix}")
 
         if rules.required_columns:
             missing = [c for c in rules.required_columns if c not in header]
             if missing:
-                failures.append(f"أعمدة مفقودة: {', '.join(missing)}")
+                failures.append(f"Missing columns: {', '.join(missing)}")
 
         if rules.min_rows is not None and row_count is not None and row_count < rules.min_rows:
-            failures.append(f"عدد الصفوف ({row_count}) أقل من الحد الأدنى ({rules.min_rows})")
+            failures.append(f"Row count ({row_count}) is below the minimum ({rules.min_rows})")
 
         if rules.max_age_hours is not None:
             age_hours = (self._now() - path.stat().st_mtime) / 3600
             if age_hours > rules.max_age_hours:
-                failures.append(f"الملف قديم جدًا ({age_hours:.1f} ساعة)")
+                failures.append(f"File is too old ({age_hours:.1f} hours)")
 
         if rules.reject_duplicate_hash and self._files_repo is not None and size_bytes > 0:
             duplicates = [f for f in self._files_repo.find_by_hash(sha256) if f.path != str(path)]
             if duplicates:
-                failures.append("الملف مطابق لملف سابق (بصمة مكررة)")
+                failures.append("File is identical to an earlier one (duplicate hash)")
                 details["duplicate_of"] = duplicates[0].id
 
         return ValidationReport(

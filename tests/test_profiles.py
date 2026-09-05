@@ -1,4 +1,4 @@
-"""اختبارات S-03: تحميل تعريفات الأنظمة وتحويلها لمعطيات collect.report."""
+"""S-03 tests: loading system definitions and turning them into collect.report params."""
 
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ from smartops.workflows.profiles import (
 
 VALID_YAML = """
 key: erp_demo
-name: نظام تجريبي
+name: Demo system
 reports:
   - key: daily_sales
-    title: تقرير المبيعات
+    title: Daily sales report
     url: "https://intranet.example.local/reports/daily-sales"
     download_selector: "#export-csv"
     wait_selector: "#report-ready"
@@ -34,7 +34,7 @@ reports:
       warn_after_seconds: 90
       critical_after_seconds: 180
   - key: direct_report
-    title: تقرير مباشر
+    title: Direct report
     url: "https://intranet.example.local/reports/direct"
     direct_download_url: "https://intranet.example.local/exports/direct.csv"
 """
@@ -46,7 +46,7 @@ def test_parse_valid_system_profile() -> None:
     profile = parse_system_profile(yaml.safe_load(VALID_YAML))
 
     assert profile.key == "erp_demo"
-    assert profile.name == "نظام تجريبي"
+    assert profile.name == "Demo system"
     assert [r.key for r in profile.reports] == ["daily_sales", "direct_report"]
 
     report = profile.report("daily_sales")
@@ -138,12 +138,12 @@ def test_duplicate_system_key_across_files_raises(tmp_path: Path) -> None:
     (tmp_path / "a.yaml").write_text(VALID_YAML, encoding="utf-8")
     (tmp_path / "b.yaml").write_text(VALID_YAML, encoding="utf-8")
 
-    with pytest.raises(ConfigurationError, match="مكرر"):
+    with pytest.raises(ConfigurationError, match="Duplicate"):
         load_system_profiles(tmp_path)
 
 
 def test_example_config_in_repo_is_valid() -> None:
-    """ملف config/systems/example.yaml في المستودع لازم يفضل صالحًا دايمًا."""
+    """config/systems/example.yaml in the repo must always stay valid."""
     profiles = load_system_profiles("config/systems")
     assert "erp_demo" in profiles
     assert len(profiles["erp_demo"].reports) >= 1
@@ -176,7 +176,7 @@ def test_registry_list_is_sorted(tmp_path: Path) -> None:
 
 
 def test_profile_params_feed_collect_report_end_to_end(services, tmp_path: Path) -> None:
-    """اختبار تكاملي: params من ملف تعريف حقيقي تشتغل مباشرة مع collect.report."""
+    """An integration test: params from a real definition file work directly with collect.report."""
     from smartops.domain.enums import ExtractionLayer
     from smartops.ports.browser import ExtractionRequest, ExtractionResult
     from smartops.ports.validation import ValidationReport, ValidationRules
@@ -216,11 +216,11 @@ def test_profile_params_feed_collect_report_end_to_end(services, tmp_path: Path)
     assert run.status is RunStatus.SUCCEEDED
 
 
-# ---------- اختبارات F-05: المصادقة والجدولة ----------
+# ---------- F-05 tests: authentication and scheduling ----------
 
 VALID_YAML_WITH_AUTH_AND_SCHEDULE = """
 key: erp_demo
-name: نظام تجريبي
+name: Demo system
 auth:
   mode: session
   login_url: "https://intranet.example.local/login"
@@ -228,7 +228,7 @@ auth:
   login_selector: "#login-form"
 reports:
   - key: daily_sales
-    title: تقرير المبيعات
+    title: Daily sales report
     url: "https://intranet.example.local/reports/daily-sales"
     download_selector: "#export-csv"
     period: daily
@@ -238,7 +238,7 @@ reports:
     schedule:
       daily_at: "08:00"
   - key: hourly_report
-    title: تقرير كل ساعة
+    title: Hourly report
     url: "https://intranet.example.local/reports/hourly"
     download_selector: "#export-csv"
     schedule:

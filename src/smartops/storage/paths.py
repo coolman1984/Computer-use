@@ -1,4 +1,4 @@
-"""تنظيم مجلدات البيانات الخام: data/raw/YYYY/MM/DD/<system>/<report>/"""
+"""Raw data directory layout: data/raw/YYYY/MM/DD/<system>/<report>/"""
 
 from __future__ import annotations
 

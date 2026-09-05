@@ -1,4 +1,4 @@
-"""اختبارات S-04: العامل الخلفي — استطلاع، توازي محدود، ومنع التداخل."""
+"""S-04 tests: the background worker — polling, bounded concurrency, and preventing overlap."""
 
 from __future__ import annotations
 
@@ -70,18 +70,18 @@ def test_worker_respects_max_concurrency(services) -> None:
         worker.stop()
         worker.join(timeout=5)
 
-    assert all_done, "لازم كل التشغيلات تخلص خلال المهلة"
+    assert all_done, "Every run must finish within the timeout"
     assert active["max_seen"] <= 2
-    assert active["max_seen"] >= 1  # على الأقل اشتغل تشغيل واحد بالفعل
+    assert active["max_seen"] >= 1  # at least one run was actually in flight
 
 
 def test_concurrent_execute_calls_do_not_double_run_same_step(services) -> None:
-    """يثبت أن تشغيلين (نداءين متزامنين) على نفس run_id لا يتداخلان أبدًا."""
+    """Proves that two concurrent execute() calls on the same run_id never overlap."""
     calls = {"n": 0}
     barrier = threading.Barrier(2, timeout=3)
 
     def counting_step(ctx):
-        time.sleep(0.05)  # يوسّع فرصة التزامن الحقيقي قبل الإفراج عن القفل
+        time.sleep(0.05)  # widens the window for genuine concurrency before the lock is released
         calls["n"] += 1
         return StepResult.ok()
 
@@ -110,12 +110,12 @@ def test_concurrent_execute_calls_do_not_double_run_same_step(services) -> None:
     for t in threads:
         t.join(timeout=5)
 
-    assert calls["n"] == 1, "خطوة الخطوة لازم تتنفذ مرة واحدة بالظبط رغم النداءين المتزامنين"
+    assert calls["n"] == 1, "The step must execute exactly once despite the two concurrent calls"
     assert any(r.status is RunStatus.SUCCEEDED for r in results)
 
 
 def test_worker_does_not_dispatch_more_than_max_concurrency_at_once(services) -> None:
-    """حتى مع دفعة واحدة من عدة تشغيلات مستحقة، لا يُرسل أكتر من الحد المسموح."""
+    """Even with one batch of several due runs, no more than the allowed limit is dispatched."""
     for _ in range(5):
         services.runner.create_run("platform.selfcheck")
 
@@ -138,13 +138,13 @@ def test_worker_stop_is_clean_and_prompt(services) -> None:
     elapsed = time.monotonic() - started
 
     assert not worker.is_running()
-    assert elapsed < 1.5  # الإيقاف ما ينتظرش دورة poll_interval كاملة (2 ثانية)
+    assert elapsed < 1.5  # stopping does not wait out a full poll_interval cycle (2 seconds)
 
 
 def test_worker_survives_a_single_run_execute_failure(services) -> None:
-    """خطأ غير متوقع أثناء execute تشغيل واحد ما يوقفش العامل عن معالجة الباقي."""
+    """An unexpected error while executing one run does not stop the worker from processing the rest."""
     good_run = services.runner.create_run("platform.selfcheck")
-    bad_run = services.runs.create("does.not.exist")  # مسجّل في DB لكن سير عمله غير معرّف
+    bad_run = services.runs.create("does.not.exist")  # recorded in the DB but its workflow is not defined
 
     errors: list[tuple[str, BaseException]] = []
     worker = Worker(
@@ -169,7 +169,7 @@ def test_worker_survives_a_single_run_execute_failure(services) -> None:
     assert isinstance(errors[0][1], ConfigurationError)
 
 
-# ---------- اختبارات F-09: الجدولة داخل العامل ----------
+# ---------- F-09 tests: scheduling inside the worker ----------
 
 
 class _StubScheduler:
@@ -180,7 +180,7 @@ class _StubScheduler:
     def tick(self):
         self.ticks += 1
         if self._boom:
-            raise RuntimeError("عطل مصطنع في الجدولة")
+            raise RuntimeError("Artificial fault in scheduling")
         return []
 
 

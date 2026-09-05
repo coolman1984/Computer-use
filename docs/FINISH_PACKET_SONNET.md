@@ -21,8 +21,10 @@ here. If something genuinely contradicts, prefer this document over older docs.
 
 ## Hard rules (unchanged from AGENT_TASK_PACKETS.md)
 
-1. **Write code comments and docstrings in Arabic**, matching the existing
-   codebase style exactly. This document is English only because it is a spec.
+1. **Write code comments and docstrings in English**, matching the existing
+   codebase style exactly. (Historical note: this packet originally required
+   Arabic comments; the codebase was later fully translated to English —
+   follow English going forward.)
 2. Local edits only — never regenerate a whole file to change a few lines.
 3. Never commit real internal URLs, credentials, cookies, or session files.
 4. Every new adapter goes under `src/smartops/adapters/<domain>/`.
@@ -67,7 +69,7 @@ Windows, meaningful on POSIX).
 **Also edit** `config/system.example.yaml` — add under `storage:`:
 ```yaml
   sessions_dir: data/sessions
-  systems_dir: config/systems   # للتعريفات الحقيقية: استخدم SMARTOPS_SYSTEMS_DIR لمجلد خارج المستودع
+  systems_dir: config/systems   # for real definitions: use SMARTOPS_SYSTEMS_DIR pointing outside the repo
 ```
 
 **Test** `tests/test_config.py` (new file): defaults are correct; env overrides
@@ -86,7 +88,7 @@ is keyed globally so concurrent runs overwrite each other.
 ```python
 @dataclass(frozen=True)
 class ExtractionRequest:
-    # ... كل الحقول الحالية كما هي، ثم:
+    # ... all current fields as they are, then:
     run_id: str = ""
     session_state_path: Path | None = None
     evidence_dir: Path | None = None
@@ -95,7 +97,7 @@ class ExtractionRequest:
 ```python
 @dataclass
 class ExtractionResult:
-    # ... كل الحقول الحالية كما هي، ثم:
+    # ... all current fields as they are, then:
     auth_required: bool = False
 ```
 
@@ -164,14 +166,14 @@ def _session_expired(self, page, filters) -> bool:
 Call it in `_extract_via_dom` right after `page.goto`, before waiting for
 `wait_selector`. If it returns True, return a failure result with
 `auth_required=True` and message
-`"الجلسة منتهية أو غير مسجّلة الدخول للنظام <system> — شغّل: python -m smartops login <system>"`.
+`"Session expired or not signed in for system <system> — run: python -m smartops login <system>"`.
 Also capture failure evidence in that case.
 
 In `_try_network`, treat an HTML response as a silent login redirect:
 ```python
 content_type = (response.headers.get("content-type") or "").lower()
 if "text/html" in content_type:
-    return None   # على الأرجح تحويل لصفحة الدخول — انزل لطبقة DOM
+    return None   # most likely a redirect to the login page — fall through to the DOM layer
 ```
 
 `_failure` gains an `auth_required: bool = False` parameter it passes through.
@@ -201,12 +203,12 @@ session afterwards. The platform never sees or stores a password.
 
 ```python
 def session_path(sessions_dir: Path | str, system_key: str) -> Path
-    # <sessions_dir>/<slug(system_key)>.json   — استخدم paths.slug
+    # <sessions_dir>/<slug(system_key)>.json   — use paths.slug
 
 def session_exists(sessions_dir, system_key) -> bool
 
 def session_age_hours(sessions_dir, system_key, *, now=None) -> float | None
-    # None لو الملف غير موجود
+    # None if the file does not exist
 
 def capture_login(
     system_key: str,
@@ -227,7 +229,7 @@ def capture_login(
 2. New context; if a session file already exists, load it as `storage_state` so
    the user may only need to refresh a partly-valid session.
 3. `page.goto(login_url)`.
-4. Print (Arabic) instructions to stdout telling the user to complete login in
+4. Print instructions to stdout telling the user to complete login in
    the opened window, then press Enter here.
 5. Wait: if `logged_in_selector` is given, `page.wait_for_selector(...)` with
    `timeout_seconds`; otherwise call `wait_for_enter()` (default `input`).
@@ -264,12 +266,12 @@ class AuthProfile:
 
 @dataclass(frozen=True)
 class ScheduleProfile:
-    daily_at: str = ""              # "HH:MM" بتوقيت الجهاز المحلي
+    daily_at: str = ""              # "HH:MM" in the machine's local time
     every_seconds: float | None = None
     enabled: bool = True
 
     @property
-    def is_active(self) -> bool:    # True لو enabled و(daily_at أو every_seconds)
+    def is_active(self) -> bool:    # True if enabled and (daily_at or every_seconds)
 ```
 
 `SystemProfile` gains `auth: AuthProfile = field(default_factory=AuthProfile)`.
@@ -335,7 +337,7 @@ it actually writes evidence. (Do not create an empty dir for every successful ru
 ```python
 if result.auth_required:
     raise AuthError(
-        result.message or "الجلسة منتهية",
+        result.message or "Session expired",
         details={"system": system, "needs_login": True,
                  "command": f"python -m smartops login {system}"},
     )
@@ -380,12 +382,12 @@ level = evaluate_latency(duration, warn_after_seconds=ctx.get("warn_after_second
 if level is not None:
     ctx.emit(EventType.ALERT_RAISED,
              severity=Severity.WARNING if level is AlertLevel.YELLOW else Severity.ERROR,
-             message=f"التنزيل أبطأ من المتوقع ({duration:.1f} ثانية)",
+             message=f"Download was slower than expected ({duration:.1f} seconds)",
              payload={"level": level.value, "duration_seconds": duration,
                       "normal_duration_seconds": ctx.get("normal_duration_seconds")})
     notifier = getattr(ctx.services, "notifier", None)
     if notifier is not None:
-        notifier.send(Alert(level=level, title=f"بطء في {system}/{report}",
+        notifier.send(Alert(level=level, title=f"Slowness in {system}/{report}",
                             body=..., run_id=ctx.run_id, payload={...}))
 ```
 **A slow run is still a successful run.** Never fail the step on latency.
@@ -480,9 +482,9 @@ Commands:
 | `python -m smartops work` | Build `Services`, start `Worker(services, scheduler=services.scheduler)`, run until Ctrl-C, then `worker.stop()` + `join()`. This is the daily driver. |
 | `python -m smartops serve` | `uvicorn.run(create_app(), host=settings.app.host, port=settings.app.port)`. |
 
-Every command builds `Services` once and closes it in a `finally`. Print human
-Arabic text, no tracebacks for expected failures — catch `SmartOpsError` and
-print `exc.message` plus `exc.details`, exit 1.
+Every command builds `Services` once and closes it in a `finally`. Print
+plain human-readable text, no tracebacks for expected failures — catch
+`SmartOpsError` and print `exc.message` plus `exc.details`, exit 1.
 
 Add to `pyproject.toml`:
 ```toml
@@ -509,10 +511,10 @@ Small, but it's what makes the web app honest about why a run failed.
 - `POST /api/systems/{system}/{report}/collect` → create + drive a
   `collect.report` run from the profile; 404 for an unknown system/report.
 
-**Edit** `web/index.html` + `web/static/app.js`: a "الأنظمة" panel listing
+**Edit** `web/index.html` + `web/static/app.js`: a "Systems" panel listing
 systems with session status, a red badge reading
-`الجلسة منتهية — سجّل الدخول من الطرفية` when a session is missing, and a
-"جمع الآن" button hitting the new POST endpoint. Match the existing pages' style;
+`Session expired — sign in from the terminal` when a session is missing, and a
+"Collect now" button hitting the new POST endpoint. Match the existing pages' style;
 no framework, no build step.
 
 **Test** — extend `tests/test_api.py`: the three endpoints return 200 with the
@@ -522,18 +524,22 @@ expected shape, and the unknown-system case returns 404.
 
 ## F-12 — Documentation and honest status
 
-1. **`docs/DECISION_LOG.md`** — append (Arabic, one short paragraph each):
-   - **D020 — الجلسة تُلتقط يدويًا مرة واحدة ثم يُعاد استخدامها.** المنصة لا ترى
-     كلمة مرور أبدًا؛ الإنسان يسجّل الدخول في متصفح مرئي و`storage_state` يُحفظ
-     خارج المستودع. جلسة منتهية = `AuthError` وحادثة برسالة تخبر المشغّل بالأمر المطلوب.
-   - **D021 — الأدلة تُكتب على القرص ومفتاحها `run_id`.** لقطات الشاشة والتتبع لا
-     تدخل سجل الأحداث ولا SQLite أبدًا (تضخّم + تسريب)، والمفتاح `run_id` حتى لا
-     تختلط أدلة تشغيلات متوازية.
-   - **D022 — الجدولة تُبنى من تعريفات الأنظمة لا من جدول جديد.** لا سكيمة جديدة؛
-     الاستحقاق يُحسب من آخر تشغيل للزوج (نظام، تقرير).
-   - **D023 — التعريفات الحقيقية خارج المستودع** عبر `SMARTOPS_SYSTEMS_DIR` (ينفّذ D012 عمليًا).
-2. **`README.md`** — replace the "حالة البناء" section with an honest one, and
-   add a **"التشغيل الأول"** section with this exact sequence:
+1. **`docs/DECISION_LOG.md`** — append (one short paragraph each):
+   - **D020 — The session is captured manually once, then reused.** The
+     platform never sees a password; the human signs in in a visible browser
+     and `storage_state` is saved outside the repository. An expired session
+     becomes `AuthError` plus an incident with a message telling the operator
+     what command to run.
+   - **D021 — Evidence is written to disk, keyed by `run_id`.** Screenshots
+     and traces never enter the event log or SQLite (bloat + leakage risk),
+     and the key is `run_id` so evidence from parallel runs never mixes.
+   - **D022 — Scheduling is built from the system definitions, not a new
+     table.** No new schema; due-ness is computed from the last run of the
+     (system, report) pair.
+   - **D023 — Real definitions live outside the repository** via
+     `SMARTOPS_SYSTEMS_DIR` (this is D012 put into practice).
+2. **`README.md`** — replace the "Build status" section with an honest one, and
+   add a **"First run"** section with this exact sequence:
    ```bash
    pip install -e ".[dev]"
    playwright install chromium
@@ -548,7 +554,7 @@ expected shape, and the unknown-system case returns 404.
 3. **`docs/EXECUTION_PLAN.md`** — mark P5 as partially done (delay alert only;
    baselines and trend detection still open) and add a line that scheduling and
    session management are now implemented.
-4. **`docs/AGENT_TASK_PACKETS.md`** — append an `F-01..F-12 (تم ✅)` line under
+4. **`docs/AGENT_TASK_PACKETS.md`** — append an `F-01..F-12 (done ✅)` line under
    the recommended order so the next agent sees this packet happened.
 
 ---

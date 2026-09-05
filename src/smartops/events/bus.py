@@ -1,4 +1,4 @@
-"""ناقل أحداث داخلي: يسمح للواجهة (WebSocket لاحقًا) بالاستماع الحي دون ربط مباشر."""
+"""Internal event bus: lets the UI (WebSocket) listen live without direct coupling."""
 
 from __future__ import annotations
 
@@ -32,5 +32,5 @@ class EventBus:
         for subscriber in subscribers:
             try:
                 subscriber(event)
-            except Exception:  # المستمع لا يُسقط التشغيل أبدًا
+            except Exception:  # a listener must never take down the run
                 continue

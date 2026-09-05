@@ -1,4 +1,4 @@
-"""سجل الأحداث: العمود الفقري للتتبع. كل خطوة مهمة تترك أثرًا هنا."""
+"""The event log: the backbone of traceability. Every meaningful step leaves a trace here."""
 
 from __future__ import annotations
 

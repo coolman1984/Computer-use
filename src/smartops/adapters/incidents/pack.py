@@ -1,8 +1,9 @@
-"""حزمة الحادثة: تجميع كل أدلة حادثة واحدة في مجلد واحد + ملخص JSON.
+"""The incident pack: gathering all the evidence for one incident into one folder + a JSON summary.
 
-هذا هو "المدخل الأساسي للوكيل الذكي" (انظر MASTER_PLAN.md القسم 15):
-الملخص، الخطأ، خطوات التشغيل، الأحداث، الملفات المتوقعة مقابل الفعلية،
-وحوادث مشابهة سابقة عبر نفس التوقيع (signature) — قبل استدعاء أي وكيل.
+This is "the AI agent's primary entry point" (see MASTER_PLAN.md section
+15): the summary, the error, the run's steps, its events, expected vs. actual
+files, and earlier similar incidents sharing the same signature — all before
+any agent is ever invoked.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from ...domain.enums import StepStatus
 
 
 def _extract_error(run: Any, steps: list[Any]) -> dict[str, Any] | None:
-    """يستخرج تفاصيل الخطأ: من التشغيل أولًا، وإلا من آخر خطوة فاشلة."""
+    """Extract the error details: from the run first, otherwise from the last failed step."""
     if run is not None and run.error_class:
         return {"error_class": run.error_class, "message": run.error_message, "source": "run"}
     for step in reversed(steps):
@@ -31,7 +32,7 @@ def _extract_error(run: Any, steps: list[Any]) -> dict[str, Any] | None:
 
 
 def _expected_files(run: Any) -> dict[str, Any] | None:
-    """يستنتج الملف المتوقع من معطيات التشغيل (system/report) إن وُجدت."""
+    """Infer the expected file from the run's params (system/report), if present."""
     if run is None:
         return None
     system = run.params.get("system")
@@ -42,7 +43,7 @@ def _expected_files(run: Any) -> dict[str, Any] | None:
 
 
 class IncidentPackBuilder:
-    """يبني مجلد أدلة تحت incidents_dir/<incident_id>/ ويحدّث incident.pack_path."""
+    """Builds an evidence folder under incidents_dir/<incident_id>/ and updates incident.pack_path."""
 
     def __init__(
         self,
@@ -50,7 +51,7 @@ class IncidentPackBuilder:
         incidents: Any,
         runs: Any,
         steps: Any,
-        events: Any,  # سجل الأحداث: كائن له timeline(run_id) (مثل services.events)
+        events: Any,  # the event log: an object with timeline(run_id) (such as services.events)
         files: Any,
         base_dir: Path | str,
         clock: Clock | None = None,
@@ -67,7 +68,7 @@ class IncidentPackBuilder:
         incident = self._incidents.get(incident_id)
         if incident is None:
             raise SmartOpsError(
-                f"حادثة غير موجودة: {incident_id}", error_class=ErrorClass.PERMANENT
+                f"Incident not found: {incident_id}", error_class=ErrorClass.PERMANENT
             )
 
         run = self._runs.get(incident.run_id) if incident.run_id else None

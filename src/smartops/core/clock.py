@@ -1,4 +1,4 @@
-"""الوقت في SmartOps دائمًا UTC وقابل للتزييف في الاختبارات."""
+"""Time in SmartOps is always UTC and always fakeable in tests."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class SystemClock:
 
 
 class FrozenClock:
-    """ساعة ثابتة للاختبارات، يمكن تحريكها يدويًا."""
+    """A fixed clock for tests, advanced manually."""
 
     def __init__(self, start: datetime | None = None) -> None:
         self._now = start or datetime(2026, 1, 1, tzinfo=timezone.utc)

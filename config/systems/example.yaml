@@ -1,8 +1,8 @@
-# مثال تعريف نظام: انسخ هذا الملف باسم آخر لكل نظام حقيقي.
-# ممنوع وضع روابط داخلية أو بيانات شركة فعلية هنا (المستودع عام).
+# Example system definition: copy this file under another name for each real system.
+# Never put internal URLs or real company data here (this repository is public).
 
 key: erp_demo
-name: نظام تجريبي لتقارير المبيعات
+name: Demo system for sales reports
 
 auth:
   mode: session
@@ -18,7 +18,7 @@ auth:
 
 reports:
   - key: daily_sales
-    title: تقرير المبيعات اليومي
+    title: Daily sales report
     url: "https://intranet.example.local/reports/daily-sales"
     download_selector: "#export-csv"
     wait_selector: "#report-ready"
@@ -37,7 +37,7 @@ reports:
       daily_at: "08:00"
 
   - key: weekly_summary
-    title: ملخص أسبوعي
+    title: Weekly summary
     direct_download_url: "https://intranet.example.local/exports/weekly-summary.csv"
     url: "https://intranet.example.local/reports/weekly-summary"
     period: weekly

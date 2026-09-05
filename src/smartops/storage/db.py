@@ -1,4 +1,4 @@
-"""طبقة SQLite: اتصال آمن + ترحيلات (migrations) قابلة للتكرار بلا ضرر."""
+"""The SQLite layer: a safe connection plus migrations that are harmless to re-run."""
 
 from __future__ import annotations
 
@@ -171,7 +171,7 @@ MIGRATIONS: tuple[tuple[int, str], ...] = ((1, SCHEMA_V1), (2, SCHEMA_V2))
 
 
 class Database:
-    """اتصال SQLite لكل خيط (thread) مع وضع WAL لتقليل التعارض."""
+    """One SQLite connection per thread, in WAL mode to reduce contention."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -215,7 +215,7 @@ class Database:
                 raise
 
     def migrate(self) -> int:
-        """يطبق الترحيلات الناقصة فقط ويعيد رقم النسخة الحالية."""
+        """Apply only the missing migrations and return the current schema version."""
         conn = self.connection
         conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations ("

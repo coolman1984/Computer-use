@@ -1,40 +1,40 @@
 # AGENTS.md
 
-هذه التعليمات إلزامية لأي وكيل برمجي يعمل على هذا المستودع.
+These instructions are mandatory for any software agent working on this repository.
 
-## افهم قبل أن تعدل
+## Understand before you modify
 
-اقرأ بالترتيب:
+Read in order:
 1. README.md
 2. docs/PROJECT_CONTEXT.md
 3. docs/ARCHITECTURE.md
 4. docs/BROWSER_EXTRACTION_ENGINE.md
 5. docs/AI_AGENT_ORCHESTRATION.md
 6. docs/OBSERVABILITY_SELF_HEALING.md
-7. المستند المتخصص المرتبط بالمهمة
+7. The specialized document tied to the task
 
-## قواعد البناء
+## Build rules
 
-- حافظ على بساطة النواة.
-- لا تضف تقنية جديدة إذا كان الموجود يحل المشكلة.
-- كل Workflow يجب أن يكون قابلًا للاستكمال بعد الفشل.
-- كل خطوة مهمة يجب أن تترك Event في السجل.
-- أي تنزيل يجب التحقق منه قبل اعتباره ناجحًا.
-- أي تعديل ذاتي يجب أن يمر على اختبار وتراجع.
-- افصل بيئة الاختبار عن الإنتاج.
-- لا تعتمد على إحداثيات شاشة مطلقة.
-- استخدم Network/API أولًا، ثم DOM، ثم Vision، ثم Desktop.
-- لا تخزن أسرارًا في المستودع.
-- لا تضف بيانات شركة حساسة.
+- Keep the core simple.
+- Do not add a new technology if what exists already solves the problem.
+- Every workflow must be resumable after a failure.
+- Every meaningful step must leave an event in the log.
+- Any download must be validated before it is considered successful.
+- Any self-modification must go through testing and rollback.
+- Separate the test environment from production.
+- Never rely on absolute screen coordinates.
+- Use Network/API first, then DOM, then Vision, then Desktop.
+- Never store secrets in the repository.
+- Never add sensitive company data.
 
-## قبل إنهاء أي مهمة
+## Before finishing any task
 
-- شغّل الاختبارات.
-- وثّق ما تغير.
-- اذكر المخاطر المعروفة.
-- لا تدّع نجاح شيء لم يتم اختباره.
-- حافظ على التوافق مع Windows والعمل المحلي قدر الإمكان.
+- Run the tests.
+- Document what changed.
+- State known risks.
+- Never claim something works if it hasn't been tested.
+- Keep compatibility with Windows and local operation as much as possible.
 
-## فلسفة الوكلاء
+## Agent philosophy
 
-الوكيل مساعد منظم داخل المنصة، وليس صاحب صلاحية مطلقة.
+An agent is an organized assistant inside the platform, not an owner of absolute authority.

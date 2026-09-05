@@ -1,4 +1,4 @@
-"""سياسات إعادة المحاولة حسب نوع الخطأ، لا محاولة عمياء."""
+"""Retry policies driven by error class, never blind retrying."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class RetryPolicy:
     jitter: float = 0.2
 
     def delay_for(self, attempt: int, *, rng: random.Random | None = None) -> float:
-        """تأخير تصاعدي مع عشوائية بسيطة لتفادي الازدحام."""
+        """Exponential backoff with light jitter to avoid thundering-herd retries."""
         raw = min(self.base_delay * (self.factor ** max(0, attempt - 1)), self.max_delay)
         spread = raw * self.jitter
         source = rng or random

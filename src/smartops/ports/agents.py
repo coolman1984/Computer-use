@@ -1,4 +1,4 @@
-"""عقد مدير الوكلاء: تشغيل Codex أو Claude Code بصلاحية وسياق وسجل واضح."""
+"""Agent manager contract: run Codex or Claude Code with explicit permission, context, and logging."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ class EscalationStep:
     mode: AgentMode
 
 
-# سلم التصعيد الافتراضي: الأرخص أولًا، والبشر آخرًا.
+# Default escalation ladder: cheapest first, humans last.
 DEFAULT_ESCALATION: tuple[EscalationStep, ...] = (
     EscalationStep("claude", "haiku", "low", AgentMode.ANALYZE),
     EscalationStep("codex", "medium", "medium", AgentMode.ANALYZE),

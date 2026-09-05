@@ -1,8 +1,8 @@
-"""محوّلات محلية لعقد NotifierPort: سجل محلي (JSONL)، Webhook اختياري،
-وناقل يجمّع عدة قنوات معًا.
+"""Local adapters for the NotifierPort contract: a local log (JSONL), an
+optional webhook, and a composite that fans out across several channels.
 
-send() لا يرفع استثناء أبدًا؛ أي فشل يُعاد كـ False حتى لا يُسقط تنبيه
-واحد فاشل بقية سلسلة الإنذار.
+send() never raises; any failure is returned as False so one failed alert
+never takes down the rest of the alerting chain.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def _alert_to_dict(alert: Alert) -> dict[str, Any]:
 
 
 class LocalLogNotifier:
-    """يكتب كل تنبيه كسطر JSON واحد في ملف سجل محلي append-only."""
+    """Writes each alert as one JSON line in a local, append-only log file."""
 
     def __init__(self, log_path: Path | str, *, clock: Clock | None = None) -> None:
         self._log_path = Path(log_path)
@@ -47,11 +47,11 @@ class LocalLogNotifier:
                 handle.write("\n")
             return True
         except OSError:
-            logger.exception("فشل كتابة تنبيه في السجل المحلي: %s", self._log_path)
+            logger.exception("Failed to write an alert to the local log: %s", self._log_path)
             return False
 
     def read_all(self) -> list[dict[str, Any]]:
-        """يقرأ كل التنبيهات المسجّلة بالترتيب. مفيد للاختبار وشاشة المراقبة."""
+        """Read every recorded alert in order. Useful for testing and the monitoring screen."""
         if not self._log_path.exists():
             return []
         records: list[dict[str, Any]] = []
@@ -63,7 +63,7 @@ class LocalLogNotifier:
 
 
 class WebhookNotifier:
-    """يرسل التنبيه كـ POST JSON لرابط Webhook، بمكتبات المعيار القياسي فقط."""
+    """Sends the alert as a JSON POST to a webhook URL, standard library only."""
 
     def __init__(
         self,
@@ -85,15 +85,15 @@ class WebhookNotifier:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
                 return 200 <= response.status < 400
         except urllib.error.HTTPError as exc:
-            logger.warning("Webhook رفض التنبيه (%s): %s", exc.code, self._url)
+            logger.warning("Webhook rejected the alert (%s): %s", exc.code, self._url)
             return False
         except (urllib.error.URLError, OSError, ValueError):
-            logger.exception("فشل الاتصال بـ Webhook: %s", self._url)
+            logger.exception("Failed to connect to webhook: %s", self._url)
             return False
 
 
 class CompositeNotifier:
-    """يرسل عبر كل القنوات المُعطاة؛ ينجح لو نجحت قناة واحدة على الأقل."""
+    """Sends through every given channel; succeeds if at least one channel succeeds."""
 
     def __init__(self, notifiers: Iterable[Any]) -> None:
         self._notifiers = list(notifiers)
@@ -105,5 +105,5 @@ class CompositeNotifier:
                 if notifier.send(alert):
                     succeeded = True
             except Exception:
-                logger.exception("قناة إنذار رفعت استثناء غير متوقع: %r", notifier)
+                logger.exception("An alert channel raised an unexpected exception: %r", notifier)
         return succeeded

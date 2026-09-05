@@ -1,72 +1,74 @@
-# المراقبة والإصلاح الذاتي
+# Observability and Self-Healing
 
-## الهدف
+## Goal
 
-اكتشاف التدهور قبل الفشل، وليس بعده فقط.
+Detect degradation before failure, not only after it.
 
-## مؤشرات أساسية
+## Core metrics
 
-- زمن فتح النظام.
-- زمن التقرير.
-- زمن التنزيل.
-- عدد إعادة المحاولات.
-- معدل الفشل.
-- حجم الملف.
-- عدد الصفوف.
-- زمن تحديث البيانات.
-- استهلاك الذاكرة والمعالج.
-- عدد المهام المعلقة.
+- System login time.
+- Report generation time.
+- Download time.
+- Number of retries.
+- Failure rate.
+- File size.
+- Row count.
+- Data refresh time.
+- Memory and CPU usage.
+- Number of pending tasks.
 
-## اكتشاف الشذوذ
+## Anomaly detection
 
-العملية قد تنجح لكنها تصبح أبطأ تدريجيًا. هذا يجب أن يولد إنذارًا مبكرًا.
+A process may still succeed while gradually getting slower. This must
+generate an early warning.
 
-مثال:
+Example:
 
 `8s → 10s → 15s → 23s → 31s`
 
-لا ننتظر الفشل.
+We do not wait for the failure.
 
-## مستويات الإنذار
+## Alert levels
 
-- أخضر: طبيعي.
-- أصفر: تدهور.
-- برتقالي: خطر قريب.
-- أحمر: فشل.
-- حرج: أثر واسع أو تسلسل أعطال.
+- Green: normal.
+- Yellow: degradation.
+- Orange: imminent risk.
+- Red: failure.
+- Critical: wide impact or a cascade of failures.
 
-## دورة الحادثة
+## Incident cycle
 
 ```text
-اكتشاف
+Detection
 ↓
-تجميد الأدلة
+Freeze evidence
 ↓
-البحث في الحلول السابقة
+Search past solutions
 ↓
-تجربة حل آمن
+Try a safe fix
 ↓
-تشخيص بالوكيل
+Agent diagnosis
 ↓
-إصلاح على نسخة
+Fix on a branch
 ↓
-اختبارات
+Tests
 ↓
-نشر أو تراجع
+Deploy or roll back
 ↓
-توثيق الدرس
+Document the lesson
 ```
 
-## التراجع
+## Rollback
 
-كل إصلاح يخلق نسخة جديدة. لو فشلت اختبارات ما بعد النشر أو ساء الأداء، ارجع تلقائيًا للنسخة السابقة.
+Every fix creates a new version. If post-deploy tests fail or performance
+degrades, automatically roll back to the previous version.
 
-## مراقبة المراقب
+## Watching the watcher
 
-Watchdog مستقل يتأكد أن:
-- قاعدة البيانات متاحة.
-- طابور المهام يتحرك.
-- محرك المتصفح حي.
-- السجلات تُكتب.
-- القرص ليس ممتلئًا.
-- خدمة الويب تعمل.
+An independent watchdog confirms that:
+- The database is available.
+- The task queue is moving.
+- The browser engine is alive.
+- Logs are being written.
+- The disk is not full.
+- The web service is running.

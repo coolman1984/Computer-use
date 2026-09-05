@@ -1,4 +1,4 @@
-"""اختبارات F-07: تقييم بطء التنزيل، وأن تشغيلًا بطيئًا يظل ناجحًا وينذر."""
+"""F-07 tests: evaluating download slowness, and that a slow run still succeeds while raising an alert."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def test_boundary_equals_threshold_triggers() -> None:
     assert evaluate_latency(90.0, warn_after_seconds=90, critical_after_seconds=None) is AlertLevel.YELLOW
 
 
-# ---------- تكامل: تشغيل بطيء ينذر ويظل ناجحًا ----------
+# ---------- Integration: a slow run raises an alert and still succeeds ----------
 
 
 class SlowFakeBrowser:

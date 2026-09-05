@@ -1,4 +1,4 @@
-/* تصميم مشترك بسيط لكل صفحات غرفة القيادة — RTL، عربي، واضح للمستخدم غير التقني */
+/* Shared styling for every operations-center page. */
 
 :root {
   color-scheme: light;
@@ -31,8 +31,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: "Segoe UI", Tahoma, Arial, sans-serif;
-  direction: rtl;
-  text-align: right;
+  direction: ltr;
+  text-align: left;
   line-height: 1.6;
 }
 
@@ -126,7 +126,7 @@ table {
 th, td {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
-  text-align: right;
+  text-align: left;
   vertical-align: top;
 }
 
@@ -194,8 +194,8 @@ button.secondary:hover { background: #374151; }
 button:disabled { background: var(--gray-bg); color: var(--muted); cursor: not-allowed; }
 
 .muted { color: var(--muted); font-size: 13px; }
-/* سطر مساعد صغير تحت شارة الحالة (مثل أمر تسجيل الدخول) */
-.hint { margin-top: 4px; font-size: 12px; direction: ltr; text-align: right; }
+/* Small helper line under a status badge (e.g. the sign-in command). */
+.hint { margin-top: 4px; font-size: 12px; direction: ltr; text-align: left; }
 .empty { color: var(--muted); padding: 20px 0; text-align: center; }
 .error-box {
   background: var(--red-bg);

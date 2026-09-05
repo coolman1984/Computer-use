@@ -1,4 +1,4 @@
-"""عقود الخطوات: ما تراه الخطوة، وما يمكنها إرجاعه. الخطوة لا تعرف قاعدة البيانات."""
+"""Step contracts: what a step can see, and what it can return. A step never knows about the database."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class StepResult:
 
     @classmethod
     def wait(cls, seconds: float, reason: str = "") -> "StepResult":
-        """توقّف مؤقت مقصود: انتظار جاهزية تقرير أو اعتمادية خارجية."""
+        """An intentional pause: waiting for a report to be ready or for an external dependency."""
         return cls(outcome=StepOutcome.WAIT, wait_seconds=seconds, reason=reason)
 
     @classmethod
@@ -39,7 +39,7 @@ class StepResult:
 
 @dataclass
 class StepContext:
-    """كل ما تحتاجه الخطوة: مدخلاتها، حالة التشغيل المشتركة، والخدمات."""
+    """Everything a step needs: its inputs, the run's shared state, and the services."""
 
     run_id: str
     step_name: str
@@ -50,7 +50,7 @@ class StepContext:
     emit: Callable[..., Any]
 
     def get(self, key: str, default: Any = None) -> Any:
-        """يقرأ من معطيات الخطوة أولًا ثم من حالة التشغيل."""
+        """Read from the step's own params first, then fall back to the run's shared state."""
         if key in self.params:
             return self.params[key]
         return self.state.get(key, default)

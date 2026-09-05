@@ -7,16 +7,7 @@
 <link rel="stylesheet" href="static/style.css" />
 </head>
 <body data-page="runs" data-title="Run details">
-<header class="top">
-  <h1>غرفة القيادة</h1>
-  <nav class="main">
-    <a href="index.html">لوحة الحالة</a>
-    <a href="runs.html" class="active">التشغيلات</a>
-    <a href="recordings.html">التسجيلات</a>
-    <a href="incidents.html">الحوادث</a>
-    <a href="files.html">الملفات</a>
-  </nav>
-</header>
+<header class="top"></header>
 <main>
   <div id="error"></div>
   <p class="muted"><a class="link" href="runs.html">← Back to runs</a></p>
@@ -161,7 +152,7 @@ if (runId) {
   const socket = connectEvents(runId, (evt) => {
     document.getElementById("live-dot").classList.add("on");
     prependEvent(evt);
-    // أي حدث جديد لهذا التشغيل يعني حالته أو خطواته اتغيرت، فنحدّث الكل
+    // Any new event for this run means its status or steps changed, so reload everything.
     loadAll();
   });
   socket.onopen = () => document.getElementById("live-dot").classList.add("on");

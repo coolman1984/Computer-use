@@ -1,30 +1,30 @@
-# خارطة التنفيذ
+# Implementation Roadmap
 
-## المرحلة 0 — تأسيس المستودع
-- توثيق الرؤية.
-- قواعد الوكلاء.
-- هيكل الكود.
-- الإعدادات.
-- اختبارات دخان.
+## Phase 0 — Repository foundation
+- Document the vision.
+- Agent rules.
+- Code structure.
+- Settings.
+- Smoke tests.
 
-## المرحلة 1 — النواة (تمت ✅)
-- FastAPI محلي. ✅
-- قاعدة SQLite بترحيلات. ✅
-- نموذج Workflow وRun وStep قابل للاستكمال. ✅
-- سجل أحداث مرتب. ✅
-- عقود المتصفح والتحقق والوكلاء والإنذار. ✅
-- المتبقي لهذه المرحلة: محوّل Playwright وتنزيل ملف حقيقي (حزمة S-02).
+## Phase 1 — Core (done ✅)
+- Local FastAPI. ✅
+- SQLite database with migrations. ✅
+- A resumable Workflow/Run/Step model. ✅
+- An ordered event log. ✅
+- Contracts for the browser, validation, agents, and alerting. ✅
+- Remaining for this phase: the Playwright adapter and a real file download (package S-02).
 
-## المرحلة 2 — جمع بيانات موثوق
-- عدة أنظمة.
-- عدة تابات.
-- طابور.
-- إعادة محاولة.
-- تحقق من الملفات.
-- أرشفة Raw Data.
-- Trace للحوادث.
+## Phase 2 — Reliable data collection
+- Multiple systems.
+- Multiple tabs.
+- A queue.
+- Retry.
+- File validation.
+- Raw data archiving.
+- Trace for incidents.
 
-## المرحلة 3 — الويب آب
+## Phase 3 — The web app
 - Dashboard.
 - Workflows.
 - Runs.
@@ -33,44 +33,44 @@
 - Agents.
 - Chat side panel.
 
-## المرحلة 4 — Agent Manager
-- تشغيل Codex CLI.
-- تشغيل Claude Code CLI.
-- بث المخرجات للواجهة.
-- قراءة فقط / تجربة / تنفيذ.
-- سجل كامل.
+## Phase 4 — Agent Manager
+- Run Codex CLI.
+- Run Claude Code CLI.
+- Stream output to the UI.
+- Read-only / experiment / execute.
+- A complete log.
 
-## المرحلة 5 — الإنذار والاستباق
+## Phase 5 — Alerting and early warning
 - Baselines.
-- Detection للتدهور.
-- قواعد إنذار.
-- إنشاء Incident Pack.
+- Degradation detection.
+- Alert rules.
+- Incident pack creation.
 
-## المرحلة 6 — الإصلاح الذاتي
-- حلول معروفة.
-- تصعيد.
+## Phase 6 — Self-healing
+- Known fixes.
+- Escalation.
 - Sandbox.
 - Tests.
 - Rollback.
-- Approval Gates.
+- Approval gates.
 
-## المرحلة 7 — الرؤية
+## Phase 7 — Vision
 - Screenshots.
 - Vision adapter.
-- إحداثيات نسبية.
-- fallback كامل للواجهات الصعبة.
+- Relative coordinates.
+- A full fallback for difficult interfaces.
 
-## المرحلة 8 — أتمتة الإدارات
-- تشغيل المشاريع بعد اكتمال المدخلات.
-- Dependency Graph.
-- تاريخ مشترك.
+## Phase 8 — Department automation
+- Run projects once their inputs are complete.
+- Dependency graph.
+- Shared history.
 - Cross-department insights.
 
-## أول نطاق تجريبي
+## First pilot scope
 
-- 3 أنظمة.
-- 5 تقارير.
-- مشروع أتمتة واحد.
-- إنذار تأخير واحد.
-- Incident Pack واحد.
-- Codex تحليل فقط في البداية.
+- 3 systems.
+- 5 reports.
+- One automation project.
+- One lateness alert.
+- One incident pack.
+- Codex analysis-only at first.

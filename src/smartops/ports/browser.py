@@ -1,11 +1,13 @@
-"""عقد محرك الاستخراج. الطبقات: شبكة ← DOM ← إصلاح ذاتي ← رؤية ← سطح مكتب.
+"""Extraction engine contract. Layers: network -> DOM -> self-healing -> vision -> desktop.
 
-أي تنفيذ فعلي (Playwright وغيره) يلتزم بهذا العقد فقط، فتبقى النواة مستقلة.
+Any real implementation (Playwright or otherwise) follows only this contract,
+so the core stays independent.
 
-مفاتيح filters إضافية (F-02):
-- logged_in_selector: عنصر لازم يكون موجود بعد الدخول؛ غيابه = جلسة منتهية.
-- login_selector: عنصر لازم يكون غير موجود بعد الدخول (زي فورم تسجيل الدخول)؛
-  وجوده = جلسة منتهية.
+Additional filters keys (F-02):
+- logged_in_selector: an element that must be present after sign-in; its
+  absence means the session expired.
+- login_selector: an element that must be absent after sign-in (such as the
+  login form); its presence means the session expired.
 """
 
 from __future__ import annotations
@@ -30,8 +32,9 @@ class ExtractionRequest:
         ExtractionLayer.SELF_HEALING,
     )
     timeout_seconds: float = 300.0
-    # F-02: هوية التشغيل (لربط الدليل بتشغيل بعينه)، ومسار جلسة محفوظة
-    # (storage_state) لإعادة استخدامها بدل الدخول من الصفر، ومجلد الأدلة.
+    # F-02: the run id (to tie evidence to one specific run), the path to a
+    # saved session (storage_state) to reuse instead of signing in from
+    # scratch, and the evidence directory.
     run_id: str = ""
     session_state_path: Path | None = None
     evidence_dir: Path | None = None
@@ -47,15 +50,15 @@ class ExtractionResult:
     duration_seconds: float = 0.0
     evidence: dict[str, Any] = field(default_factory=dict)
     message: str = ""
-    # True لو الفشل سببه جلسة منتهية أو غير مسجّلة دخول، مش خطأ عادي.
+    # True when the failure was an expired or missing session, not an ordinary error.
     auth_required: bool = False
 
 
 class BrowserPort(Protocol):
-    """ينفّذ طلب استخراج واحد ويعيد الملف الناتج مع دليل ما حدث."""
+    """Execute one extraction request and return the resulting file plus evidence of what happened."""
 
     def extract(self, request: ExtractionRequest) -> ExtractionResult: ...
 
     def capture_evidence(self, run_id: str) -> dict[str, Any]:
-        """لقطة شاشة/تتبع/شبكة عند الفشل لتشغيل بعينه، لبناء حزمة الحادثة."""
+        """Screenshot/trace/network evidence for one failed run, used to build the incident pack."""
         ...

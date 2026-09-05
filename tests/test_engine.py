@@ -33,7 +33,7 @@ def test_transient_failure_retries_then_succeeds(services, slept) -> None:
     def flaky(ctx):
         calls["n"] += 1
         if calls["n"] < 3:
-            raise TransientError("الشبكة متقطعة")
+            raise TransientError("Network is flaky")
         return StepResult.ok(value=calls["n"])
 
     _register(services, "test.flaky", flaky)
@@ -42,14 +42,14 @@ def test_transient_failure_retries_then_succeeds(services, slept) -> None:
 
     assert run.status is RunStatus.SUCCEEDED
     assert calls["n"] == 3
-    assert len(slept) == 2  # محاولتان مؤجلتان داخل نفس التشغيل
+    assert len(slept) == 2  # two deferred attempts within the same run
     step = services.steps.get(run.id, "only")
     assert step.status is StepStatus.SUCCEEDED and step.attempt == 3
 
 
 def test_permanent_failure_opens_incident(services) -> None:
     def broken(ctx):
-        raise PermanentError("تعريف التقرير خاطئ")
+        raise PermanentError("Bad report definition")
 
     _register(services, "test.broken", broken)
     run = services.runner.create_run("test.flow")
@@ -67,7 +67,7 @@ def test_retry_budget_is_respected(services) -> None:
 
     def always_failing(ctx):
         calls["n"] += 1
-        raise TransientError("عطل مستمر")
+        raise TransientError("Persistent fault")
 
     services.step_registry.add("test.always", always_failing)
     services.workflows.register(
@@ -93,7 +93,7 @@ def test_wait_is_resumable_without_replaying_finished_steps(services, clock) -> 
     def second(ctx):
         counters["second"] += 1
         if counters["second"] == 1:
-            return StepResult.wait(600, reason="التقرير لم يجهز بعد")
+            return StepResult.wait(600, reason="The report is not ready yet")
         return StepResult.ok(done=True)
 
     services.step_registry.add("test.first", first)
@@ -113,7 +113,7 @@ def test_wait_is_resumable_without_replaying_finished_steps(services, clock) -> 
     run = services.runner.execute(run.id)
     assert run.status is RunStatus.WAITING and run.resume_at is not None
 
-    # قبل حلول الموعد لا يحدث شيء
+    # Before the due time arrives, nothing happens
     run = services.runner.execute(run.id)
     assert run.status is RunStatus.WAITING
     assert counters == {"first": 1, "second": 1}
@@ -121,7 +121,7 @@ def test_wait_is_resumable_without_replaying_finished_steps(services, clock) -> 
     clock.advance(601)
     run = services.runner.execute(run.id)
     assert run.status is RunStatus.SUCCEEDED
-    assert counters == {"first": 1, "second": 2}  # الخطوة الناجحة لم تُعَد
+    assert counters == {"first": 1, "second": 2}  # the succeeded step was not replayed
     assert run.state["done"] is True
 
 

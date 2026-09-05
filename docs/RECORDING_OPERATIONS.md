@@ -1,43 +1,53 @@
-# تشغيل وصيانة Recording Center
+# Running and Maintaining the Recording Center
 
-اضبط `SMARTOPS_RECORDINGS_DIR` و`SMARTOPS_RECORDINGS_BACKUP_DIR` على مجلدين
-خاصين خارج المستودع قبل تسجيل أي نظام حقيقي. لا تضع النسخ الاحتياطية أو ملفات
-الجلسة أو HAR أو trace داخل Git أو مساحة مشاركة عامة.
+Set `SMARTOPS_RECORDINGS_DIR` and `SMARTOPS_RECORDINGS_BACKUP_DIR` to two
+private folders outside the repository before recording any real system. Do
+not put backups, session files, HAR files, or traces inside Git or a public
+shared space.
 
-ابدأ المنصة كالمعتاد بـ `python -m smartops serve`. عند تركيب الخدمات تُسوّى
-التسجيلات التي توقفت بلا heartbeat إلى `interrupted`؛ لا تُحذف خطواتها أو أدلتها
-الجزئية، ويمكن بدء نسخة re-record منها.
+Start the platform as usual with `python -m smartops serve`. When services
+are wired up, recordings that stopped with no heartbeat are settled to
+`interrupted`; their steps or partial evidence are not deleted, and a
+re-record can be started from them.
 
-تحقق من الحالة بواسطة `python -m smartops doctor` أو `GET /health`. يوضح الفحص
-قابلية كتابة مسارات التسجيل والنسخ الاحتياطي وعدد عمال المسجل النشطين.
+Check status via `python -m smartops doctor` or `GET /health`. The check
+shows whether the recording and backup paths are writable, and how many
+recorder workers are active.
 
-لإنشاء نسخة خاصة قابلة للاستعادة نفّذ:
+To create a restorable private backup, run:
 
 ```powershell
 python -m smartops recordings-backup
 ```
 
-ينتج ZIP محليًا يحتوي نسخة SQLite متسقة وشجرة الأدلة الخاصة. للاستعادة، أوقف
-SmartOps، فك الأرشيف في مساحة خاصة، واستبدل قاعدة SQLite ومجلد التسجيلات معًا،
-ثم شغّل `python -m smartops recordings-recover` قبل فتح الواجهة.
+This produces a local ZIP containing a consistent SQLite copy and the
+private evidence tree. To restore, stop SmartOps, unpack the archive in a
+private space, and replace both the SQLite database and the recordings
+folder together, then run `python -m smartops recordings-recover` before
+opening the UI.
 
-الحذف من الواجهة قابل للاسترجاع فقط. الحذف الدائم معطل افتراضيًا. لتفعيله عيّن
-`storage.recordings_retention_days` إلى قيمة موجبة و`safety.allow_recording_purge`
-إلى `true` في إعداد خاص، ثم نفذ `python -m smartops recordings-purge`. كل حذف
-دائم يسجل event، ولا يلمس إلا تسجيلًا موجودًا في سلة المحذوفات وتجاوز مدة
-الاحتفاظ.
+Deleting from the UI is recoverable only. Permanent deletion is disabled by
+default. To enable it, set `storage.recordings_retention_days` to a positive
+value and `safety.allow_recording_purge` to `true` in a private setting,
+then run `python -m smartops recordings-purge`. Every permanent deletion
+logs an event, and it only touches a recording that is already in the trash
+and past its retention period.
 
 ## Chrome recording exception
 
-تعليمات المستودع تفرض `windows-chrome-launcher` لفتح الروابط التفاعلية لأنها
-تضمن سطح مكتب Windows الصحيح. Recording Center لا يستخدم launcher: يحتاج
-Playwright إلى إنشاء **Chrome persistent context** مخصص، وربطه مباشرةً للتقاط
-DOM والشبكة والتنزيلات والـtrace في نفس الجلسة. الـlauncher يفتح Chrome فقط ولا
-يوفر CDP endpoint أو profile مخصصًا يمكن لـPlaywright التحكم فيه؛ دمجه يفقد
-التقاط التسجيل وقد يخلط profile الشركة المعتاد بملفات التسجيل.
+The repository's instructions mandate `windows-chrome-launcher` for opening
+interactive links, because it guarantees the correct Windows desktop. The
+Recording Center does not use the launcher: Playwright needs to create a
+dedicated **Chrome persistent context** and attach to it directly to capture
+DOM, network, downloads, and trace in the same session. The launcher only
+opens Chrome and does not provide a CDP endpoint or a dedicated profile that
+Playwright can control; using it would lose recording capture and could mix
+the user's normal corporate profile with recording files.
 
-لذلك هذا استثناء ضيق للتسجيل فقط: `channel="chrome"` عبر Playwright، profile
-خاص داخل `recordings_dir/<id>/profile`، ونافذة headed. لا يستعمل Chrome العادي
-للمستخدم ولا `Start-Process` أو `chrome.exe` مباشرة. إذا لم يظهر Chrome على
-سطح مكتب المستخدم بسبب جلسة خدمة Windows، يفشل التسجيل بوضوح ويحتاج worker
-bridge في جلسة المستخدم؛ لا يوجد fallback يلتقط بيانات من Chrome عادي.
+So this is a narrow exception for recording only: `channel="chrome"` via
+Playwright, a private profile under `recordings_dir/<id>/profile`, and a
+headed window. It never uses the user's normal Chrome, nor `Start-Process`
+or `chrome.exe` directly. If Chrome cannot appear on the user's desktop
+because of a Windows service session, the recording fails clearly and needs
+a worker bridge in the user's session; there is no fallback that captures
+data from a normal Chrome instance.

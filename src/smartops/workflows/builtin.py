@@ -1,6 +1,6 @@
-"""خطوات وسير عمل جاهزة: فحص ذاتي للمنصة + نمط جمع تقرير قياسي.
+"""Ready-made steps and workflows: a platform self-check + the standard report collection pattern.
 
-خطوات الجمع مكتوبة بالكامل عدا المحوّلات الفعلية (متصفح/مدقق) التي تُركّب لاحقًا.
+The collection steps are fully written except for the real adapters (browser/validator), which are wired up later.
 """
 
 from __future__ import annotations
@@ -22,12 +22,12 @@ from ..storage.paths import ensure_raw_dir, slug
 
 
 def echo(ctx: StepContext) -> StepResult:
-    """خطوة تشخيصية: تنقل قيمًا إلى حالة التشغيل."""
+    """A diagnostic step: passes values through into the run's shared state."""
     return StepResult.ok(**ctx.params)
 
 
 def check_storage(ctx: StepContext) -> StepResult:
-    """يتأكد أن مجلدات التخزين موجودة وقابلة للكتابة."""
+    """Confirms the storage directories exist and are writable."""
     settings = ctx.services.settings
     checked: dict[str, Any] = {}
     for label, directory in (
@@ -43,33 +43,33 @@ def check_storage(ctx: StepContext) -> StepResult:
             probe.unlink()
         except OSError as exc:
             raise TransientError(
-                f"المجلد غير قابل للكتابة: {path}", details={"error": str(exc)}
+                f"Directory is not writable: {path}", details={"error": str(exc)}
             ) from exc
         checked[label] = str(path)
     return StepResult.ok(storage_checked=checked)
 
 
 def heartbeat(ctx: StepContext) -> StepResult:
-    """نبضة صحة تُسجَّل في سجل الأحداث ليعرف الـ Watchdog أن المنصة حية."""
+    """A health pulse recorded in the event log so the watchdog knows the platform is alive."""
     ctx.emit(
         EventType.ALERT_RAISED,
         severity=Severity.DEBUG,
-        message="نبضة صحة المنصة",
+        message="Platform health pulse",
         payload={"component": "platform"},
     )
     return StepResult.ok(heartbeat_at=ctx.services.runner.clock.now().isoformat())
 
 
 def download_report(ctx: StepContext) -> StepResult:
-    """ينزّل تقريرًا عبر محرك الاستخراج ويسجّل الملف في مركز البيانات الخام."""
+    """Downloads a report through the extraction engine and records the file in the raw data center."""
     browser = getattr(ctx.services, "browser", None)
     if browser is None:
-        raise ConfigurationError("محرك المتصفح غير مركّب (services.browser)")
+        raise ConfigurationError("The browser engine is not wired up (services.browser)")
 
     system = ctx.get("system")
     report = ctx.get("report")
     if not system or not report:
-        raise ConfigurationError("الخطوة تحتاج system و report")
+        raise ConfigurationError("This step needs both system and report")
 
     now = ctx.services.runner.clock.now()
     destination = ensure_raw_dir(Path(ctx.services.settings.storage.raw_data_dir), system, report, now)
@@ -87,12 +87,12 @@ def download_report(ctx: StepContext) -> StepResult:
     result = browser.extract(request)
     if result.auth_required:
         raise AuthError(
-            result.message or f"الجلسة منتهية للنظام {system}",
+            result.message or f"Session expired for system {system}",
             details={"system": system, "needs_login": True, "no_retry": True, "command": f"python -m smartops login {system}"},
         )
     if not result.ok or result.file_path is None:
         raise TransientError(
-            result.message or "فشل استخراج التقرير",
+            result.message or "Report extraction failed",
             details={"layer": result.layer_used.value, "evidence": result.evidence},
         )
 
@@ -110,7 +110,7 @@ def download_report(ctx: StepContext) -> StepResult:
     ctx.services.files.save(artifact)
     ctx.emit(
         EventType.FILE_DOWNLOADED,
-        message=f"تم تنزيل {report} من {system}",
+        message=f"Downloaded {report} from {system}",
         payload={
             "file_id": artifact.id,
             "path": artifact.path,
@@ -129,9 +129,9 @@ def download_report(ctx: StepContext) -> StepResult:
 def _raise_latency_alert_if_needed(
     ctx: StepContext, *, system: str, report: str, duration_seconds: float
 ) -> None:
-    """ينذر لو التنزيل أبطأ من عتبة معرّفة في تعريف التقرير (F-07).
+    """Raise an alert if the download was slower than the threshold defined on the report (F-07).
 
-    تنزيل بطيء يظل تنزيلًا ناجحًا؛ فشل قناة الإنذار لا يجب أن يُسقط التشغيل.
+    A slow download is still a successful download; a failed alert channel must never take down the run.
     """
     level = evaluate_latency(
         duration_seconds,
@@ -145,7 +145,7 @@ def _raise_latency_alert_if_needed(
     ctx.emit(
         EventType.ALERT_RAISED,
         severity=Severity.WARNING if level is AlertLevel.YELLOW else Severity.ERROR,
-        message=f"التنزيل أبطأ من المتوقع ({duration_seconds:.1f} ثانية)",
+        message=f"Download was slower than expected ({duration_seconds:.1f} seconds)",
         payload={
             "level": level.value,
             "system": system,
@@ -161,26 +161,26 @@ def _raise_latency_alert_if_needed(
         notifier.send(
             Alert(
                 level=level,
-                title=f"بطء في {system}/{report}",
-                body=f"استغرق التنزيل {duration_seconds:.1f} ثانية بدل {normal or 'غير معروف'} ثانية طبيعية",
+                title=f"Slowness in {system}/{report}",
+                body=f"The download took {duration_seconds:.1f} seconds instead of the normal {normal or 'unknown'} seconds",
                 run_id=ctx.run_id,
                 payload={"system": system, "report": report, "duration_seconds": duration_seconds},
             )
         )
     except Exception:
-        pass  # قناة إنذار فاشلة لا يجب أن تُسقط تشغيلًا ناجحًا
+        pass  # a failed alert channel must never take down a successful run
 
 
 def validate_file(ctx: StepContext) -> StepResult:
-    """يفحص الملف المنزَّل. الفشل هنا خطأ جودة بيانات وليس نجاحًا صامتًا."""
+    """Checks the downloaded file. A failure here is a data-quality error, not a silent success."""
     validator = getattr(ctx.services, "validator", None)
     if validator is None:
-        raise ConfigurationError("مدقق الملفات غير مركّب (services.validator)")
+        raise ConfigurationError("The file validator is not wired up (services.validator)")
 
     file_path = ctx.get("file_path")
     file_id = ctx.get("file_id")
     if not file_path:
-        raise ConfigurationError("لا يوجد file_path في حالة التشغيل")
+        raise ConfigurationError("No file_path in the run's shared state")
 
     raw_rules = ctx.get("rules", {}) or {}
     rules = ValidationRules(
@@ -208,14 +208,14 @@ def validate_file(ctx: StepContext) -> StepResult:
         ctx.emit(
             EventType.FILE_REJECTED,
             severity=Severity.ERROR,
-            message="الملف لم يجتز التحقق",
+            message="The file failed validation",
             payload={"failures": report.failures, "file_id": file_id},
         )
-        raise DataQualityError("الملف لم يجتز التحقق", details={"failures": report.failures})
+        raise DataQualityError("The file failed validation", details={"failures": report.failures})
 
     ctx.emit(
         EventType.FILE_VALIDATED,
-        message="الملف سليم",
+        message="The file is valid",
         payload={"file_id": file_id, "rows": report.row_count, "sha256": report.sha256},
     )
     return StepResult.ok(sha256=report.sha256, row_count=report.row_count)
@@ -223,21 +223,21 @@ def validate_file(ctx: StepContext) -> StepResult:
 
 SELF_CHECK = WorkflowDefinition(
     key="platform.selfcheck",
-    title="فحص ذاتي للمنصة",
-    description="يتحقق من التخزين ويسجل نبضة صحة.",
+    title="Platform self-check",
+    description="Checks storage and records a health pulse.",
     steps=(
-        StepDefinition(name="storage", uses="core.check_storage", title="فحص التخزين"),
-        StepDefinition(name="heartbeat", uses="core.heartbeat", title="نبضة صحة"),
+        StepDefinition(name="storage", uses="core.check_storage", title="Check storage"),
+        StepDefinition(name="heartbeat", uses="core.heartbeat", title="Health pulse"),
     ),
 )
 
 COLLECT_REPORT = WorkflowDefinition(
     key="collect.report",
-    title="جمع تقرير من نظام",
-    description="تنزيل تقرير ثم التحقق منه قبل اعتباره ناجحًا.",
+    title="Collect a report from a system",
+    description="Download a report, then validate it before considering it successful.",
     steps=(
-        StepDefinition(name="download", uses="extract.download_report", title="تنزيل التقرير"),
-        StepDefinition(name="validate", uses="extract.validate_file", title="التحقق من الملف"),
+        StepDefinition(name="download", uses="extract.download_report", title="Download the report"),
+        StepDefinition(name="validate", uses="extract.validate_file", title="Validate the file"),
     ),
 )
 

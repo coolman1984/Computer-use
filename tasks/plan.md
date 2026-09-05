@@ -8,15 +8,15 @@ The first production pilot is Samsung G-MES. Corporate URLs, cookies, HAR files,
 
 ## User Flow
 
-1. Open `/app/recordings.html` and select **تسجيل جديد**.
+1. Open `/app/recordings.html` and select **New recording**.
 2. Enter a recording name and select a configured system.
 3. SmartOps creates a recording and launches a visible, dedicated Chrome recording session.
 4. The user completes login and the business steps manually.
 5. SmartOps records DOM context when available, click ratios for canvas-style pages, network metadata, downloads, screenshots, and a Playwright trace.
 6. The user stops and saves the recording from the web app.
 7. The detail page shows the captured steps and artifacts with sensitive values redacted.
-8. **إعادة التسجيل** creates a new version linked to the original recording.
-9. **حذف** moves a recording to the recycle state; restore is available before a separate purge action.
+8. **Re-record** creates a new version linked to the original recording.
+9. **Delete** moves a recording to the recycle state; restore is available before a separate purge action.
 10. An approved recording can be converted into an automation draft and verified before scheduling.
 
 ## Architecture Decisions
@@ -164,7 +164,7 @@ For the G-MES pilot, configure `SMARTOPS_RECORDINGS_DIR` and `SMARTOPS_SESSIONS_
 **Acceptance criteria:**
 
 - [ ] The page creates and lists draft recordings without terminal use.
-- [ ] Status, version, system, date, step count, and actions are readable in Arabic.
+- [ ] Status, version, system, date, step count, and actions are readable in English.
 - [ ] Existing dashboard pages and navigation continue to work.
 
 **Verification:** `python -m pytest -q tests/test_web_recordings.py tests/test_web_app.py`.

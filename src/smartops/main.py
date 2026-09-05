@@ -1,4 +1,4 @@
-"""نقطة التشغيل: uvicorn smartops.main:app"""
+"""Entry point: uvicorn smartops.main:app"""
 
 from __future__ import annotations
 

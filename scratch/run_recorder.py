@@ -1,5 +1,6 @@
-"""تشغيل Playwright Codegen التفاعلي على سطح المكتب المباشر (WinSta0\\Default)
-لتسجيل خطوات استخراج G-MES كاملة: كود بايثون، محددات العناصر، وحفظ الجلسة وملف HAR للشبكة.
+"""Run interactive Playwright Codegen on the live desktop (WinSta0\\Default)
+to record the full G-MES extraction steps: Python code, element selectors,
+and saving the session and network HAR file.
 """
 
 import os

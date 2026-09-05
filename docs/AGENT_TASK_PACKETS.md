@@ -1,122 +1,125 @@
-# حزم المهام الجاهزة (تنفيذ Sonnet 5 Medium)
+# Ready-Made Task Packets (Sonnet 5 Medium Execution)
 
-كل حزمة هنا **مكتفية بذاتها**. الهدف إن النموذج المنفّذ ما يحتاجش يقرأ المستودع كله.
+Every packet here is **self-contained**. The goal is that the executing model does not need to read the whole repository.
 
-## قواعد إلزامية لأي حزمة
+## Mandatory rules for any packet
 
-1. اقرأ فقط الملفات المذكورة في بند «اقرأ». ممنوع البحث العام في المستودع.
-2. ممنوع تعديل ملفات النواة: `core/`، `domain/`، `storage/db.py`، `engine/`، `ports/`.
-   لو اضطريت لتعديلها → قف وصعّد لـ Opus.
-3. المخرج = كود + اختبار. نقطة التوقف = الاختبار أخضر.
-4. تعديل موضعي فقط، بدون إعادة كتابة ملفات كاملة.
-5. المحوّلات الجديدة تتحط تحت `src/smartops/adapters/<المجال>/`.
-6. التركيب في `services.py` يكون بسطر واحد أو عبر إعداد، من غير تغيير بنية الحاوية.
+1. Read only the files listed under "Read". General repository search is forbidden.
+2. Never modify core files: `core/`, `domain/`, `storage/db.py`, `engine/`, `ports/`.
+   If you are forced to modify them → stop and escalate to Opus.
+3. Output = code + a test. Stopping point = the test is green.
+4. Local edits only, never rewriting whole files.
+5. New adapters go under `src/smartops/adapters/<domain>/`.
+6. Wiring in `services.py` is one line or via a setting, with no change to the container's structure.
 
-## قالب أي مهمة جديدة
+## Template for any new task
 
 ```
-العنوان | الهدف بجملة | الملفات المسموح قراءتها | العقد المطلوب تنفيذه
-| الملفات المطلوب إنشاؤها | معيار القبول (أمر اختبار واحد) | ممنوعات
+Title | The goal in one sentence | Files allowed to be read | The contract to implement
+| Files to create | Acceptance criterion (one test command) | Prohibitions
 ```
 
 ---
 
-## S-01 — مدقق الملفات المحلي (تم ✅)
-- **الهدف:** تنفيذ `FileValidatorPort` بحيث ما يعديش ملف تالف أو ناقص أو مكرر.
-- **اقرأ:** `src/smartops/ports/validation.py`، `tests/test_collect_workflow.py`.
-- **أنشئ:** `src/smartops/adapters/validation/local.py` + `tests/test_validation_adapter.py`.
-- **المطلوب:** فحص الوجود والحجم والامتداد، حساب sha256، فتح CSV/Excel وقراءة الأعمدة وعدد الصفوف، فحص عمر الملف، وكشف التكرار عبر `services.files.find_by_hash`.
-- **القبول:** `pytest tests/test_validation_adapter.py -q` أخضر، ويغطي: ملف سليم، ملف فاضي، امتداد غلط، عمود ناقص، ملف مكرر.
-- **ممنوع:** تغيير `ValidationReport` أو `ValidationRules`.
+## S-01 — Local file validator (done ✅)
+- **Goal:** implement `FileValidatorPort` so a corrupt, incomplete, or duplicate file is never accepted.
+- **Read:** `src/smartops/ports/validation.py`, `tests/test_collect_workflow.py`.
+- **Create:** `src/smartops/adapters/validation/local.py` + `tests/test_validation_adapter.py`.
+- **Required:** check existence, size, and extension, compute sha256, open CSV/Excel and read columns and row count, check the file's age, and detect duplicates via `services.files.find_by_hash`.
+- **Acceptance:** `pytest tests/test_validation_adapter.py -q` is green, covering: a valid file, an empty file, a wrong extension, a missing column, a duplicate file.
+- **Forbidden:** changing `ValidationReport` or `ValidationRules`.
 
-## S-02 — محوّل المتصفح (Playwright) (تم ✅)
-- **الهدف:** تنفيذ `BrowserPort` بطبقتي «شبكة» ثم «DOM».
-- **اقرأ:** `src/smartops/ports/browser.py`، `tests/test_collect_workflow.py` (المتصفح الوهمي هو المرجع السلوكي).
-- **أنشئ:** `src/smartops/adapters/browser/playwright_engine.py` + `tests/test_browser_adapter.py` (اختبار على صفحة محلية، بدون أي موقع حقيقي).
-- **المطلوب:** Context معزول، Viewport من الإعدادات، انتظار التنزيل وحفظه في `destination_dir`، تسجيل الطبقة المستخدمة، وجمع الأدلة (لقطة + trace) عند الفشل، ورفع `TransientError` للأخطاء المؤقتة و`AuthError` لانتهاء الجلسة.
-- **القبول:** `pytest tests/test_browser_adapter.py -q` أخضر.
-- **ممنوع:** إحداثيات شاشة مطلقة، أو تخزين أي بيانات دخول في الكود.
+## S-02 — Browser adapter (Playwright) (done ✅)
+- **Goal:** implement `BrowserPort` with a "network" layer then a "DOM" layer.
+- **Read:** `src/smartops/ports/browser.py`, `tests/test_collect_workflow.py` (the fake browser is the behavioral reference).
+- **Create:** `src/smartops/adapters/browser/playwright_engine.py` + `tests/test_browser_adapter.py` (test against a local page, never a real site).
+- **Required:** an isolated context, viewport from settings, waiting for the download and saving it to `destination_dir`, recording which layer was used, and collecting evidence (a screenshot + trace) on failure, and raising `TransientError` for temporary errors and `AuthError` for an expired session.
+- **Acceptance:** `pytest tests/test_browser_adapter.py -q` is green.
+- **Forbidden:** absolute screen coordinates, or storing any login data in code.
 
-## S-03 — تعريفات الأنظمة والتقارير (تم ✅)
-- **الهدف:** تحميل ملفات `config/systems/*.yaml` وتحويلها إلى تشغيلات `collect.report`.
-- **اقرأ:** `src/smartops/config.py`، `src/smartops/workflows/builtin.py`.
-- **أنشئ:** `src/smartops/workflows/profiles.py` + `config/systems/example.yaml` + `tests/test_profiles.py`.
-- **المطلوب:** لكل نظام: الاسم، التقارير، قواعد التحقق، الزمن الطبيعي، قواعد الإنذار. تحقق من التعريف ورفع `ConfigurationError` برسالة واضحة لو ناقص.
-- **القبول:** `pytest tests/test_profiles.py -q` أخضر، وتعريف ناقص يعطي رسالة مفهومة.
+## S-03 — System and report definitions (done ✅)
+- **Goal:** load `config/systems/*.yaml` files and turn them into `collect.report` runs.
+- **Read:** `src/smartops/config.py`, `src/smartops/workflows/builtin.py`.
+- **Create:** `src/smartops/workflows/profiles.py` + `config/systems/example.yaml` + `tests/test_profiles.py`.
+- **Required:** for each system: the name, reports, validation rules, normal duration, alert rules. Validate the definition and raise `ConfigurationError` with a clear message if incomplete.
+- **Acceptance:** `pytest tests/test_profiles.py -q` is green, and an incomplete definition gives an understandable message.
 
-## S-04 — العامل والجدولة (تم ✅)
-- **الهدف:** تشغيل التشغيلات المستحقة تلقائيًا بدل النداء اليدوي.
-- **اقرأ:** `src/smartops/engine/runner.py` (دالتا `execute` و`drive` فقط)، `src/smartops/storage/repositories.py` (`RunRepository.due`).
-- **أنشئ:** `src/smartops/worker.py` + `tests/test_worker.py`.
-- **المطلوب:** حلقة تقرأ `runs.due()` وتنفّذ باحترام `browser.max_concurrency`، مع إيقاف نظيف، ومنع الازدحام (القفل موجود في المستودع فلا تعيد اختراعه).
-- **القبول:** `pytest tests/test_worker.py -q` أخضر، ويثبت أن تشغيلين لا يتداخلان.
+## S-04 — Worker and scheduling (done ✅)
+- **Goal:** run due runs automatically instead of a manual call.
+- **Read:** `src/smartops/engine/runner.py` (only the `execute` and `drive` functions), `src/smartops/storage/repositories.py` (`RunRepository.due`).
+- **Create:** `src/smartops/worker.py` + `tests/test_worker.py`.
+- **Required:** a loop that reads `runs.due()` and executes while respecting `browser.max_concurrency`, with a clean stop, and no overlap (the lock already exists in the repository — do not reinvent it).
+- **Acceptance:** `pytest tests/test_worker.py -q` is green, and proves two runs never overlap.
 
-## S-05 — البث الحي للأحداث (تم ✅)
-- **الهدف:** نقطة WebSocket تبث الأحداث لحظيًا للواجهة.
-- **اقرأ:** `src/smartops/events/bus.py`، `src/smartops/api/app.py`.
-- **أنشئ:** `src/smartops/api/ws.py` + `tests/test_ws.py`.
-- **المطلوب:** `/ws/events` يشترك في `services.bus`، ويلغي الاشتراك عند القطع، ويدعم فلترة بـ`run_id`.
-- **القبول:** `pytest tests/test_ws.py -q` أخضر (اتصال يستقبل حدثًا واحدًا على الأقل).
+## S-05 — Live event streaming (done ✅)
+- **Goal:** a WebSocket endpoint that streams events to the UI live.
+- **Read:** `src/smartops/events/bus.py`, `src/smartops/api/app.py`.
+- **Create:** `src/smartops/api/ws.py` + `tests/test_ws.py`.
+- **Required:** `/ws/events` subscribes to `services.bus`, unsubscribes on disconnect, and supports filtering by `run_id`.
+- **Acceptance:** `pytest tests/test_ws.py -q` is green (a connection receives at least one event).
 
-## S-06 — أرشفة التاريخ (Parquet + DuckDB) (تم ✅)
-- **الهدف:** تحويل الملفات المتحقق منها إلى تاريخ تحليلي.
-- **اقرأ:** `src/smartops/storage/paths.py`، `src/smartops/domain/models.py` (`FileArtifact` فقط).
-- **أنشئ:** `src/smartops/adapters/history/archiver.py` + `tests/test_archiver.py`.
-- **المطلوب:** كتابة Parquet مقسّم بالتاريخ والنظام والتقرير، ودالة استعلام DuckDB بسيطة تقارن فترتين.
-- **القبول:** `pytest tests/test_archiver.py -q` أخضر.
-- **ممنوع:** رفع أي بيانات فعلية للمستودع.
+## S-06 — History archiving (Parquet + DuckDB) (done ✅)
+- **Goal:** turn validated files into analytical history.
+- **Read:** `src/smartops/storage/paths.py`, `src/smartops/domain/models.py` (`FileArtifact` only).
+- **Create:** `src/smartops/adapters/history/archiver.py` + `tests/test_archiver.py`.
+- **Required:** write Parquet partitioned by date, system, and report, and a simple DuckDB query function that compares two periods.
+- **Acceptance:** `pytest tests/test_archiver.py -q` is green.
+- **Forbidden:** uploading any real data to the repository.
 
-## S-07 — الويب آب (تم ✅)
-- **الهدف:** غرفة القيادة لمستخدم غير تقني.
-- **اقرأ:** `src/smartops/api/app.py` فقط (نقاط API هي العقد).
-- **أنشئ:** `web/` (صفحات ثابتة أو Vite) + ربطها بخدمة FastAPI.
-- **المطلوب:** لوحة الحالة، قائمة التشغيلات، تفاصيل تشغيل بخطواته وأحداثه، الحوادث، الملفات، وزر تشغيل/إعادة محاولة. عربي وواضح، وبلا مصطلحات تقنية في نص الواجهة.
-- **القبول:** الشاشات تعمل على بيانات `platform.selfcheck` بدون أي تعديل في الخلفية.
+## S-07 — The web app (done ✅)
+- **Goal:** an operations center for a non-technical user.
+- **Read:** `src/smartops/api/app.py` only (the API endpoints are the contract).
+- **Create:** `web/` (static pages or Vite) + wire it to the FastAPI service.
+- **Required:** a status dashboard, a run list, run details with its steps and events, incidents, files, and a run/retry button. Clear and free of technical jargon in the UI text.
+- **Acceptance:** the screens work against `platform.selfcheck` data with no backend modification.
 
-## S-08 — مدير الوكلاء (وضع تحليل فقط) (تم ✅)
-- **الهدف:** تشغيل Codex/Claude CLI وتسجيل كل شيء.
-- **اقرأ:** `src/smartops/ports/agents.py`، `src/smartops/storage/repositories.py` (`AgentRunRepository` فقط).
-- **أنشئ:** `src/smartops/adapters/agents/cli_runner.py` + `tests/test_agent_runner.py` (بعملية وهمية، بدون استدعاء حقيقي).
-- **المطلوب:** تنفيذ `AgentRunnerPort`، بث المخرجات، مهلة زمنية، تسجيل التوكنز، واحترام `AgentMode.ANALYZE` (ممنوع أي تعديل ملفات في هذا الوضع).
-- **القبول:** `pytest tests/test_agent_runner.py -q` أخضر، ويثبت أن وضع التحليل لا يكتب أي ملف.
-- **ممنوع:** تفعيل وضع التنفيذ أو التجربة في هذه الحزمة.
+## S-08 — Agent manager (analysis-only mode) (done ✅)
+- **Goal:** run Codex/Claude CLI and log everything.
+- **Read:** `src/smartops/ports/agents.py`, `src/smartops/storage/repositories.py` (`AgentRunRepository` only).
+- **Create:** `src/smartops/adapters/agents/cli_runner.py` + `tests/test_agent_runner.py` (with a fake process, no real invocation).
+- **Required:** implement `AgentRunnerPort`, stream output, a timeout, token logging, and enforcing `AgentMode.ANALYZE` (no file modification is permitted in this mode).
+- **Acceptance:** `pytest tests/test_agent_runner.py -q` is green, and proves analyze mode writes no file.
+- **Forbidden:** enabling execute or experiment mode in this packet.
 
-## S-09 — قنوات الإنذار (تم ✅)
-- **الهدف:** تنفيذ `NotifierPort` (سجل محلي + Webhook اختياري).
-- **اقرأ:** `src/smartops/ports/notify.py`.
-- **أنشئ:** `src/smartops/adapters/notify/local.py` + `tests/test_notifier.py`.
-- **القبول:** `pytest tests/test_notifier.py -q` أخضر.
+## S-09 — Alert channels (done ✅)
+- **Goal:** implement `NotifierPort` (a local log + an optional webhook).
+- **Read:** `src/smartops/ports/notify.py`.
+- **Create:** `src/smartops/adapters/notify/local.py` + `tests/test_notifier.py`.
+- **Acceptance:** `pytest tests/test_notifier.py -q` is green.
 
-## S-10 — حزمة الحادثة (تم ✅)
-- **الهدف:** تجميع الأدلة في مجلد واحد عند فتح أي حادثة.
-- **اقرأ:** `src/smartops/domain/models.py` (`Incident`)، `src/smartops/storage/repositories.py` (`IncidentRepository`).
-- **أنشئ:** `src/smartops/adapters/incidents/pack.py` + `tests/test_incident_pack.py`.
-- **المطلوب:** ملخص، الخطأ، الخطوات، الأحداث، الملفات المتوقعة مقابل الفعلية، وحوادث مشابهة عبر `find_by_signature`، ويُكتب المسار في `incident.pack_path`.
-- **القبول:** `pytest tests/test_incident_pack.py -q` أخضر.
+## S-10 — The incident pack (done ✅)
+- **Goal:** gather evidence into one folder whenever an incident opens.
+- **Read:** `src/smartops/domain/models.py` (`Incident`), `src/smartops/storage/repositories.py` (`IncidentRepository`).
+- **Create:** `src/smartops/adapters/incidents/pack.py` + `tests/test_incident_pack.py`.
+- **Required:** a summary, the error, the steps, the events, expected vs. actual files, and similar incidents via `find_by_signature`, with the path written to `incident.pack_path`.
+- **Acceptance:** `pytest tests/test_incident_pack.py -q` is green.
 
 ---
 
-## الترتيب الموصى به (منفَّذ بالكامل ✅)
+## Recommended order (fully executed ✅)
 
-`S-01 → S-02 → S-03 → S-04` (نواة الجمع تشتغل فعليًا) ثم `S-10 → S-09 → S-05 → S-07` (رؤية وتحكم) ثم `S-06 → S-08`.
-كل الحزم العشر منفَّذة ومختبَرة — راجع `docs/EXECUTION_PLAN.md` قسم 5 لحالة كل مرحلة، وقسم "الخطوة التالية" أدناه لما تبقّى.
+`S-01 → S-02 → S-03 → S-04` (the collection core actually works) then `S-10 → S-09 → S-05 → S-07` (visibility and control) then `S-06 → S-08`.
+All ten packets are implemented and tested — see `docs/EXECUTION_PLAN.md` section 5 for each phase's status, and the "Next step" section below for what remains.
 
-**F-01 → F-12 (تم ✅):** حزمة تشغيل حقيقي كاملة (جلسات، جدولة، إنذار بطء، CLI،
-واجهة أنظمة/تنبيهات) منفَّذة دفعة واحدة حسب `docs/FINISH_PACKET_SONNET.md`. كل
-تفصيل ملزم (الحقول، منطق كشف انتهاء الجلسة، منطق الاستحقاق) موثّق هناك.
+**F-01 → F-12 (done ✅):** the full real-run packet (sessions, scheduling,
+slowness alerting, the CLI, a systems/alerts UI) was implemented in one pass
+per `docs/FINISH_PACKET_SONNET.md`. Every binding detail (the fields, the
+session-expiry detection logic, the due-ness logic) is documented there.
 
-## الخطوة التالية: التركيب لا الحزم الجديدة
+## Next step: wiring, not new packets
 
-كل حزمة أنشأت محوّلًا مستقلًا خلف عقده (ports/) دون ربطه تلقائيًا بـ
-`services.py` — بالتصميم، حتى تبقى النواة مستقلة عن أي محوّل بعينه.
-المتبقي ليس حزمة Sonnet جديدة بل **تركيب واعٍ يقرره Opus**: أي محوّلات
-تُفعَّل فعليًا في `main.py`/الإنتاج (Playwright حقيقي؟ Webhook حقيقي؟
-أي نموذج وكيل؟)، وهذا قرار تشغيلي/أمني يحتاج نفس مستوى الحرص المعماري
-الأصلي، فلا يُترك لـ Sonnet وحده.
+Every packet built an independent adapter behind its contract (ports/)
+without automatically wiring it into `services.py` — by design, so the core
+stays independent of any specific adapter. What remains is not a new Sonnet
+packet but a **deliberate wiring decision made by Opus**: which adapters are
+actually enabled in `main.py`/production (a real Playwright? a real webhook?
+which agent model?) — this is an operational/security decision that needs
+the same level of architectural care as the original design, so it is not
+left to Sonnet alone.
 
-## متى نوقف Sonnet ونصعّد
+## When to stop Sonnet and escalate
 
-- المهمة تحتاج تعديل عقد أو جدول قاعدة بيانات.
-- ظهرت حالة تزامن أو استكمال جديدة.
-- فشل الاختبار مرتين بنفس السبب.
-- قرار يخص الأمان أو الصلاحيات أو حذف بيانات.
+- The task needs a contract or database schema change.
+- A new concurrency or resumption case appeared.
+- A test failed twice for the same reason.
+- A decision concerns security, permissions, or data deletion.

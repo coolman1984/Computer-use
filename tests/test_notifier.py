@@ -1,4 +1,4 @@
-"""اختبارات S-09: قنوات الإنذار — سجل محلي، Webhook، وناقل يجمّع القنوات."""
+"""S-09 tests: alert channels — a local log, a webhook, and a composite that fans out across channels."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from smartops.ports.notify import Alert
 def _alert(**overrides) -> Alert:
     defaults: dict = dict(
         level=AlertLevel.RED,
-        title="تأخر تنزيل التقرير",
-        body="التقرير لم يصل خلال الوقت الطبيعي",
+        title="Report download is late",
+        body="The report did not arrive within its normal time",
         run_id="run_demo",
         incident_id="inc_demo",
         payload={"minutes_late": 12},
@@ -35,14 +35,14 @@ def test_local_log_notifier_appends_jsonl(tmp_path: Path) -> None:
     notifier = LocalLogNotifier(log_path, clock=FrozenClock())
 
     assert notifier.send(_alert()) is True
-    assert notifier.send(_alert(title="تنبيه ثانٍ")) is True
+    assert notifier.send(_alert(title="Second alert")) is True
 
     records = notifier.read_all()
     assert len(records) == 2
-    assert records[0]["title"] == "تأخر تنزيل التقرير"
+    assert records[0]["title"] == "Report download is late"
     assert records[0]["level"] == "red"
     assert records[0]["payload"] == {"minutes_late": 12}
-    assert records[1]["title"] == "تنبيه ثانٍ"
+    assert records[1]["title"] == "Second alert"
     assert "sent_at" in records[0]
 
 
@@ -60,7 +60,7 @@ def test_local_log_notifier_read_all_on_missing_file_is_empty(tmp_path: Path) ->
 
 
 def test_local_log_notifier_returns_false_on_write_failure(tmp_path: Path) -> None:
-    # نمرر مسارًا هو نفسه مجلد، فالكتابة فيه كملف تفشل بـ OSError.
+    # We pass a path that is itself a directory, so writing to it as a file fails with OSError.
     directory_as_file = tmp_path / "not_a_file"
     directory_as_file.mkdir()
     notifier = LocalLogNotifier(directory_as_file)
@@ -83,7 +83,7 @@ class _RecordingHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def log_message(self, *args) -> None:  # يسكت لوجات http.server الافتراضية
+    def log_message(self, *args) -> None:  # silences http.server's default request logging
         pass
 
 
@@ -110,7 +110,7 @@ def test_webhook_notifier_posts_alert_as_json() -> None:
     assert len(_RecordingHandler.received) == 1
     payload = _RecordingHandler.received[0]
     assert payload["level"] == "red"
-    assert payload["title"] == "تأخر تنزيل التقرير"
+    assert payload["title"] == "Report download is late"
     assert payload["payload"] == {"minutes_late": 12}
 
 
@@ -144,7 +144,7 @@ class _FakeNotifier:
     def send(self, alert: Alert) -> bool:
         self.calls += 1
         if self.raises:
-            raise RuntimeError("قناة معطوبة")
+            raise RuntimeError("Broken channel")
         return self.result
 
 

@@ -1,4 +1,4 @@
-"""نقطة تشغيل: python -m smartops <أمر>"""
+"""Entry point: python -m smartops <command>"""
 
 from __future__ import annotations
 
