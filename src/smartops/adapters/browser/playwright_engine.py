@@ -17,6 +17,7 @@ from typing import Any
 from playwright.sync_api import Playwright, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from ...config import BrowserSettings
+from ...credentials import CredentialStore
 from ...domain.enums import ExtractionLayer
 from ...ports.browser import ExtractionRequest, ExtractionResult
 from ...storage.paths import slug
@@ -31,10 +32,12 @@ class PlaywrightBrowserAdapter:
         *,
         executable_path: str | None = None,
         clock: Any = None,
+        credential_store: CredentialStore | None = None,
     ) -> None:
         self._settings = settings
         self._executable_path = executable_path
         self._clock = clock or time.time
+        self._credential_store = credential_store
         # آخر دليل فشل لكل (نظام, تقرير) — يُستخدم من capture_evidence.
         self._last_evidence: dict[str, dict[str, Any]] = {}
 
@@ -127,6 +130,11 @@ class PlaywrightBrowserAdapter:
                 page = context.new_page()
                 try:
                     page.goto(entry_url, wait_until="networkidle")
+                    auth_error = self._ensure_authenticated(context, page, request, filters)
+                    if auth_error:
+                        return self._failure(
+                            request, ExtractionLayer.NETWORK, auth_error, started, auth_required=True
+                        )
                 finally:
                     page.close()
             network_result = self._try_network(context, request, direct_url, started)
@@ -182,6 +190,73 @@ class PlaywrightBrowserAdapter:
             return True
         return False
 
+    def _ensure_authenticated(
+        self, context, page, request: ExtractionRequest, filters: dict[str, Any]
+    ) -> str | None:
+        """Use the saved session first, then one credential-backed login attempt.
+
+        Tracing is stopped before any credential is entered. The password field is
+        cleared in every path before tracing/evidence can resume.
+        """
+        if not self._session_expired(page, filters):
+            return None
+        credential_ref = filters.get("credential_ref")
+        if not credential_ref:
+            return (
+                f"Session expired for {request.system}. "
+                f"Run: python -m smartops login {request.system}"
+            )
+        if self._credential_store is None:
+            return f"Secure credentials are unavailable for {request.system}."
+
+        try:
+            credential = self._credential_store.get(credential_ref)
+        except Exception:
+            return f"Secure credentials could not be read for {request.system}."
+        if credential is None:
+            return f"No secure credentials are stored for {request.system}."
+
+        try:
+            context.tracing.stop()
+        except Exception:
+            pass
+
+        password_field = None
+        try:
+            login_url = filters.get("login_url")
+            if login_url and not page.url.startswith(login_url):
+                page.goto(login_url, wait_until="networkidle")
+            page.locator(filters["username_selector"]).fill(credential.username)
+            password_field = page.locator(filters["password_selector"])
+            password_field.fill(credential.password)
+            page.locator(filters["submit_selector"]).click()
+
+            logged_in_selector = filters.get("logged_in_selector")
+            login_selector = filters.get("login_selector")
+            if logged_in_selector:
+                page.wait_for_selector(logged_in_selector, state="visible")
+            elif login_selector:
+                page.wait_for_selector(login_selector, state="hidden")
+            if self._session_expired(page, filters):
+                return f"Automatic login was rejected for {request.system}."
+
+            if request.session_state_path:
+                Path(request.session_state_path).parent.mkdir(parents=True, exist_ok=True)
+                context.storage_state(path=str(request.session_state_path))
+            return None
+        except Exception:
+            return f"Automatic login failed for {request.system}."
+        finally:
+            if password_field is not None:
+                try:
+                    password_field.fill("")
+                except Exception:
+                    pass
+            try:
+                context.tracing.start(screenshots=True, snapshots=True)
+            except Exception:
+                pass
+
     def _extract_via_dom(
         self, context, request: ExtractionRequest, filters: dict[str, Any], started: float
     ) -> ExtractionResult:
@@ -199,11 +274,15 @@ class PlaywrightBrowserAdapter:
         try:
             page.goto(entry_url, wait_until="networkidle")
 
+            message = self._ensure_authenticated(context, page, request, filters)
+            if message:
+                self._capture_failure_evidence(page, request, message)
+                return self._failure(request, ExtractionLayer.DOM, message, started, auth_required=True)
+            # A successful login can land on a home page; return to the report URL.
+            if page.url != entry_url:
+                page.goto(entry_url, wait_until="networkidle")
             if self._session_expired(page, filters):
-                message = (
-                    f"الجلسة منتهية أو غير مسجّلة الدخول للنظام {request.system} — "
-                    f"شغّل: python -m smartops login {request.system}"
-                )
+                message = f"Automatic login did not establish a valid session for {request.system}."
                 self._capture_failure_evidence(page, request, message)
                 return self._failure(request, ExtractionLayer.DOM, message, started, auth_required=True)
 

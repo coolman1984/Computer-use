@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from smartops.config import AppSettings, BrowserSettings, SafetySettings, Settings, StorageSettings
+from smartops.credentials import InMemoryCredentialStore
 from smartops.core.clock import FrozenClock
 from smartops.services import Services
 from smartops.storage.db import Database
@@ -43,6 +44,7 @@ def services(settings, clock, slept) -> Services:
         db=Database(":memory:"),
         clock=clock,
         sleeper=slept.append,
+        credential_store=InMemoryCredentialStore(),
     )
     yield svc
     svc.close()

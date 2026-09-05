@@ -319,6 +319,24 @@ def test_to_run_params_carries_auth_selectors_and_thresholds() -> None:
     assert "normal_duration_seconds" in params
 
 
+def test_unattended_auth_requires_selectors_and_passes_only_references() -> None:
+    import yaml
+
+    raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
+    raw["auth"].update({
+        "mode": "unattended",
+        "credential_ref": "mes-prod",
+        "username_selector": "#username",
+        "password_selector": "#password",
+        "submit_selector": "button[type=submit]",
+    })
+    profile = parse_system_profile(raw)
+    filters = profile.to_run_params("daily_sales")["filters"]
+    assert filters["credential_ref"] == "mes-prod"
+    assert filters["login_url"].endswith("/login")
+    assert filters["password_selector"] == "#password"
+
+
 def test_iter_scheduled_returns_only_active_pairs(tmp_path: Path) -> None:
     (tmp_path / "erp.yaml").write_text(VALID_YAML_WITH_AUTH_AND_SCHEDULE, encoding="utf-8")
     (tmp_path / "unscheduled.yaml").write_text(

@@ -74,13 +74,18 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         systems = services.systems.list()
         print(f"الأنظمة المحمّلة: {len(systems)}")
         for system in systems:
-            if system.auth.mode != "session":
+            if system.auth.mode not in ("session", "unattended"):
                 session_status = "بلا مصادقة (لا يحتاج جلسة)"
             else:
                 age = session_age_hours(settings.storage.sessions_dir, system.key)
                 session_status = (
                     "لا توجد جلسة محفوظة" if age is None else f"عمر الجلسة: {age:.1f} ساعة"
                 )
+                if system.auth.mode == "unattended":
+                    try:
+                        session_status += "؛ بيانات الدخول الآمنة: " + ("موجودة" if services.credentials.get(system.auth.credential_ref or system.key) else "غير موجودة")
+                    except Exception:
+                        session_status += "؛ بيانات الدخول الآمنة: غير متاحة"
             print(f"  - {system.key} ({system.auth.mode}): {session_status}")
 
         print()
@@ -128,6 +133,9 @@ def _cmd_login(args: argparse.Namespace) -> int:
     services = _build_services()
     try:
         system = services.systems.get(args.system)
+        if system.auth.mode == "unattended":
+            print("هذا النظام يستخدم تسجيل الدخول الليلي الآمن. احفظ username/password من صفحة Credentials.")
+            return 1
         if system.auth.mode != "session":
             print(f"النظام {args.system} وضع مصادقته '{system.auth.mode}' — لا يحتاج تسجيل دخول.")
             return 1

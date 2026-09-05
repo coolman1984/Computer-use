@@ -76,11 +76,28 @@ class WorkflowRunner:
         if not force and run.resume_at and run.resume_at > now:
             return run
 
-        definition: WorkflowDefinition = self.services.workflows.get(run.workflow_key)
         token = new_id("lock")
         if not self.services.runs.claim(run.id, token):
             return run
         try:
+            try:
+                definition: WorkflowDefinition = self.services.workflows.get(run.workflow_key)
+            except SmartOpsError as exc:
+                # A stale/invalid queued run must become terminal; otherwise a
+                # worker would redispatch it forever after every poll.
+                run.status = RunStatus.FAILED
+                run.finished_at = self.clock.now()
+                run.error_class = exc.error_class.value
+                run.error_message = exc.message
+                self.services.runs.update(run)
+                self.services.events.emit(
+                    EventType.RUN_FAILED,
+                    run_id=run.id,
+                    severity=Severity.ERROR,
+                    message=exc.message,
+                    payload={"error_class": exc.error_class.value},
+                )
+                raise
             return self._execute_locked(run, definition)
         finally:
             self.services.runs.release(run.id, token)
@@ -236,7 +253,9 @@ class WorkflowRunner:
             error = result.error or SmartOpsError("فشل غير موصوف")
             attempts_used = attempt_no
             policy = policy_for(error.error_class, max_attempts=step_def.max_attempts)
-            can_retry = error.retryable and attempts_used < policy.max_attempts
+            # Authentication failures need operator intervention; retrying a
+            # password automatically can lock the target account.
+            can_retry = error.retryable and not error.details.get("no_retry", False) and attempts_used < policy.max_attempts
             if not can_retry:
                 return self._fail_run(run, definition, step_def, seq, attempts_used, started_at, error)
 

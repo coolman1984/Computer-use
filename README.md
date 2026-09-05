@@ -107,6 +107,13 @@ python -m smartops work
 `config/systems/example.yaml`. `smartops login` يفتح متصفحًا مرئيًا لتسجّل
 دخولك يدويًا مرة واحدة؛ المنصة لا ترى كلمة مرورك أبدًا (D020).
 
+للتشغيل الليلي بدون وجودك، عرّف النظام خارجيًا بوضع `auth.mode: unattended`
+ومحددات username/password/submit فقط، ثم افتح `/app/credentials.html` واحفظ
+البيانات مرة واحدة. تُحفظ في Windows Credential Manager تحت حساب Windows نفسه؛
+لا تُحفظ في YAML أو SQLite أو السجلات أو التسجيلات. راجع
+`docs/UNATTENDED_LOGIN.md`. هذا المسار يفترض عدم وجود MFA/CAPTCHA، وأن الجهاز
+والـVPN والعامل يظلّوا شغّالين أثناء الليل.
+
 نقاط الواجهة الحالية: `/health`، `/api/workflows`، `/api/runs`، `/api/runs/{id}`،
 `/api/runs/{id}/events`، `/api/events`، `/api/incidents`، `/api/files`،
 `/api/systems`، `/api/alerts`، `/api/systems/{system}/{report}/collect`.

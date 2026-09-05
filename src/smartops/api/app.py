@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from ..adapters.notify.local import LocalLogNotifier
 from ..core.errors import SmartOpsError
@@ -41,8 +41,22 @@ class CreateRecordingRequest(BaseModel):
     system_key: str = Field(min_length=1, max_length=120)
 
 
+class CredentialRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=256)
+    password: SecretStr = Field(min_length=1, max_length=1024)
+
+
 def create_app(services: Services | None = None) -> FastAPI:
     app = FastAPI(title="SmartOps", version="0.1.0")
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if request.url.path.startswith("/api/credentials"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     def provide() -> Services:
         return services or get_services()
@@ -147,12 +161,12 @@ def create_app(services: Services | None = None) -> FastAPI:
                     "auth_mode": system.auth.mode,
                     "session_exists": (
                         session_exists(svc.settings.storage.sessions_dir, system.key)
-                        if system.auth.mode == "session"
+                        if system.auth.mode in ("session", "unattended")
                         else None
                     ),
                     "session_age_hours": (
                         session_age_hours(svc.settings.storage.sessions_dir, system.key)
-                        if system.auth.mode == "session"
+                        if system.auth.mode in ("session", "unattended")
                         else None
                     ),
                     "reports": [
@@ -170,6 +184,58 @@ def create_app(services: Services | None = None) -> FastAPI:
                 }
             )
         return {"items": items}
+
+    @app.get("/api/credentials")
+    def list_credentials(svc: Services = Depends(provide)) -> dict[str, Any]:
+        items = []
+        for system in svc.systems.list():
+            if system.auth.mode != "unattended":
+                continue
+            ref = system.auth.credential_ref or system.key
+            try:
+                credential = svc.credentials.get(ref)
+                stored = credential is not None
+                username = credential.username if credential else ""
+            except Exception:
+                stored, username = False, ""
+            items.append({"system_key": system.key, "credential_ref": ref, "stored": stored, "username": username})
+        return {"items": items}
+
+    def _credential_system(system_key: str, svc: Services):
+        try:
+            return svc.systems.get(system_key)
+        except SmartOpsError as exc:
+            raise HTTPException(status_code=404, detail=exc.to_dict()) from exc
+
+    def _require_local_ui(request: Request) -> None:
+        # Browser mutations must originate from the shipped UI. Missing header is
+        # intentionally rejected to reduce accidental script/CSRF use.
+        if request.headers.get("X-SmartOps-Request") != "web":
+            raise HTTPException(status_code=403, detail="Credential changes must come from the SmartOps UI.")
+
+    @app.put("/api/credentials/{system_key}")
+    def save_credential(system_key: str, body: CredentialRequest, request: Request, svc: Services = Depends(provide)) -> dict[str, Any]:
+        _require_local_ui(request)
+        system = _credential_system(system_key, svc)
+        if system.auth.mode != "unattended":
+            raise HTTPException(status_code=400, detail="System authentication mode must be unattended.")
+        ref = system.auth.credential_ref or system.key
+        try:
+            svc.credentials.put(ref, body.username, body.password.get_secret_value())
+        except (ValueError, OSError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {"system_key": system_key, "credential_ref": ref, "stored": True, "username": body.username}
+
+    @app.delete("/api/credentials/{system_key}")
+    def delete_credential(system_key: str, request: Request, svc: Services = Depends(provide)) -> dict[str, Any]:
+        _require_local_ui(request)
+        system = _credential_system(system_key, svc)
+        ref = system.auth.credential_ref or system.key
+        try:
+            deleted = svc.credentials.delete(ref)
+        except (ValueError, OSError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {"system_key": system_key, "credential_ref": ref, "stored": False, "deleted": deleted}
 
     @app.get("/api/recordings")
     def list_recordings(

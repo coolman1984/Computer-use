@@ -88,7 +88,7 @@ def download_report(ctx: StepContext) -> StepResult:
     if result.auth_required:
         raise AuthError(
             result.message or f"الجلسة منتهية للنظام {system}",
-            details={"system": system, "needs_login": True, "command": f"python -m smartops login {system}"},
+            details={"system": system, "needs_login": True, "no_retry": True, "command": f"python -m smartops login {system}"},
         )
     if not result.ok or result.file_path is None:
         raise TransientError(

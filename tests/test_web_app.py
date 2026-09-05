@@ -95,7 +95,7 @@ def test_dashboard_runs_selfcheck_and_updates_live(page) -> None:
 
     page.click("#run-selfcheck")
     page.wait_for_function(
-        "document.getElementById('selfcheck-hint').textContent.includes('بنجاح')",
+        "document.getElementById('selfcheck-hint').textContent.includes('Completed')",
         timeout=5000,
     )
 
@@ -160,6 +160,16 @@ def test_every_primary_page_links_to_recording_center(page, path) -> None:
     link = page.locator('.side-nav a[href="recordings.html"]')
     assert link.count() == 1
     assert "Recordings" in link.inner_text()
+
+
+def test_sidebar_opens_recording_center(page) -> None:
+    page.goto("/app/index.html")
+
+    page.locator('.side-nav a[href="recordings.html"]').click()
+
+    page.wait_for_url("**/app/recordings.html")
+    assert page.locator("section.panel h2").first.inner_text() == "Capture a workflow"
+    assert page.errors_log == []
 
 
 def test_retry_button_disabled_after_success(page, services) -> None:

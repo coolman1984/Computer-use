@@ -7,6 +7,7 @@ function mountAppShell() {
     ["overview", "Overview", "index.html", "⌂"],
     ["runs", "Runs", "runs.html", "↗"],
     ["recordings", "Recordings", "recordings.html", "●"],
+    ["credentials", "Credentials", "credentials.html", "▣"],
     ["incidents", "Incidents", "incidents.html", "!"],
     ["files", "Files", "files.html", "□"],
   ];

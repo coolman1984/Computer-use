@@ -9,6 +9,12 @@ auth:
   login_url: "https://intranet.example.local/login"
   logged_in_selector: "#user-menu"
   login_selector: "#login-form"
+  # For unattended runs, use mode: unattended and add selectors below.
+  # Never put real credentials in YAML; save them in /app/credentials.html.
+  # credential_ref: erp_demo
+  # username_selector: "#username"
+  # password_selector: "#password"
+  # submit_selector: "button[type=submit]"
 
 reports:
   - key: daily_sales

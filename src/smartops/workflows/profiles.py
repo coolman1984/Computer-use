@@ -37,12 +37,16 @@ class AlertRule:
 
 @dataclass(frozen=True)
 class AuthProfile:
-    """طريقة المصادقة لنظام: none (بلا جلسة) أو session (جلسة محفوظة D020)."""
+    """Authentication mode and selectors; credentials never belong in YAML."""
 
     mode: str = "none"
     login_url: str = ""
     logged_in_selector: str = ""
     login_selector: str = ""
+    credential_ref: str = ""
+    username_selector: str = ""
+    password_selector: str = ""
+    submit_selector: str = ""
 
 
 @dataclass(frozen=True)
@@ -91,6 +95,12 @@ class ReportProfile:
                 filters["logged_in_selector"] = auth.logged_in_selector
             if auth.login_selector:
                 filters["login_selector"] = auth.login_selector
+            if auth.mode == "unattended":
+                filters["login_url"] = auth.login_url
+                filters["credential_ref"] = auth.credential_ref
+                filters["username_selector"] = auth.username_selector
+                filters["password_selector"] = auth.password_selector
+                filters["submit_selector"] = auth.submit_selector
         params: dict[str, Any] = {
             "report": self.key,
             "period": self.period,
@@ -153,22 +163,42 @@ def _parse_alert(raw: dict[str, Any]) -> AlertRule:
 
 def _parse_auth(raw: dict[str, Any], *, system_key: str) -> AuthProfile:
     mode = raw.get("mode", "none") or "none"
-    if mode not in ("none", "session"):
+    if mode not in ("none", "session", "unattended"):
         raise ConfigurationError(
             f"وضع مصادقة غير معروف في النظام {system_key}: {mode}",
-            details={"system": system_key, "mode": mode, "allowed": ["none", "session"]},
+            details={"system": system_key, "mode": mode, "allowed": ["none", "session", "unattended"]},
         )
     login_url = raw.get("login_url", "") or ""
-    if mode == "session" and not login_url:
+    if mode in ("session", "unattended") and not login_url:
         raise ConfigurationError(
-            f"لازم login_url لأي نظام وضع مصادقته session ({system_key})",
+            f"لازم login_url لأي نظام وضع مصادقته {mode} ({system_key})",
+            details={"system": system_key},
+        )
+    credential_ref = raw.get("credential_ref", system_key) or system_key
+    username_selector = raw.get("username_selector", "") or ""
+    password_selector = raw.get("password_selector", "") or ""
+    submit_selector = raw.get("submit_selector", "") or ""
+    logged_in_selector = raw.get("logged_in_selector", "") or ""
+    login_selector = raw.get("login_selector", "") or ""
+    if mode == "unattended" and not all((username_selector, password_selector, submit_selector)):
+        raise ConfigurationError(
+            f"unattended auth needs username_selector, password_selector, and submit_selector ({system_key})",
+            details={"system": system_key},
+        )
+    if mode == "unattended" and not (logged_in_selector or login_selector):
+        raise ConfigurationError(
+            f"unattended auth needs a login success check ({system_key})",
             details={"system": system_key},
         )
     return AuthProfile(
         mode=mode,
         login_url=login_url,
-        logged_in_selector=raw.get("logged_in_selector", "") or "",
-        login_selector=raw.get("login_selector", "") or "",
+        logged_in_selector=logged_in_selector,
+        login_selector=login_selector,
+        credential_ref=credential_ref,
+        username_selector=username_selector,
+        password_selector=password_selector,
+        submit_selector=submit_selector,
     )
 
 

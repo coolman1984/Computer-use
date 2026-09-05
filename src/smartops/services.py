@@ -12,6 +12,7 @@ from .adapters.history.archiver import HistoryArchiver
 from .adapters.notify.local import CompositeNotifier, LocalLogNotifier, WebhookNotifier
 from .adapters.validation.local import LocalFileValidator
 from .config import AgentSettings, Settings, ensure_directories, load_settings
+from .credentials import CredentialStore, default_credential_store
 from .core.clock import Clock, SystemClock
 from .core.errors import ConfigurationError
 from .engine.registry import StepRegistry, WorkflowRegistry
@@ -48,6 +49,7 @@ class Services:
         clock: Clock | None = None,
         sleeper: Callable[[float], None] = time.sleep,
         create_directories: bool = True,
+        credential_store: CredentialStore | None = None,
     ) -> None:
         self.settings = settings or load_settings()
         self.clock = clock or SystemClock()
@@ -74,7 +76,8 @@ class Services:
         # محوّلات آمنة ومحلية بالكامل: تُركَّب دايمًا، لا تحتاج إعدادًا إضافيًا،
         # ولا تلمس شبكة أو عملية خارجية إلا لو استُدعيت فعليًا من خطوة تشغيل.
         self.validator = LocalFileValidator(files_repo=self.files, now=lambda: self.clock.now().timestamp())
-        self.browser = PlaywrightBrowserAdapter(self.settings.browser)
+        self.credentials = credential_store or default_credential_store()
+        self.browser = PlaywrightBrowserAdapter(self.settings.browser, credential_store=self.credentials)
         self.history = HistoryArchiver(self.settings.storage.history_dir)
         # settings.storage.systems_dir، أو فاضي لو المجلد غير موجود. التعريفات
         # الحقيقية تعيش خارج المستودع عبر SMARTOPS_SYSTEMS_DIR (D023).
