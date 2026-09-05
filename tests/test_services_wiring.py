@@ -48,6 +48,8 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
             incidents_dir=tmp_path / "incidents",
             logs_dir=tmp_path / "logs",
             history_dir=tmp_path / "history",
+            sessions_dir=tmp_path / "sessions",
+            systems_dir=tmp_path / "systems",
         ),
         browser=BrowserSettings(),
         safety=SafetySettings(),

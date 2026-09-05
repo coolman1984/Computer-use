@@ -3,15 +3,17 @@
 
 كل نظام يوصف مرة واحدة بدل تكرار نفس الإعداد في كل تشغيل: الاسم، التقارير،
 قواعد التحقق، الزمن الطبيعي، وقواعد الإنذار (انظر المخطط في MASTER_PLAN.md
-القسم 7). تعريف ناقص يرفع ConfigurationError برسالة واضحة فورًا بدل فشل
-غامض أثناء التنفيذ لاحقًا.
+القسم 7)، بالإضافة لطريقة المصادقة والجدولة (F-05). تعريف ناقص يرفع
+ConfigurationError برسالة واضحة فورًا بدل فشل غامض أثناء التنفيذ لاحقًا.
 
-ملاحظة: normal_duration_seconds وalert ما زالا بيانات وصفية غير مستهلكة
-بعد من محرك التشغيل؛ ستُستخدم في مرحلة الإنذار المبكر (P5).
+ملاحظة: normal_duration_seconds وalert أصبحا يُستهلكان فعليًا من
+extract.download_report (F-07) لإطلاق إنذار بطء بعتبات ثابتة. اكتشاف
+الاتجاه/الخط الأساسي (baseline) يظل مؤجلًا لمرحلة الإنذار المبكر الكاملة (P5).
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,8 @@ from ..core.errors import ConfigurationError
 
 DEFAULT_SYSTEMS_DIR = Path("config/systems")
 
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
 
 @dataclass(frozen=True)
 class AlertRule:
@@ -29,6 +33,29 @@ class AlertRule:
 
     warn_after_seconds: float | None = None
     critical_after_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class AuthProfile:
+    """طريقة المصادقة لنظام: none (بلا جلسة) أو session (جلسة محفوظة D020)."""
+
+    mode: str = "none"
+    login_url: str = ""
+    logged_in_selector: str = ""
+    login_selector: str = ""
+
+
+@dataclass(frozen=True)
+class ScheduleProfile:
+    """جدولة تقرير: إما وقت يومي ثابت، أو كل عدد ثوانٍ. مش الاثنين معًا."""
+
+    daily_at: str = ""
+    every_seconds: float | None = None
+    enabled: bool = True
+
+    @property
+    def is_active(self) -> bool:
+        return self.enabled and bool(self.daily_at or self.every_seconds)
 
 
 @dataclass(frozen=True)
@@ -43,8 +70,9 @@ class ReportProfile:
     normal_duration_seconds: float = 60.0
     validation_rules: dict[str, Any] = field(default_factory=dict)
     alert: AlertRule = field(default_factory=AlertRule)
+    schedule: ScheduleProfile = field(default_factory=ScheduleProfile)
 
-    def to_run_params(self) -> dict[str, Any]:
+    def to_run_params(self, auth: "AuthProfile | None" = None) -> dict[str, Any]:
         """يبني params جاهزة لـ runner.create_run("collect.report", params=...).
 
         لا يضع مفتاح "system" هنا؛ يُضاف من SystemProfile.to_run_params.
@@ -58,12 +86,23 @@ class ReportProfile:
             filters["direct_download_url"] = self.direct_download_url
         if self.wait_selector:
             filters["wait_selector"] = self.wait_selector
-        return {
+        if auth is not None:
+            if auth.logged_in_selector:
+                filters["logged_in_selector"] = auth.logged_in_selector
+            if auth.login_selector:
+                filters["login_selector"] = auth.login_selector
+        params: dict[str, Any] = {
             "report": self.key,
             "period": self.period,
             "filters": filters,
             "rules": dict(self.validation_rules),
+            "normal_duration_seconds": self.normal_duration_seconds,
         }
+        if self.alert.warn_after_seconds is not None:
+            params["warn_after_seconds"] = self.alert.warn_after_seconds
+        if self.alert.critical_after_seconds is not None:
+            params["critical_after_seconds"] = self.alert.critical_after_seconds
+        return params
 
 
 @dataclass(frozen=True)
@@ -71,6 +110,7 @@ class SystemProfile:
     key: str
     name: str
     reports: tuple[ReportProfile, ...]
+    auth: AuthProfile = field(default_factory=AuthProfile)
     source: Path | None = None
 
     def report(self, report_key: str) -> ReportProfile:
@@ -87,7 +127,7 @@ class SystemProfile:
         )
 
     def to_run_params(self, report_key: str) -> dict[str, Any]:
-        params = self.report(report_key).to_run_params()
+        params = self.report(report_key).to_run_params(self.auth)
         params["system"] = self.key
         return params
 
@@ -108,6 +148,52 @@ def _parse_alert(raw: dict[str, Any]) -> AlertRule:
     return AlertRule(
         warn_after_seconds=float(warn) if warn is not None else None,
         critical_after_seconds=float(critical) if critical is not None else None,
+    )
+
+
+def _parse_auth(raw: dict[str, Any], *, system_key: str) -> AuthProfile:
+    mode = raw.get("mode", "none") or "none"
+    if mode not in ("none", "session"):
+        raise ConfigurationError(
+            f"وضع مصادقة غير معروف في النظام {system_key}: {mode}",
+            details={"system": system_key, "mode": mode, "allowed": ["none", "session"]},
+        )
+    login_url = raw.get("login_url", "") or ""
+    if mode == "session" and not login_url:
+        raise ConfigurationError(
+            f"لازم login_url لأي نظام وضع مصادقته session ({system_key})",
+            details={"system": system_key},
+        )
+    return AuthProfile(
+        mode=mode,
+        login_url=login_url,
+        logged_in_selector=raw.get("logged_in_selector", "") or "",
+        login_selector=raw.get("login_selector", "") or "",
+    )
+
+
+def _parse_schedule(raw: dict[str, Any], *, context: str) -> ScheduleProfile:
+    daily_at = raw.get("daily_at", "") or ""
+    every_seconds = raw.get("every_seconds")
+    if daily_at and every_seconds is not None:
+        raise ConfigurationError(
+            f"اختر daily_at أو every_seconds، مش الاثنين معًا، في {context}",
+            details={"context": context},
+        )
+    if daily_at and not _TIME_RE.match(daily_at):
+        raise ConfigurationError(
+            f"صيغة daily_at غير صحيحة (المطلوب HH:MM) في {context}: {daily_at}",
+            details={"context": context, "daily_at": daily_at},
+        )
+    if every_seconds is not None and float(every_seconds) <= 0:
+        raise ConfigurationError(
+            f"every_seconds لازم يكون أكبر من صفر في {context}",
+            details={"context": context, "every_seconds": every_seconds},
+        )
+    return ScheduleProfile(
+        daily_at=daily_at,
+        every_seconds=float(every_seconds) if every_seconds is not None else None,
+        enabled=bool(raw.get("enabled", True)),
     )
 
 
@@ -138,6 +224,7 @@ def _parse_report(raw: Any, *, system_key: str) -> ReportProfile:
         normal_duration_seconds=float(raw.get("normal_duration_seconds", 60.0)),
         validation_rules=dict(raw.get("validation_rules") or {}),
         alert=_parse_alert(raw.get("alert") or {}),
+        schedule=_parse_schedule(raw.get("schedule") or {}, context=context),
     )
 
 
@@ -155,7 +242,8 @@ def parse_system_profile(raw: Any, *, source: Path | None = None) -> SystemProfi
             f"النظام {key} يحتاج قائمة reports غير فارغة", details={"system": key, "source": source_label}
         )
     reports = tuple(_parse_report(r, system_key=key) for r in reports_raw)
-    return SystemProfile(key=key, name=raw.get("name", key), reports=reports, source=source)
+    auth = _parse_auth(raw.get("auth") or {}, system_key=key)
+    return SystemProfile(key=key, name=raw.get("name", key), reports=reports, auth=auth, source=source)
 
 
 def load_system_profiles(directory: Path | str | None = None) -> dict[str, SystemProfile]:
@@ -201,3 +289,12 @@ class SystemRegistry:
 
     def run_params(self, system_key: str, report_key: str) -> dict[str, Any]:
         return self.get(system_key).to_run_params(report_key)
+
+    def iter_scheduled(self) -> list[tuple[SystemProfile, ReportProfile]]:
+        """كل أزواج (نظام, تقرير) اللي جدولتها مفعّلة — مصدر بيانات الجدولة (F-08)."""
+        pairs: list[tuple[SystemProfile, ReportProfile]] = []
+        for system in self.list():
+            for report in system.reports:
+                if report.schedule.is_active:
+                    pairs.append((system, report))
+        return pairs

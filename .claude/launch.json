@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "smartops",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "uvicorn",
+        "--app-dir", "src",
+        "smartops.main:app",
+        "--host", "127.0.0.1",
+        "--port", "8765"
+      ],
+      "port": 8765
+    }
+  ]
+}

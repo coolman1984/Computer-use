@@ -10,6 +10,9 @@ storage:
   incidents_dir: incidents
   logs_dir: logs
   history_dir: data/history
+  sessions_dir: data/sessions
+  systems_dir: config/systems   # للتعريفات الحقيقية: استخدم SMARTOPS_SYSTEMS_DIR لمجلد خارج المستودع
+  recordings_dir: data/recordings # للإنتاج: SMARTOPS_RECORDINGS_DIR خارج المستودع
 
 browser:
   engine: playwright

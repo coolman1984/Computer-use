@@ -194,6 +194,8 @@ button.secondary:hover { background: #374151; }
 button:disabled { background: var(--gray-bg); color: var(--muted); cursor: not-allowed; }
 
 .muted { color: var(--muted); font-size: 13px; }
+/* سطر مساعد صغير تحت شارة الحالة (مثل أمر تسجيل الدخول) */
+.hint { margin-top: 4px; font-size: 12px; direction: ltr; text-align: right; }
 .empty { color: var(--muted); padding: 20px 0; text-align: center; }
 .error-box {
   background: var(--red-bg);

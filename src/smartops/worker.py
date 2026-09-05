@@ -26,12 +26,14 @@ class Worker:
         *,
         poll_interval: float = 1.0,
         max_concurrency: int | None = None,
+        scheduler: Any | None = None,
         on_run_done: Callable[[Any], None] | None = None,
         on_error: Callable[[str, BaseException], None] | None = None,
     ) -> None:
         self.services = services
         self.poll_interval = poll_interval
         self.max_concurrency = max(1, max_concurrency or services.settings.browser.max_concurrency)
+        self.scheduler = scheduler
         self._on_run_done = on_run_done
         self._on_error = on_error
         self._stop_event = threading.Event()
@@ -79,6 +81,12 @@ class Worker:
             return self._poll_once(executor)
 
     def _poll_once(self, executor: ThreadPoolExecutor) -> int:
+        if self.scheduler is not None:
+            try:
+                self.scheduler.tick()
+            except Exception:
+                logger.exception("فشل تِك الجدولة — العامل يكمل استطلاعه بلا توقف")
+
         with self._in_flight_lock:
             available_slots = self.max_concurrency - len(self._in_flight)
         if available_slots <= 0:

@@ -44,6 +44,17 @@
   </section>
 
   <section class="panel">
+    <h2>الأنظمة</h2>
+    <p class="muted">حالة الجلسة لكل نظام، وإمكانية جمع تقرير الآن يدويًا.</p>
+    <table>
+      <thead>
+        <tr><th>النظام</th><th>الجلسة</th><th>التقرير</th><th></th></tr>
+      </thead>
+      <tbody id="systems-body"><tr><td colspan="4" class="empty">جارٍ التحميل…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="panel">
     <h2>آخر التشغيلات</h2>
     <table>
       <thead>
@@ -63,7 +74,7 @@
 
 <script src="static/app.js"></script>
 <script>
-const { getJSON, postJSON, formatDate, statusBadge, RUN_STATUS_LABELS, EVENT_TYPE_LABELS, shortId, link, showError, connectEvents, el } = SmartOps;
+const { getJSON, postJSON, formatDate, statusBadge, badge, RUN_STATUS_LABELS, EVENT_TYPE_LABELS, shortId, link, showError, connectEvents, el } = SmartOps;
 
 async function loadDashboard() {
   try {
@@ -104,6 +115,66 @@ async function loadDashboard() {
   }
 }
 
+async function loadSystems() {
+  const tbody = document.getElementById("systems-body");
+  try {
+    const systems = await getJSON("/api/systems");
+    tbody.innerHTML = "";
+    if (systems.items.length === 0) {
+      tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["لا توجد أنظمة معرّفة بعد"])]));
+      return;
+    }
+    for (const system of systems.items) {
+      for (const [index, report] of system.reports.entries()) {
+        const button = el("button", {}, ["جمع الآن"]);
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          button.textContent = "جارٍ الجمع…";
+          try {
+            await postJSON(`/api/systems/${encodeURIComponent(system.key)}/${encodeURIComponent(report.key)}/collect`, {});
+            await loadDashboard();
+            button.textContent = "تم ✅";
+          } catch (err) {
+            showError(document.getElementById("error"), err);
+            button.textContent = "جمع الآن";
+          } finally {
+            button.disabled = false;
+          }
+        });
+        // كل صف = ٤ خلايا دايمًا. اسم النظام وحالة الجلسة يظهروا في أول صف
+        // للنظام بس، والباقي فاضي — أبسط وأأمن من rowspan.
+        tbody.appendChild(
+          el("tr", {}, [
+            el("td", {}, [index === 0 ? (system.name || system.key) : ""]),
+            index === 0 ? sessionStatusCell(system) : el("td", {}, [""]),
+            el("td", {}, [report.title || report.key]),
+            el("td", {}, [button]),
+          ])
+        );
+      }
+    }
+  } catch (err) {
+    showError(document.getElementById("error"), err);
+  }
+}
+
+function sessionStatusCell(system) {
+  if (system.auth_mode !== "session") {
+    return el("td", {}, [badge("بلا مصادقة", "gray")]);
+  }
+  if (!system.session_exists) {
+    return el("td", {}, [
+      badge("الجلسة منتهية", "red"),
+      el("div", { class: "muted hint" }, [`سجّل الدخول من الطرفية: python -m smartops login ${system.key}`]),
+    ]);
+  }
+  const hours = system.session_age_hours != null ? system.session_age_hours.toFixed(1) : "؟";
+  return el("td", {}, [
+    badge("متصل", "green"),
+    el("div", { class: "muted hint" }, [`عمر الجلسة: ${hours} ساعة`]),
+  ]);
+}
+
 document.getElementById("run-selfcheck").addEventListener("click", async (event) => {
   const button = event.target;
   button.disabled = true;
@@ -120,19 +191,50 @@ document.getElementById("run-selfcheck").addEventListener("click", async (event)
   }
 });
 
-function addLiveEvent(evt) {
+const liveEvents = new Map();
+let liveEventOrder = 0;
+
+function renderLiveEvents() {
   const list = document.getElementById("live-events");
-  if (list.firstElementChild?.classList.contains("empty")) list.innerHTML = "";
-  const label = EVENT_TYPE_LABELS[evt.type] || evt.type;
-  const li = el("li", {}, [
-    el("span", { class: "msg" }, [`${label}${evt.run_id ? " — " + shortId(evt.run_id) : ""}`]),
-    el("span", { class: "time" }, [formatDate(evt.created_at)]),
-  ]);
-  list.insertBefore(li, list.firstChild);
-  while (list.children.length > 15) list.removeChild(list.lastChild);
+  list.innerHTML = "";
+  const events = [...liveEvents.values()]
+    .sort((a, b) => {
+      const byDate = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      return byDate || b._receivedOrder - a._receivedOrder;
+    })
+    .slice(0, 15);
+  if (events.length === 0) {
+    list.appendChild(el("li", { class: "empty" }, ["لا توجد أحداث بعد"]));
+    return;
+  }
+  for (const evt of events) {
+    const label = EVENT_TYPE_LABELS[evt.type] || evt.type;
+    list.appendChild(el("li", {}, [
+      el("span", { class: "msg" }, [`${label}${evt.run_id ? " — " + shortId(evt.run_id) : ""}`]),
+      el("span", { class: "time" }, [formatDate(evt.created_at)]),
+    ]));
+  }
+}
+
+function addLiveEvent(evt) {
+  const key = evt.id || `${evt.type}:${evt.run_id || ""}:${evt.created_at || ""}`;
+  if (liveEvents.has(key)) return;
+  liveEvents.set(key, { ...evt, _receivedOrder: liveEventOrder++ });
+  renderLiveEvents();
+}
+
+async function loadRecentEvents() {
+  try {
+    const events = await getJSON("/api/events?limit=15");
+    for (const evt of events.items) addLiveEvent(evt);
+  } catch (err) {
+    showError(document.getElementById("error"), err);
+  }
 }
 
 loadDashboard();
+loadSystems();
+loadRecentEvents();
 const socket = connectEvents(null, (evt) => {
   document.getElementById("live-dot").classList.add("on");
   addLiveEvent(evt);

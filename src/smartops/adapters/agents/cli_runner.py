@@ -64,7 +64,15 @@ class CliAgentRunner:
 
     def run(self, request: AgentRequest) -> AgentResponse:
         command = self._command_builder(request)
-        env = {**os.environ, **self._env, "SMARTOPS_AGENT_MODE": request.mode.value}
+        env = {
+            **os.environ,
+            **self._env,
+            # مخرجات الوكيل بروتوكول نصي/JSON وقد تحتوي العربية. على Windows
+            # الترميز الافتراضي للعملية الفرعية قد يكون cp1252، فيفشل الوكيل
+            # نفسه قبل أن يطبع النتيجة. نفرض UTF-8 على الطرفين.
+            "PYTHONIOENCODING": "utf-8",
+            "SMARTOPS_AGENT_MODE": request.mode.value,
+        }
 
         try:
             process = subprocess.Popen(
@@ -75,6 +83,8 @@ class CliAgentRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
             )
         except OSError as exc:

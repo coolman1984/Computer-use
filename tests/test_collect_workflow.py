@@ -81,6 +81,36 @@ def test_bad_file_fails_run_and_records_rejection(services) -> None:
     assert "file_rejected" in types and "incident_opened" in types
 
 
+class AuthExpiredBrowser:
+    """يحاكي جلسة منتهية: extract() يرجع auth_required=True بلا أي ملف."""
+
+    def extract(self, request: ExtractionRequest) -> ExtractionResult:
+        return ExtractionResult(
+            ok=False,
+            layer_used=ExtractionLayer.DOM,
+            message="الجلسة منتهية أو غير مسجّلة الدخول للنظام erp",
+            auth_required=True,
+        )
+
+    def capture_evidence(self, run_id: str) -> dict:
+        return {"run_id": run_id}
+
+
+def test_expired_session_fails_run_with_auth_error_and_opens_incident(services) -> None:
+    services.browser = AuthExpiredBrowser()
+    services.validator = FakeValidator()
+
+    run = services.runner.create_run(
+        "collect.report", params={"system": "erp", "report": "daily_sales"}
+    )
+    run = services.runner.execute(run.id)
+
+    assert run.status is RunStatus.FAILED
+    assert run.error_class == "auth"
+    types = [e.type.value for e in services.events.timeline(run.id)]
+    assert "incident_opened" in types
+
+
 def test_missing_adapter_is_configuration_error(services) -> None:
     # منذ قرار التركيب (services.browser مركّب افتراضيًا)، نحاكي هنا صراحةً
     # حالة عدم تركيب أي محوّل متصفح، للتأكد أن الحماية الدفاعية في

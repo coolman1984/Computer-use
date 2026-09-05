@@ -12,6 +12,9 @@ dependencies = [
   "pyyaml>=6.0",
 ]
 
+[project.scripts]
+smartops = "smartops.cli:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",

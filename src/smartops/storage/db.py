@@ -123,7 +123,51 @@ CREATE TABLE IF NOT EXISTS knowledge (
 CREATE INDEX IF NOT EXISTS idx_knowledge_signature ON knowledge(signature);
 """
 
-MIGRATIONS: tuple[tuple[int, str], ...] = ((1, SCHEMA_V1),)
+SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS recordings (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    system_key TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    parent_recording_id TEXT REFERENCES recordings(id),
+    status TEXT NOT NULL,
+    artifact_dir TEXT NOT NULL DEFAULT '',
+    worker_pid INTEGER,
+    started_at TEXT,
+    finished_at TEXT,
+    heartbeat_at TEXT,
+    error_message TEXT,
+    step_count INTEGER NOT NULL DEFAULT 0,
+    download_count INTEGER NOT NULL DEFAULT 0,
+    automation_draft TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_recordings_system_active ON recordings(system_key, status, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_recordings_created ON recordings(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS recording_steps (
+    recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    occurred_at TEXT,
+    page_url_redacted TEXT NOT NULL DEFAULT '',
+    page_title TEXT NOT NULL DEFAULT '',
+    selector TEXT NOT NULL DEFAULT '',
+    target_text_redacted TEXT NOT NULL DEFAULT '',
+    x_ratio REAL,
+    y_ratio REAL,
+    changed_ratio REAL,
+    request_ref TEXT NOT NULL DEFAULT '',
+    download_ref TEXT NOT NULL DEFAULT '',
+    before_image TEXT NOT NULL DEFAULT '',
+    after_image TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(recording_id, seq)
+);
+"""
+
+MIGRATIONS: tuple[tuple[int, str], ...] = ((1, SCHEMA_V1), (2, SCHEMA_V2))
 
 
 class Database:

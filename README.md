@@ -77,19 +77,44 @@
 
 ```bash
 pip install -e ".[dev]"
-uvicorn smartops.main:app --reload --port 8765
 pytest -q
+uvicorn smartops.main:app --reload --port 8765   # أو: python -m smartops serve
 ```
 
+## التشغيل الأول (نظام حقيقي)
+
+```bash
+pip install -e ".[dev]"
+playwright install chromium
+set SMARTOPS_SYSTEMS_DIR=C:\smartops-private\systems
+python -m smartops doctor
+python -m smartops login <system>
+python -m smartops collect <system> <report>
+python -m smartops work
+```
+
+`SMARTOPS_SYSTEMS_DIR` لازم يشاور على مجلد **خارج هذا المستودع العام**
+(راجع D012 وD023) فيه ملفات `*.yaml` بتعريفات أنظمتك الحقيقية على نمط
+`config/systems/example.yaml`. `smartops login` يفتح متصفحًا مرئيًا لتسجّل
+دخولك يدويًا مرة واحدة؛ المنصة لا ترى كلمة مرورك أبدًا (D020).
+
 نقاط الواجهة الحالية: `/health`، `/api/workflows`، `/api/runs`، `/api/runs/{id}`،
-`/api/runs/{id}/events`، `/api/events`، `/api/incidents`، `/api/files`.
+`/api/runs/{id}/events`، `/api/events`، `/api/incidents`، `/api/files`،
+`/api/systems`، `/api/alerts`، `/api/systems/{system}/{report}/collect`.
 
 ## حالة البناء
 
-النواة والنطاق التجريبي الأول مكتملان (97 اختبارًا خضراء): إعدادات، قاعدة SQLite
-بترحيلات، سجل أحداث، محرك سير عمل قابل للاستكمال مع قفل وإعادة محاولة مصنّفة،
-فتح حوادث تلقائي بحزمة أدلة كاملة، تنبيهات، بث حي عبر WebSocket، محوّل Playwright،
-مدقق ملفات، تعريفات أنظمة من YAML، عامل خلفي بتوازي محدود، أرشفة تحليلية
-Parquet/DuckDB، تشغيل وكيل ذكاء اصطناعي بوضع تحليل فقط، وواجهة ويب ثابتة
-(`web/`, متاحة على `/app`). التفاصيل والخطوة التالية في `docs/EXECUTION_PLAN.md`
-و`docs/AGENT_TASK_PACKETS.md`.
+النواة مكتملة ومختبَرة محليًا: إعدادات، قاعدة SQLite بترحيلات، سجل أحداث،
+محرك سير عمل قابل للاستكمال مع قفل وإعادة محاولة مصنّفة، فتح حوادث تلقائي
+بحزمة أدلة كاملة (لقطات وتتبع على القرص، لا base64 في القاعدة)، تنبيهات محلية
+وWebhook، بث حي عبر WebSocket، محوّل Playwright بجلسات دخول محفوظة وكشف
+انتهاء جلسة، مدقق ملفات، تعريفات أنظمة من YAML (مع مصادقة وجدولة)، جدولة
+تلقائية + عامل خلفي بتوازي محدود، إنذار بطء بعتبات ثابتة، أرشفة تحليلية
+Parquet/DuckDB، تشغيل وكيل ذكاء اصطناعي بوضع تحليل فقط، واجهة سطر أوامر
+(`python -m smartops`)، وواجهة ويب (`web/`, متاحة على `/app`).
+
+**لم يُشغَّل بعد ضد نظام إنتاج حقيقي.** كل ما سبق مبني ومختبَر محليًا بصفحات
+ومحاكيات، لكن أول تشغيل فعلي على نظام حقيقي لم يحدث بعد — هو الخطوة التالية
+الفعلية، وأي مشاكل تظهر فيه هي المدخل الحقيقي لمرحلتَي الإنذار المبكر الكامل
+والإصلاح الذاتي (P5، P6). التفاصيل في `docs/EXECUTION_PLAN.md` و
+`docs/AGENT_TASK_PACKETS.md` و`docs/FINISH_PACKET_SONNET.md`.

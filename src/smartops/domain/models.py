@@ -16,7 +16,72 @@ from .enums import (
     StepStatus,
     TriggerType,
     ValidationStatus,
+    RecordingStatus,
 )
+
+
+@dataclass
+class Recording:
+    id: str
+    name: str
+    system_key: str
+    status: RecordingStatus = RecordingStatus.DRAFT
+    version: int = 1
+    parent_recording_id: str | None = None
+    artifact_dir: str = ""
+    worker_pid: int | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    error_message: str | None = None
+    step_count: int = 0
+    download_count: int = 0
+    automation_draft: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    deleted_at: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id, "name": self.name, "system_key": self.system_key,
+            "status": self.status.value, "version": self.version,
+            "parent_recording_id": self.parent_recording_id, "started_at": to_iso(self.started_at),
+            "finished_at": to_iso(self.finished_at), "heartbeat_at": to_iso(self.heartbeat_at),
+            "error_message": self.error_message, "step_count": self.step_count,
+            "download_count": self.download_count, "automation_draft": self.automation_draft,
+            "created_at": to_iso(self.created_at), "updated_at": to_iso(self.updated_at),
+            "deleted_at": to_iso(self.deleted_at),
+        }
+
+
+@dataclass
+class RecordingStep:
+    recording_id: str
+    seq: int
+    kind: str
+    occurred_at: datetime | None = None
+    page_url_redacted: str = ""
+    page_title: str = ""
+    selector: str = ""
+    target_text_redacted: str = ""
+    x_ratio: float | None = None
+    y_ratio: float | None = None
+    changed_ratio: float | None = None
+    request_ref: str = ""
+    download_ref: str = ""
+    before_image: str = ""
+    after_image: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "recording_id": self.recording_id, "seq": self.seq, "kind": self.kind,
+            "occurred_at": to_iso(self.occurred_at), "page_url_redacted": self.page_url_redacted,
+            "page_title": self.page_title, "selector": self.selector,
+            "target_text_redacted": self.target_text_redacted, "x_ratio": self.x_ratio,
+            "y_ratio": self.y_ratio, "changed_ratio": self.changed_ratio,
+            "request_ref": self.request_ref, "download_ref": self.download_ref,
+            "before_image": self.before_image, "after_image": self.after_image,
+        }
 
 
 @dataclass(frozen=True)

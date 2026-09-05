@@ -108,6 +108,17 @@ def test_dashboard_runs_selfcheck_and_updates_live(page) -> None:
     assert page.errors_log == []
 
 
+def test_dashboard_loads_recent_events_on_open(page, services) -> None:
+    run = services.runner.create_run("platform.selfcheck")
+    services.runner.execute(run.id)
+
+    page.goto("/app/index.html")
+    page.wait_for_selector("#live-events li:not(.empty)")
+
+    assert "اكتمل التشغيل بنجاح" in page.locator("#live-events").inner_text()
+    assert page.errors_log == []
+
+
 def test_runs_page_lists_run_and_links_to_detail(page) -> None:
     page.goto("/app/runs.html")
     page.fill("#workflow-key", "platform.selfcheck")

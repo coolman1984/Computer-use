@@ -214,3 +214,121 @@ def test_profile_params_feed_collect_report_end_to_end(services, tmp_path: Path)
     run = services.runner.execute(run.id)
 
     assert run.status is RunStatus.SUCCEEDED
+
+
+# ---------- اختبارات F-05: المصادقة والجدولة ----------
+
+VALID_YAML_WITH_AUTH_AND_SCHEDULE = """
+key: erp_demo
+name: نظام تجريبي
+auth:
+  mode: session
+  login_url: "https://intranet.example.local/login"
+  logged_in_selector: "#user-menu"
+  login_selector: "#login-form"
+reports:
+  - key: daily_sales
+    title: تقرير المبيعات
+    url: "https://intranet.example.local/reports/daily-sales"
+    download_selector: "#export-csv"
+    period: daily
+    alert:
+      warn_after_seconds: 90
+      critical_after_seconds: 180
+    schedule:
+      daily_at: "08:00"
+  - key: hourly_report
+    title: تقرير كل ساعة
+    url: "https://intranet.example.local/reports/hourly"
+    download_selector: "#export-csv"
+    schedule:
+      every_seconds: 3600
+"""
+
+
+def test_auth_profile_parses() -> None:
+    import yaml
+
+    profile = parse_system_profile(yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE))
+    assert profile.auth.mode == "session"
+    assert profile.auth.login_url.endswith("/login")
+    assert profile.auth.logged_in_selector == "#user-menu"
+    assert profile.auth.login_selector == "#login-form"
+
+
+def test_session_mode_without_login_url_raises() -> None:
+    import yaml
+
+    raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
+    del raw["auth"]["login_url"]
+
+    with pytest.raises(ConfigurationError, match="login_url"):
+        parse_system_profile(raw)
+
+
+def test_unknown_auth_mode_raises() -> None:
+    import yaml
+
+    raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
+    raw["auth"]["mode"] = "password"
+
+    with pytest.raises(ConfigurationError):
+        parse_system_profile(raw)
+
+
+def test_bad_daily_at_format_raises() -> None:
+    import yaml
+
+    raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
+    raw["reports"][0]["schedule"]["daily_at"] = "8am"
+
+    with pytest.raises(ConfigurationError, match="daily_at"):
+        parse_system_profile(raw)
+
+
+def test_both_schedule_kinds_together_raises() -> None:
+    import yaml
+
+    raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
+    raw["reports"][0]["schedule"]["every_seconds"] = 60
+
+    with pytest.raises(ConfigurationError):
+        parse_system_profile(raw)
+
+
+def test_zero_every_seconds_raises() -> None:
+    import yaml
+
+    raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
+    raw["reports"][1]["schedule"]["every_seconds"] = 0
+
+    with pytest.raises(ConfigurationError):
+        parse_system_profile(raw)
+
+
+def test_to_run_params_carries_auth_selectors_and_thresholds() -> None:
+    import yaml
+
+    profile = parse_system_profile(yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE))
+    params = profile.to_run_params("daily_sales")
+
+    assert params["filters"]["logged_in_selector"] == "#user-menu"
+    assert params["filters"]["login_selector"] == "#login-form"
+    assert params["warn_after_seconds"] == 90
+    assert params["critical_after_seconds"] == 180
+    assert "normal_duration_seconds" in params
+
+
+def test_iter_scheduled_returns_only_active_pairs(tmp_path: Path) -> None:
+    (tmp_path / "erp.yaml").write_text(VALID_YAML_WITH_AUTH_AND_SCHEDULE, encoding="utf-8")
+    (tmp_path / "unscheduled.yaml").write_text(
+        VALID_YAML.replace("erp_demo", "no_schedule_system"), encoding="utf-8"
+    )
+    registry = SystemRegistry.load(tmp_path)
+
+    pairs = registry.iter_scheduled()
+    keys = {(system.key, report.key) for system, report in pairs}
+
+    assert ("erp_demo", "daily_sales") in keys
+    assert ("erp_demo", "hourly_report") in keys
+    assert not any(system.key == "no_schedule_system" for system, _ in pairs)

@@ -6,6 +6,11 @@ venv/
 .env.*
 !.env.example
 /data/
+/data/sessions/
+/data/recordings/
+*.har
+*storage-state*.json
+*.storage_state.json
 /logs/
 /incidents/
 playwright-report/

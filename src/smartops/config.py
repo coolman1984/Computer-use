@@ -28,6 +28,14 @@ class StorageSettings:
     incidents_dir: Path = Path("incidents")
     logs_dir: Path = Path("logs")
     history_dir: Path = Path("data/history")  # أرشيف Parquet التحليلي (S-06)
+    # جلسات الدخول المحفوظة (storage_state لكل نظام). محتواها حسّاس: كوكيز
+    # وتوكنز جلسة حقيقية، فهو مستبعد من Git ولا يُرفع أبدًا.
+    sessions_dir: Path = Path("data/sessions")
+    # تعريفات الأنظمة. الافتراضي داخل المستودع (أمثلة فقط)؛ التعريفات
+    # الحقيقية توضع في مجلد خارج المستودع عبر SMARTOPS_SYSTEMS_DIR (D023).
+    systems_dir: Path = Path("config/systems")
+    # تسجيلات المتصفح قد تضم لقطات وtrace وHAR؛ الإنتاج يضعها خارج المستودع.
+    recordings_dir: Path = Path("data/recordings")
 
 
 @dataclass(frozen=True)
@@ -125,6 +133,15 @@ def load_settings(path: Path | str | None = None) -> Settings:
         incidents_dir=Path(storage_raw.get("incidents_dir", "incidents")),
         logs_dir=Path(storage_raw.get("logs_dir", "logs")),
         history_dir=Path(storage_raw.get("history_dir", "data/history")),
+        sessions_dir=Path(
+            os.getenv("SMARTOPS_SESSIONS_DIR", storage_raw.get("sessions_dir", "data/sessions"))
+        ),
+        systems_dir=Path(
+            os.getenv("SMARTOPS_SYSTEMS_DIR", storage_raw.get("systems_dir", "config/systems"))
+        ),
+        recordings_dir=Path(
+            os.getenv("SMARTOPS_RECORDINGS_DIR", storage_raw.get("recordings_dir", "data/recordings"))
+        ),
     )
     browser = BrowserSettings(
         engine=browser_raw.get("engine", "playwright"),
@@ -173,5 +190,11 @@ def ensure_directories(settings: Settings) -> None:
         settings.storage.incidents_dir,
         settings.storage.logs_dir,
         settings.storage.history_dir,
+        settings.storage.sessions_dir,
+        settings.storage.recordings_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(settings.storage.sessions_dir, 0o700)
+    except OSError:
+        pass  # على ويندوز أو أنظمة ملفات لا تدعم صلاحيات POSIX هذا لا يفيد ولا يضر

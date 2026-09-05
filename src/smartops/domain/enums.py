@@ -74,6 +74,26 @@ class EventType(StrEnum):
     AGENT_RUN_STARTED = "agent_run_started"
     AGENT_RUN_FINISHED = "agent_run_finished"
     ESCALATED = "escalated"
+    RECORDING_CREATED = "recording_created"
+    RECORDING_STARTED = "recording_started"
+    RECORDING_PAUSED = "recording_paused"
+    RECORDING_RESUMED = "recording_resumed"
+    RECORDING_STOPPED = "recording_stopped"
+    RECORDING_FAILED = "recording_failed"
+    RECORDING_DELETED = "recording_deleted"
+    RECORDING_RESTORED = "recording_restored"
+    RECORDING_DRAFT_CREATED = "recording_draft_created"
+
+
+class RecordingStatus(StrEnum):
+    DRAFT = "draft"
+    STARTING = "starting"
+    RECORDING = "recording"
+    PAUSED = "paused"
+    STOPPING = "stopping"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 class ExtractionLayer(StrEnum):

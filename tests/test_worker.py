@@ -167,3 +167,41 @@ def test_worker_survives_a_single_run_execute_failure(services) -> None:
     assert len(errors) == 1
     assert errors[0][0] == bad_run.id
     assert isinstance(errors[0][1], ConfigurationError)
+
+
+# ---------- اختبارات F-09: الجدولة داخل العامل ----------
+
+
+class _StubScheduler:
+    def __init__(self, *, boom: bool = False) -> None:
+        self.ticks = 0
+        self._boom = boom
+
+    def tick(self):
+        self.ticks += 1
+        if self._boom:
+            raise RuntimeError("عطل مصطنع في الجدولة")
+        return []
+
+
+def test_worker_calls_scheduler_tick_once_per_poll(services) -> None:
+    scheduler = _StubScheduler()
+    worker = Worker(services, poll_interval=0.02, max_concurrency=1, scheduler=scheduler)
+
+    worker.poll_once()
+    worker.poll_once()
+
+    assert scheduler.ticks == 2
+
+
+def test_worker_survives_scheduler_tick_failure(services) -> None:
+    scheduler = _StubScheduler(boom=True)
+    run = services.runner.create_run("platform.selfcheck")
+    worker = Worker(services, poll_interval=0.02, max_concurrency=1, scheduler=scheduler)
+
+    dispatched = worker.poll_once()
+
+    assert scheduler.ticks == 1
+    assert dispatched == 1
+    finished = services.runs.get(run.id)
+    assert finished.status is RunStatus.SUCCEEDED

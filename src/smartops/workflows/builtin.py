@@ -8,14 +8,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..core.errors import ConfigurationError, DataQualityError, TransientError
+from ..adapters.notify.latency import evaluate_latency
+from ..core.errors import AuthError, ConfigurationError, DataQualityError, TransientError
 from ..core.ids import new_id
-from ..domain.enums import EventType, Severity, ValidationStatus
+from ..domain.enums import AlertLevel, EventType, Severity, ValidationStatus
 from ..domain.models import FileArtifact, StepDefinition, WorkflowDefinition
 from ..engine.contracts import StepContext, StepResult
 from ..ports.browser import ExtractionRequest
+from ..ports.notify import Alert
 from ..ports.validation import ValidationRules
-from ..storage.paths import ensure_raw_dir
+from ..sessions import session_path
+from ..storage.paths import ensure_raw_dir, slug
 
 
 def echo(ctx: StepContext) -> StepResult:
@@ -70,14 +73,23 @@ def download_report(ctx: StepContext) -> StepResult:
 
     now = ctx.services.runner.clock.now()
     destination = ensure_raw_dir(Path(ctx.services.settings.storage.raw_data_dir), system, report, now)
+    settings = ctx.services.settings
     request = ExtractionRequest(
         system=system,
         report=report,
         destination_dir=destination,
         period=ctx.get("period", ""),
         filters=ctx.get("filters", {}) or {},
+        run_id=ctx.run_id,
+        session_state_path=session_path(settings.storage.sessions_dir, system),
+        evidence_dir=Path(settings.storage.incidents_dir) / "evidence" / slug(ctx.run_id),
     )
     result = browser.extract(request)
+    if result.auth_required:
+        raise AuthError(
+            result.message or f"الجلسة منتهية للنظام {system}",
+            details={"system": system, "needs_login": True, "command": f"python -m smartops login {system}"},
+        )
     if not result.ok or result.file_path is None:
         raise TransientError(
             result.message or "فشل استخراج التقرير",
@@ -106,11 +118,57 @@ def download_report(ctx: StepContext) -> StepResult:
             "size_bytes": artifact.size_bytes,
         },
     )
+    _raise_latency_alert_if_needed(ctx, system=system, report=report, duration_seconds=result.duration_seconds)
     return StepResult.ok(
         file_id=artifact.id,
         file_path=artifact.path,
         layer_used=result.layer_used.value,
     )
+
+
+def _raise_latency_alert_if_needed(
+    ctx: StepContext, *, system: str, report: str, duration_seconds: float
+) -> None:
+    """ينذر لو التنزيل أبطأ من عتبة معرّفة في تعريف التقرير (F-07).
+
+    تنزيل بطيء يظل تنزيلًا ناجحًا؛ فشل قناة الإنذار لا يجب أن يُسقط التشغيل.
+    """
+    level = evaluate_latency(
+        duration_seconds,
+        warn_after_seconds=ctx.get("warn_after_seconds"),
+        critical_after_seconds=ctx.get("critical_after_seconds"),
+    )
+    if level is None:
+        return
+
+    normal = ctx.get("normal_duration_seconds")
+    ctx.emit(
+        EventType.ALERT_RAISED,
+        severity=Severity.WARNING if level is AlertLevel.YELLOW else Severity.ERROR,
+        message=f"التنزيل أبطأ من المتوقع ({duration_seconds:.1f} ثانية)",
+        payload={
+            "level": level.value,
+            "system": system,
+            "report": report,
+            "duration_seconds": duration_seconds,
+            "normal_duration_seconds": normal,
+        },
+    )
+    notifier = getattr(ctx.services, "notifier", None)
+    if notifier is None:
+        return
+    try:
+        notifier.send(
+            Alert(
+                level=level,
+                title=f"بطء في {system}/{report}",
+                body=f"استغرق التنزيل {duration_seconds:.1f} ثانية بدل {normal or 'غير معروف'} ثانية طبيعية",
+                run_id=ctx.run_id,
+                payload={"system": system, "report": report, "duration_seconds": duration_seconds},
+            )
+        )
+    except Exception:
+        pass  # قناة إنذار فاشلة لا يجب أن تُسقط تشغيلًا ناجحًا
 
 
 def validate_file(ctx: StepContext) -> StepResult:

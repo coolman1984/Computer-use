@@ -18,6 +18,7 @@ from .engine.registry import StepRegistry, WorkflowRegistry
 from .engine.runner import WorkflowRunner
 from .events.bus import EventBus
 from .events.log import EventLog
+from .scheduler import Scheduler
 from .storage.db import Database
 from .storage.repositories import (
     AgentRunRepository,
@@ -66,13 +67,16 @@ class Services:
         self.step_registry = StepRegistry()
         self.workflows = WorkflowRegistry()
         self.runner = WorkflowRunner(self, clock=self.clock, sleeper=sleeper)
+        self.scheduler = Scheduler(self, clock=self.clock)
 
         # محوّلات آمنة ومحلية بالكامل: تُركَّب دايمًا، لا تحتاج إعدادًا إضافيًا،
         # ولا تلمس شبكة أو عملية خارجية إلا لو استُدعيت فعليًا من خطوة تشغيل.
         self.validator = LocalFileValidator(files_repo=self.files, now=lambda: self.clock.now().timestamp())
         self.browser = PlaywrightBrowserAdapter(self.settings.browser)
         self.history = HistoryArchiver(self.settings.storage.history_dir)
-        self.systems = SystemRegistry.load()  # config/systems/*.yaml، أو فاضي لو المجلد غير موجود
+        # settings.storage.systems_dir، أو فاضي لو المجلد غير موجود. التعريفات
+        # الحقيقية تعيش خارج المستودع عبر SMARTOPS_SYSTEMS_DIR (D023).
+        self.systems = SystemRegistry.load(self.settings.storage.systems_dir)
 
         notifiers: list[Any] = [
             LocalLogNotifier(self.settings.storage.logs_dir / "alerts.jsonl", clock=self.clock)

@@ -18,8 +18,9 @@ from ..domain.enums import (
     StepStatus,
     TriggerType,
     ValidationStatus,
+    RecordingStatus,
 )
-from ..domain.models import AgentRun, Event, FileArtifact, Incident, Run, StepRecord
+from ..domain.models import AgentRun, Event, FileArtifact, Incident, Run, StepRecord, Recording, RecordingStep
 from .db import Database
 
 
@@ -41,6 +42,76 @@ class BaseRepository:
     def __init__(self, db: Database, clock: Clock | None = None) -> None:
         self.db = db
         self.clock = clock or SystemClock()
+
+
+class RecordingRepository(BaseRepository):
+    @staticmethod
+    def _recording(row: sqlite3.Row) -> Recording:
+        return Recording(
+            id=row["id"], name=row["name"], system_key=row["system_key"], version=row["version"],
+            parent_recording_id=row["parent_recording_id"], status=RecordingStatus(row["status"]),
+            artifact_dir=row["artifact_dir"], worker_pid=row["worker_pid"], started_at=from_iso(row["started_at"]),
+            finished_at=from_iso(row["finished_at"]), heartbeat_at=from_iso(row["heartbeat_at"]),
+            error_message=row["error_message"], step_count=row["step_count"], download_count=row["download_count"],
+            automation_draft=_loads(row["automation_draft"]), created_at=from_iso(row["created_at"]),
+            updated_at=from_iso(row["updated_at"]), deleted_at=from_iso(row["deleted_at"]),
+        )
+
+    @staticmethod
+    def _step(row: sqlite3.Row) -> RecordingStep:
+        return RecordingStep(
+            recording_id=row["recording_id"], seq=row["seq"], kind=row["kind"],
+            occurred_at=from_iso(row["occurred_at"]), page_url_redacted=row["page_url_redacted"],
+            page_title=row["page_title"], selector=row["selector"], target_text_redacted=row["target_text_redacted"],
+            x_ratio=row["x_ratio"], y_ratio=row["y_ratio"], changed_ratio=row["changed_ratio"],
+            request_ref=row["request_ref"], download_ref=row["download_ref"], before_image=row["before_image"], after_image=row["after_image"],
+        )
+
+    def create(self, name: str, system_key: str, *, parent: Recording | None = None, artifact_dir: str = "") -> Recording:
+        now = self.clock.now()
+        recording = Recording(id=new_id("rec"), name=name, system_key=system_key,
+            version=(parent.version + 1 if parent else 1), parent_recording_id=(parent.id if parent else None),
+            artifact_dir=artifact_dir, created_at=now, updated_at=now)
+        with self.db.transaction() as tx:
+            tx.execute("INSERT INTO recordings(id,name,system_key,version,parent_recording_id,status,artifact_dir,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (recording.id, recording.name, recording.system_key, recording.version, recording.parent_recording_id,
+                 recording.status.value, recording.artifact_dir, to_iso(now), to_iso(now)))
+        return recording
+
+    def get(self, recording_id: str, *, include_deleted: bool = True) -> Recording | None:
+        sql = "SELECT * FROM recordings WHERE id=?" + ("" if include_deleted else " AND deleted_at IS NULL")
+        row = self.db.connection.execute(sql, (recording_id,)).fetchone()
+        return self._recording(row) if row else None
+
+    def list(self, *, include_deleted: bool = False, status: RecordingStatus | None = None, limit: int = 100) -> list[Recording]:
+        clauses, args = ([] if include_deleted else ["deleted_at IS NULL"], [])
+        if status: clauses.append("status=?"); args.append(status.value)
+        sql = "SELECT * FROM recordings" + (" WHERE " + " AND ".join(clauses) if clauses else "") + " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        return [self._recording(r) for r in self.db.connection.execute(sql, args)]
+
+    def active_for_system(self, system_key: str, except_id: str | None = None) -> Recording | None:
+        sql = "SELECT * FROM recordings WHERE system_key=? AND deleted_at IS NULL AND status IN ('starting','recording','paused','stopping')"
+        args: list[Any] = [system_key]
+        if except_id: sql += " AND id != ?"; args.append(except_id)
+        row = self.db.connection.execute(sql, args).fetchone()
+        return self._recording(row) if row else None
+
+    def save(self, recording: Recording) -> Recording:
+        recording.updated_at = self.clock.now()
+        with self.db.transaction() as tx:
+            tx.execute("UPDATE recordings SET status=?,artifact_dir=?,worker_pid=?,started_at=?,finished_at=?,heartbeat_at=?,error_message=?,step_count=?,download_count=?,automation_draft=?,updated_at=?,deleted_at=? WHERE id=?",
+                (recording.status.value,recording.artifact_dir,recording.worker_pid,to_iso(recording.started_at),to_iso(recording.finished_at),to_iso(recording.heartbeat_at),recording.error_message,recording.step_count,recording.download_count,_json(recording.automation_draft),to_iso(recording.updated_at),to_iso(recording.deleted_at),recording.id))
+        return recording
+
+    def save_step(self, step: RecordingStep) -> RecordingStep:
+        with self.db.transaction() as tx:
+            tx.execute("INSERT INTO recording_steps(recording_id,seq,kind,occurred_at,page_url_redacted,page_title,selector,target_text_redacted,x_ratio,y_ratio,changed_ratio,request_ref,download_ref,before_image,after_image) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(recording_id,seq) DO UPDATE SET kind=excluded.kind,occurred_at=excluded.occurred_at,page_url_redacted=excluded.page_url_redacted,page_title=excluded.page_title,selector=excluded.selector,target_text_redacted=excluded.target_text_redacted,x_ratio=excluded.x_ratio,y_ratio=excluded.y_ratio,changed_ratio=excluded.changed_ratio,request_ref=excluded.request_ref,download_ref=excluded.download_ref,before_image=excluded.before_image,after_image=excluded.after_image",
+                (step.recording_id,step.seq,step.kind,to_iso(step.occurred_at),step.page_url_redacted,step.page_title,step.selector,step.target_text_redacted,step.x_ratio,step.y_ratio,step.changed_ratio,step.request_ref,step.download_ref,step.before_image,step.after_image))
+        return step
+
+    def steps(self, recording_id: str) -> list[RecordingStep]:
+        return [self._step(r) for r in self.db.connection.execute("SELECT * FROM recording_steps WHERE recording_id=? ORDER BY seq", (recording_id,))]
 
 
 class RunRepository(BaseRepository):

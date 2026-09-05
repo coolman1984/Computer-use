@@ -9,8 +9,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from ..adapters.notify.local import LocalLogNotifier
 from ..core.errors import SmartOpsError
 from ..domain.enums import IncidentStatus, RunStatus, TriggerType
+from ..sessions import session_age_hours, session_exists
 from ..services import Services
 from .ws import create_ws_router
 
@@ -127,5 +129,56 @@ def create_app(services: Services | None = None) -> FastAPI:
         svc: Services = Depends(provide),
     ) -> dict[str, Any]:
         return {"items": [f.to_dict() for f in svc.files.list(run_id=run_id, limit=limit)]}
+
+    @app.get("/api/systems")
+    def list_systems(svc: Services = Depends(provide)) -> dict[str, Any]:
+        items = []
+        for system in svc.systems.list():
+            items.append(
+                {
+                    "key": system.key,
+                    "name": system.name,
+                    "auth_mode": system.auth.mode,
+                    "session_exists": (
+                        session_exists(svc.settings.storage.sessions_dir, system.key)
+                        if system.auth.mode == "session"
+                        else None
+                    ),
+                    "session_age_hours": (
+                        session_age_hours(svc.settings.storage.sessions_dir, system.key)
+                        if system.auth.mode == "session"
+                        else None
+                    ),
+                    "reports": [
+                        {
+                            "key": report.key,
+                            "title": report.title,
+                            "schedule": {
+                                "daily_at": report.schedule.daily_at,
+                                "every_seconds": report.schedule.every_seconds,
+                                "enabled": report.schedule.enabled,
+                            },
+                        }
+                        for report in system.reports
+                    ],
+                }
+            )
+        return {"items": items}
+
+    @app.get("/api/alerts")
+    def list_alerts(limit: int = Query(default=100, le=1000), svc: Services = Depends(provide)) -> dict[str, Any]:
+        notifier = LocalLogNotifier(svc.settings.storage.logs_dir / "alerts.jsonl")
+        records = notifier.read_all()
+        return {"items": list(reversed(records))[:limit]}
+
+    @app.post("/api/systems/{system_key}/{report_key}/collect", status_code=201)
+    def collect_now(system_key: str, report_key: str, svc: Services = Depends(provide)) -> dict[str, Any]:
+        try:
+            params = svc.systems.run_params(system_key, report_key)
+        except SmartOpsError as exc:
+            raise HTTPException(status_code=404, detail=exc.to_dict()) from exc
+        run = svc.runner.create_run("collect.report", params=params, trigger=TriggerType.MANUAL)
+        run = svc.runner.drive(run.id)
+        return run.to_dict()
 
     return app

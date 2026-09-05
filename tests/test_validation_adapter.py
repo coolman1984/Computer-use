@@ -174,7 +174,9 @@ def test_duplicate_hash_is_rejected(tmp_path: Path) -> None:
 
     import hashlib
 
-    sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    # بصمة المدقق للبايتات الفعلية. write_text يترجم LF إلى CRLF على Windows،
+    # لذلك حساب البصمة من النص الأصلي يجعل الاختبار يختبر بصمة مختلفة.
+    sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
     repo = _FakeFilesRepo([_Existing("file_old", sha256, str(tmp_path / "old_report.csv"))])
 
     report = LocalFileValidator(files_repo=repo).validate(path, ValidationRules())
@@ -192,7 +194,7 @@ def test_same_file_is_not_flagged_as_its_own_duplicate(tmp_path: Path) -> None:
 
     import hashlib
 
-    sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
     repo = _FakeFilesRepo([_Existing("file_self", sha256, str(path))])
 
     report = LocalFileValidator(files_repo=repo).validate(path, ValidationRules())
