@@ -9,12 +9,18 @@ from pathlib import Path
 from typing import Any
 
 from ..adapters.notify.latency import evaluate_latency
-from ..core.errors import AuthError, ConfigurationError, DataQualityError, TransientError
+from ..core.errors import (
+    AuthError,
+    ConfigurationError,
+    DataQualityError,
+    SmartOpsError,
+    TransientError,
+)
 from ..core.ids import new_id
 from ..domain.enums import AlertLevel, EventType, Severity, ValidationStatus
 from ..domain.models import FileArtifact, StepDefinition, WorkflowDefinition
 from ..engine.contracts import StepContext, StepResult
-from ..ports.browser import ExtractionRequest
+from ..ports.browser import ExtractionRequest, ReplayRequest
 from ..ports.notify import Alert
 from ..ports.validation import ValidationRules
 from ..sessions import session_path
@@ -124,6 +130,118 @@ def download_report(ctx: StepContext) -> StepResult:
         file_path=artifact.path,
         layer_used=result.layer_used.value,
     )
+
+
+def replay_recording(ctx: StepContext) -> StepResult:
+    """Replay a recorded plan and register the file it produced.
+
+    This is the step that makes a recording an automation. It ends in exactly
+    the same place as extract.download_report — a FileArtifact saved in the raw
+    data centre — so the validate step, the incident opener, and the archiver
+    treat both origins identically.
+    """
+    browser = getattr(ctx.services, "browser", None)
+    if browser is None:
+        raise ConfigurationError("The browser engine is not wired up (services.browser)")
+
+    system = ctx.get("system")
+    report = ctx.get("report")
+    plan = ctx.get("plan") or {}
+    if not system or not report:
+        raise ConfigurationError("This step needs both system and report")
+    if not plan.get("actions"):
+        raise ConfigurationError(
+            "This automation has no recorded steps to repeat. Record the workflow again."
+        )
+
+    now = ctx.services.runner.clock.now()
+    settings = ctx.services.settings
+    destination = ensure_raw_dir(Path(settings.storage.raw_data_dir), system, report, now)
+    request = ReplayRequest(
+        system=system,
+        report=report,
+        destination_dir=destination,
+        plan=plan,
+        period=ctx.get("period", ""),
+        filters=_auth_filters(ctx.services, system),
+        run_id=ctx.run_id,
+        session_state_path=session_path(settings.storage.sessions_dir, system),
+        evidence_dir=Path(settings.storage.incidents_dir) / "evidence" / slug(ctx.run_id),
+    )
+    result = browser.replay(request)
+    if result.auth_required:
+        raise AuthError(
+            result.message or f"Session expired for system {system}",
+            details={"system": system, "needs_login": True, "no_retry": True},
+        )
+    if not result.ok or result.file_path is None:
+        raise TransientError(
+            result.message or "Repeating the recording failed",
+            details={"layer": result.layer_used.value, "evidence": result.evidence},
+        )
+
+    artifact = FileArtifact(
+        id=new_id("file"),
+        run_id=ctx.run_id,
+        system=system,
+        report=report,
+        path=str(result.file_path),
+        original_name=result.original_name,
+        size_bytes=result.size_bytes,
+        period=request.period,
+        created_at=now,
+    )
+    ctx.services.files.save(artifact)
+    ctx.emit(
+        EventType.FILE_DOWNLOADED,
+        message=f"Downloaded {report} from {system} by repeating the recording",
+        payload={
+            "file_id": artifact.id,
+            "path": artifact.path,
+            "layer": result.layer_used.value,
+            "size_bytes": artifact.size_bytes,
+            "process_id": ctx.get("process_id"),
+        },
+    )
+    _raise_latency_alert_if_needed(
+        ctx, system=system, report=report, duration_seconds=result.duration_seconds
+    )
+    return StepResult.ok(
+        file_id=artifact.id, file_path=artifact.path, layer_used=result.layer_used.value
+    )
+
+
+def _auth_filters(services: Any, system_key: str) -> dict[str, Any]:
+    """Authentication filters for a system, or an empty dict when it needs no sign-in.
+
+    A recorded automation carries no auth details of its own on purpose: they
+    belong to the system definition, so changing how a system is signed into
+    never means re-recording every automation that uses it.
+    """
+    systems = getattr(services, "systems", None)
+    if systems is None:
+        return {}
+    try:
+        system = systems.get(system_key)
+    except SmartOpsError:
+        return {}
+    auth = system.auth
+    filters: dict[str, Any] = {}
+    if auth.logged_in_selector:
+        filters["logged_in_selector"] = auth.logged_in_selector
+    if auth.login_selector:
+        filters["login_selector"] = auth.login_selector
+    if auth.mode == "unattended":
+        filters.update(
+            {
+                "login_url": auth.login_url,
+                "credential_ref": auth.credential_ref,
+                "username_selector": auth.username_selector,
+                "password_selector": auth.password_selector,
+                "submit_selector": auth.submit_selector,
+            }
+        )
+    return filters
 
 
 def _raise_latency_alert_if_needed(
@@ -242,11 +360,24 @@ COLLECT_REPORT = WorkflowDefinition(
 )
 
 
+REPLAY_PROCESS = WorkflowDefinition(
+    key="process.replay",
+    title="Run a recorded automation",
+    description="Repeat a reviewed recording, then validate the file it produced.",
+    steps=(
+        StepDefinition(name="replay", uses="automation.replay_recording", title="Repeat the recorded steps"),
+        StepDefinition(name="validate", uses="extract.validate_file", title="Validate the file"),
+    ),
+)
+
+
 def register_builtins(services: Any) -> None:
     services.step_registry.add("core.echo", echo)
     services.step_registry.add("core.check_storage", check_storage)
     services.step_registry.add("core.heartbeat", heartbeat)
     services.step_registry.add("extract.download_report", download_report)
     services.step_registry.add("extract.validate_file", validate_file)
+    services.step_registry.add("automation.replay_recording", replay_recording)
     services.workflows.register(SELF_CHECK)
     services.workflows.register(COLLECT_REPORT)
+    services.workflows.register(REPLAY_PROCESS)

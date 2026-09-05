@@ -7,10 +7,20 @@ from typing import Any
 from ..core.errors import ConcurrencyError, PermanentError
 from ..domain.enums import EventType, RecordingStatus, Severity
 from ..domain.models import Recording, RecordingStep
-from .converter import build_draft
+from .converter import build_plan, review_plan
 from .worker import PlaywrightRecordingWorker
 
 _ACTIVE = {RecordingStatus.STARTING, RecordingStatus.RECORDING, RecordingStatus.PAUSED, RecordingStatus.STOPPING}
+
+def _default_report_key(name: str) -> str:
+    """A stable, file-system-safe report key derived from the recording's name.
+
+    A recorded automation still needs a report key: it is what names the folder
+    its files land in and what ties every run of it together in history.
+    """
+    parts = ["".join(c for c in word if c.isalnum()) for word in name.strip().lower().split()]
+    cleaned = "_".join(part for part in parts if part)
+    return cleaned or "recorded_report"
 
 class RecordingManager:
     def __init__(self, services: Any) -> None:
@@ -91,10 +101,22 @@ class RecordingManager:
     def restore(self, recording_id: str) -> Recording:
         record=self._required(recording_id)
         record.deleted_at=None; self.services.recordings.save(record); self._emit(EventType.RECORDING_RESTORED, record, "Recording restored"); return record
-    def draft(self, recording_id: str) -> Recording:
+    def draft(self, recording_id: str, report_key: str = "") -> Recording:
+        """Build the executable replay plan for a completed recording.
+
+        The plan is stored on the recording as the reviewable artifact; turning
+        it into something runnable and schedulable is ProcessManager's job. The
+        review verdict is stored alongside it so the UI can say plainly whether
+        this recording is fit to become an automation.
+        """
         record=self._required(recording_id)
         if record.status != RecordingStatus.COMPLETED: raise PermanentError("Complete and review the recording before creating a draft")
-        record.automation_draft=build_draft(record.id, record.system_key, self.services.recordings.steps(record.id)); self.services.recordings.save(record); self._emit(EventType.RECORDING_DRAFT_CREATED, record, "Reviewable automation draft created"); return record
+        plan=build_plan(recording_id=record.id, system_key=record.system_key,
+                        report_key=report_key or _default_report_key(record.name),
+                        steps=self.services.recordings.steps(record.id),
+                        start_url=self._system_url(record.system_key))
+        record.automation_draft={**plan, "review": review_plan(plan)}
+        self.services.recordings.save(record); self._emit(EventType.RECORDING_DRAFT_CREATED, record, "Reviewable automation draft created"); return record
     def recover(self, stale_seconds: int = 90) -> int:
         now=self.services.clock.now(); count=0
         for record in self.services.recordings.list(limit=1000):

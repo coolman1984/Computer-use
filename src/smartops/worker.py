@@ -115,9 +115,29 @@ class Worker:
         with self._in_flight_lock:
             self._in_flight.discard(run_id)
 
+    def _settle_process(self, run: Any) -> None:
+        """Feed a finished automation run back to the process that owns it.
+
+        A test started from the web app finishes here, on the worker, not in the
+        request that started it — so this is where "the test passed" becomes
+        "this automation may now be approved". Without it a test would run,
+        succeed, and leave the automation stuck at 'testing' forever.
+        """
+        process_id = (run.params or {}).get("process_id")
+        if not process_id:
+            return
+        manager = getattr(self.services, "process_manager", None)
+        if manager is None:
+            return
+        try:
+            manager.settle_test(process_id, run.id)
+        except Exception:
+            logger.exception("Could not record the outcome of run %s on its automation", run.id)
+
     def _execute_one(self, run_id: str) -> None:
         try:
             run = self.services.runner.execute(run_id)
+            self._settle_process(run)
             if self._on_run_done is not None:
                 self._on_run_done(run)
         except Exception as exc:  # one failed run must not take down the whole worker

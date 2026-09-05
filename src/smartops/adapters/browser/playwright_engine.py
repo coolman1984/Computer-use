@@ -20,7 +20,7 @@ from playwright.sync_api import Playwright, TimeoutError as PlaywrightTimeoutErr
 from ...config import BrowserSettings
 from ...credentials import CredentialStore
 from ...domain.enums import ExtractionLayer
-from ...ports.browser import ExtractionRequest, ExtractionResult
+from ...ports.browser import ExtractionRequest, ExtractionResult, ReplayRequest
 from ...storage.paths import slug
 
 
@@ -346,6 +346,177 @@ class PlaywrightBrowserAdapter:
             message=message,
             duration_seconds=self._clock() - started,
             evidence=self._last_evidence.get(key, {}),
+            auth_required=auth_required,
+        )
+
+    # ---------- replay of a recorded plan ----------
+
+    def replay(self, request: ReplayRequest) -> ExtractionResult:
+        """Replay a recorded plan: authenticate, walk the actions, capture the download.
+
+        The whole plan runs inside one browser context so the site sees a single
+        continuous visit, the same as when the human recorded it. Authentication
+        is the identical code path used by extract(), so a recorded automation
+        benefits from saved sessions and unattended login without duplicating
+        any of that logic.
+        """
+        started = self._clock()
+        Path(request.destination_dir).mkdir(parents=True, exist_ok=True)
+
+        plan = request.plan or {}
+        actions = plan.get("actions") or []
+        start_url = plan.get("start_url") or ""
+        # Reject an unrunnable plan before paying for a browser launch, and say
+        # which half is missing so the message is actionable on its own.
+        if not start_url:
+            return self._replay_failure(request, "The recorded plan has no starting page.", started)
+        if not actions:
+            return self._replay_failure(request, "The recorded plan has no steps to repeat.", started)
+
+        try:
+            with sync_playwright() as playwright:
+                browser = self._launch(playwright)
+                try:
+                    context_kwargs: dict[str, Any] = {
+                        "accept_downloads": True,
+                        "viewport": {
+                            "width": self._settings.viewport_width,
+                            "height": self._settings.viewport_height,
+                        },
+                    }
+                    if request.session_state_path and Path(request.session_state_path).exists():
+                        context_kwargs["storage_state"] = str(request.session_state_path)
+                    context = browser.new_context(**context_kwargs)
+                    context.set_default_timeout(request.timeout_seconds * 1000)
+                    try:
+                        context.tracing.start(screenshots=True, snapshots=True)
+                    except Exception:
+                        pass  # tracing is a bonus; it must never stop a replay
+                    result = self._replay_with_context(context, request, plan, started)
+                    self._finish_tracing(context, self._as_extraction_request(request), result)
+                    return result
+                finally:
+                    browser.close()
+        except PlaywrightTimeoutError as exc:
+            return self._replay_failure(request, f"Timed out while repeating the recording: {exc}", started)
+        except Exception as exc:
+            return self._replay_failure(request, f"Unexpected failure while repeating the recording: {exc}", started)
+
+    def _as_extraction_request(self, request: ReplayRequest) -> ExtractionRequest:
+        """Adapt a replay request to the shape the shared auth/evidence helpers expect."""
+        return ExtractionRequest(
+            system=request.system,
+            report=request.report,
+            destination_dir=request.destination_dir,
+            period=request.period,
+            filters=request.filters or {},
+            timeout_seconds=request.timeout_seconds,
+            run_id=request.run_id,
+            session_state_path=request.session_state_path,
+            evidence_dir=request.evidence_dir,
+        )
+
+    def _replay_with_context(
+        self, context, request: ReplayRequest, plan: dict[str, Any], started: float
+    ) -> ExtractionResult:
+        filters = request.filters or {}
+        as_extraction = self._as_extraction_request(request)
+        page = context.new_page()
+        try:
+            page.goto(plan["start_url"], wait_until="networkidle")
+
+            auth_message = self._ensure_authenticated(context, page, as_extraction, filters)
+            if auth_message:
+                self._capture_failure_evidence(page, as_extraction, auth_message)
+                return self._replay_failure(request, auth_message, started, auth_required=True)
+            # A sign-in redirect can land somewhere else; return to the recorded
+            # starting page before replaying the first action.
+            if page.url != plan["start_url"]:
+                page.goto(plan["start_url"], wait_until="networkidle")
+
+            expects_download = bool(plan.get("expects_download"))
+            download = None
+            actions = plan.get("actions") or []
+            for index, action in enumerate(actions):
+                is_last = index == len(actions) - 1
+                # The download is triggered by the final action, exactly as it
+                # was during the recording, so that is the only click we arm an
+                # expect_download around. Arming every click would time out on
+                # each ordinary navigation step.
+                if expects_download and is_last:
+                    with page.expect_download() as info:
+                        self._perform_action(page, action)
+                    download = info.value
+                else:
+                    self._perform_action(page, action)
+                    page.wait_for_load_state("networkidle")
+
+            if expects_download:
+                if download is None:
+                    message = "The recorded steps ran, but no file was downloaded."
+                    self._capture_failure_evidence(page, as_extraction, message)
+                    return self._replay_failure(request, message, started)
+                suggested = download.suggested_filename or request.report
+                target = Path(request.destination_dir) / suggested
+                download.save_as(target)
+                return ExtractionResult(
+                    ok=True,
+                    layer_used=ExtractionLayer.DOM,
+                    file_path=target,
+                    original_name=suggested,
+                    size_bytes=target.stat().st_size,
+                    duration_seconds=self._clock() - started,
+                )
+
+            message = "The recording produced no file, so there is nothing to validate."
+            self._capture_failure_evidence(page, as_extraction, message)
+            return self._replay_failure(request, message, started)
+        except PlaywrightTimeoutError as exc:
+            message = f"A recorded step no longer works on the site: {exc}"
+            self._capture_failure_evidence(page, as_extraction, message)
+            return self._replay_failure(request, message, started)
+        except Exception as exc:
+            message = f"Repeating the recording failed: {exc}"
+            self._capture_failure_evidence(page, as_extraction, message)
+            return self._replay_failure(request, message, started)
+        finally:
+            page.close()
+
+    def _perform_action(self, page, action: dict[str, Any]) -> None:
+        """Replay one recorded action on the most durable layer it supports.
+
+        Ratios, never pixels: the recording stored the click as a fraction of the
+        viewport, so it lands in the same relative place on a different screen
+        size (AGENTS.md forbids absolute screen coordinates).
+        """
+        layer = action.get("layer")
+        if layer == "dom":
+            selector = action.get("selector") or ""
+            locator = page.locator(selector).first
+            locator.wait_for(state="visible")
+            locator.click()
+            return
+        if layer == "visual":
+            viewport = page.viewport_size or {
+                "width": self._settings.viewport_width,
+                "height": self._settings.viewport_height,
+            }
+            x = float(action["x_ratio"]) * viewport["width"]
+            y = float(action["y_ratio"]) * viewport["height"]
+            page.mouse.click(x, y)
+            return
+        raise RuntimeError(
+            f"Step {action.get('seq')} was not captured well enough to repeat; record the workflow again."
+        )
+
+    def _replay_failure(
+        self, request: ReplayRequest, message: str, started: float, *, auth_required: bool = False
+    ) -> ExtractionResult:
+        return self._failure(
+            self._as_extraction_request(request),
+            ExtractionLayer.DOM,
+            message,
+            started,
             auth_required=auth_required,
         )
 
