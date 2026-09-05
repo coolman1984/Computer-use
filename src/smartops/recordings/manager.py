@@ -7,6 +7,7 @@ from typing import Any
 from ..core.errors import ConcurrencyError, PermanentError
 from ..domain.enums import EventType, RecordingStatus, Severity
 from ..domain.models import Recording, RecordingStep
+from ..sessions import session_path
 from .converter import build_plan, review_plan
 from .worker import PlaywrightRecordingWorker
 
@@ -41,7 +42,7 @@ class RecordingManager:
         if other: raise ConcurrencyError("Another recording is already active for this system")
         record.status, record.error_message, record.started_at = RecordingStatus.STARTING, None, self.services.clock.now(); self.services.recordings.save(record); self._emit(EventType.RECORDING_STARTED, record, "Opening Google Chrome for recording")
         url = self._system_url(record.system_key)
-        worker = PlaywrightRecordingWorker(record.id, Path(record.artifact_dir), url, lambda item: self._step(record.id, item), lambda: self._heartbeat(record.id), lambda error: self._finished(record.id, error), self.services.settings.browser.executable_path)
+        worker = PlaywrightRecordingWorker(record.id, Path(record.artifact_dir), url, lambda item: self._step(record.id, item), lambda: self._heartbeat(record.id), lambda error: self._finished(record.id, error), self.services.settings.browser.executable_path, session_path(self.services.settings.storage.sessions_dir, record.system_key))
         self.workers[record.id] = worker
         try:
             worker.start()

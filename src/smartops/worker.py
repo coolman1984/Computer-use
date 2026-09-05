@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
@@ -41,6 +42,7 @@ class Worker:
         self._in_flight: set[str] = set()
         self._in_flight_lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        self._last_poll_at: float | None = None
 
     # ---------- lifecycle ----------
 
@@ -64,12 +66,42 @@ class Worker:
         return self._thread is not None and self._thread.is_alive()
 
     def run_forever(self) -> None:
-        """The polling loop, with one thread pool that lives for the loop's whole lifetime."""
+        """The polling loop, with one thread pool that lives for the loop's whole lifetime.
+
+        A single failed poll must never end the loop. Before this guard, an
+        unexpected error anywhere in a poll — a momentarily locked database, a
+        malformed row — killed the thread, and the platform went on reporting
+        itself healthy while every schedule silently stopped firing.
+        """
         self._stop_event.clear()
         with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
             while not self._stop_event.is_set():
-                self._poll_once(executor)
+                try:
+                    self._poll_once(executor)
+                except Exception:
+                    logger.exception("A polling cycle failed; the worker keeps running")
+                self._last_poll_at = time.time()
                 self._stop_event.wait(self.poll_interval)
+
+    def seconds_since_last_poll(self) -> float | None:
+        """How long since the loop completed a cycle. None before the first one.
+
+        This is what makes "automatic runs: on" mean something. A thread that is
+        alive but wedged reports the same is_running() as a healthy one; only the
+        time since it last got round the loop tells them apart.
+        """
+        if self._last_poll_at is None:
+            return None
+        return max(0.0, time.time() - self._last_poll_at)
+
+    def is_healthy(self, *, tolerance: float = 30.0) -> bool:
+        """Running, and actually getting round its loop."""
+        if not self.is_running():
+            return False
+        since = self.seconds_since_last_poll()
+        if since is None:
+            return True  # started, first cycle not finished yet
+        return since <= max(tolerance, self.poll_interval * 5)
 
     # ---------- polling ----------
 

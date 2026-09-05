@@ -78,7 +78,9 @@ def download_report(ctx: StepContext) -> StepResult:
         raise ConfigurationError("This step needs both system and report")
 
     now = ctx.services.runner.clock.now()
-    destination = ensure_raw_dir(Path(ctx.services.settings.storage.raw_data_dir), system, report, now)
+    destination = ensure_raw_dir(
+        Path(ctx.services.settings.storage.raw_data_dir), system, report, now, ctx.run_id
+    )
     settings = ctx.services.settings
     request = ExtractionRequest(
         system=system,
@@ -156,7 +158,9 @@ def replay_recording(ctx: StepContext) -> StepResult:
 
     now = ctx.services.runner.clock.now()
     settings = ctx.services.settings
-    destination = ensure_raw_dir(Path(settings.storage.raw_data_dir), system, report, now)
+    destination = ensure_raw_dir(
+        Path(settings.storage.raw_data_dir), system, report, now, ctx.run_id
+    )
     request = ReplayRequest(
         system=system,
         report=report,
@@ -329,7 +333,13 @@ def validate_file(ctx: StepContext) -> StepResult:
             message="The file failed validation",
             payload={"failures": report.failures, "file_id": file_id},
         )
-        raise DataQualityError("The file failed validation", details={"failures": report.failures})
+        # The specific failure belongs in the run's own error message: the run
+        # page and the incident both show that string, and "the file failed
+        # validation" tells the user nothing they can act on.
+        raise DataQualityError(
+            "The file did not pass its checks: " + "; ".join(report.failures),
+            details={"failures": report.failures, "file_id": file_id},
+        )
 
     ctx.emit(
         EventType.FILE_VALIDATED,

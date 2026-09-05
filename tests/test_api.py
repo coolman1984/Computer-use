@@ -74,7 +74,16 @@ def _save_fake_session(services, system_key: str) -> None:
 
     path = session_path(services.settings.storage.sessions_dir, system_key)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('{"cookies": [], "origins": []}', encoding="utf-8")
+    import json
+
+    path.write_text(json.dumps({
+        # A session with a live cookie. Writing an empty storage_state here would
+        # be writing the very defect the platform now rejects: a file that exists
+        # but carries nothing that would get you through the door.
+        "cookies": [{"name": "sid", "value": "test-session", "domain": "example.local",
+                     "path": "/", "expires": 4102444800}],
+        "origins": [],
+    }), encoding="utf-8")
 
 
 @pytest.fixture

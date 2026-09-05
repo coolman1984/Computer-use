@@ -33,6 +33,15 @@ function statusCell(item) {
       el("div", { class: "muted hint" }, [`Saved ${hours} hours ago. Sign in again if a run reports an expired session.`]),
     ]);
   }
+  // A saved file that no longer works is not the same as never having signed
+  // in, and the difference changes nothing the user does — but it does explain
+  // why a system that worked yesterday is asking again today.
+  if (item.session?.exists) {
+    return el("td", {}, [
+      badge("Sign-in expired", "orange"),
+      el("div", { class: "muted hint" }, [item.session.reason || "Sign in again."]),
+    ]);
+  }
   return el("td", {}, [badge("Not signed in", "red")]);
 }
 

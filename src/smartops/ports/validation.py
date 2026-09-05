@@ -15,6 +15,15 @@ class ValidationRules:
     min_rows: int | None = None
     max_age_hours: float | None = None
     reject_duplicate_hash: bool = True
+    # A portal that has lost your session answers a download request with an
+    # HTML page. It arrives with the right filename, a healthy size and a unique
+    # hash, so every other check passes and a login screen is filed as a valid
+    # report. On by default because the failure is silent and common.
+    reject_web_pages: bool = True
+    # Text that must appear somewhere in the file. This is how a wrong period is
+    # caught: a report exported for the wrong month is a perfectly valid file
+    # that happens to be the wrong answer, and only its own content can tell.
+    must_contain: tuple[str, ...] = ()
 
 
 @dataclass

@@ -22,6 +22,35 @@ _CHUNK_SIZE = 1024 * 1024
 _XLSX_NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 _COL_LETTERS_RE = re.compile(r"[A-Z]+")
 
+# How much of the file to read when deciding what it really is. A served error
+# page declares itself in its first few hundred bytes.
+_SNIFF_BYTES = 4096
+_HTML_MARKERS = (b"<!doctype html", b"<html", b"<head", b"<body", b"<!DOCTYPE HTML")
+# Magic numbers for formats that are archives or documents underneath. Used to
+# tell a real .xlsx from an HTML page wearing that extension.
+_ZIP_MAGIC = b"PK\x03\x04"
+
+
+def _looks_like_a_web_page(head: bytes) -> bool:
+    """True when the bytes are an HTML document rather than data.
+
+    Checked on content, never on the extension: the whole point is that the
+    extension lies. A portal that has dropped your session answers the download
+    with its login page, named exactly like the report you asked for.
+    """
+    lowered = head.lstrip()[:512].lower()
+    return any(marker.lower() in lowered for marker in _HTML_MARKERS)
+
+
+def _head_bytes(path: Path) -> bytes:
+    with path.open("rb") as handle:
+        return handle.read(_SNIFF_BYTES)
+
+
+def _decode(head: bytes) -> str:
+    """Best-effort text for the "must contain" check; never raises on binary."""
+    return head.decode("utf-8", errors="replace")
+
 
 def _sha256_of(path: Path) -> str:
     digest = hashlib.sha256()
@@ -126,8 +155,26 @@ class LocalFileValidator:
         size_bytes = path.stat().st_size
         if size_bytes < rules.min_size_bytes:
             failures.append(f"File is too small ({size_bytes} bytes)")
+        if size_bytes == 0:
+            # Nothing further can be true of an empty file, and every later check
+            # would either pass vacuously or raise.
+            return ValidationReport(
+                passed=False, size_bytes=0, sha256=_sha256_of(path),
+                failures=failures + ["The file is empty"],
+            )
 
+        head = _head_bytes(path)
         suffix = path.suffix.lower()
+
+        # Identify the file by what is inside it, before trusting its name.
+        is_web_page = _looks_like_a_web_page(head)
+        if is_web_page and rules.reject_web_pages:
+            failures.append(
+                "The download returned a web page, not a report — this usually means the "
+                "sign-in expired or the site showed an error instead of the file"
+            )
+        if suffix == ".xlsx" and not head.startswith(_ZIP_MAGIC):
+            failures.append("The file is named as an Excel file but is not one")
         if rules.expected_extensions:
             allowed = {
                 ext.lower() if ext.startswith(".") else f".{ext.lower()}"
@@ -141,7 +188,11 @@ class LocalFileValidator:
         header: list[str] = []
         row_count: int | None = None
         needs_content = bool(rules.required_columns) or rules.min_rows is not None
-        if suffix == ".csv":
+        # Reading an HTML page as a CSV "succeeds" and reports nonsense columns;
+        # skip it so the failure above stands as the real reason.
+        if is_web_page:
+            pass
+        elif suffix == ".csv":
             try:
                 header, row_count = _read_csv_header_and_count(path)
             except (OSError, UnicodeDecodeError) as exc:
@@ -161,6 +212,15 @@ class LocalFileValidator:
 
         if rules.min_rows is not None and row_count is not None and row_count < rules.min_rows:
             failures.append(f"Row count ({row_count}) is below the minimum ({rules.min_rows})")
+
+        if rules.must_contain and not is_web_page:
+            text = _decode(head if size_bytes <= _SNIFF_BYTES else path.read_bytes())
+            missing_text = [needle for needle in rules.must_contain if needle not in text]
+            if missing_text:
+                failures.append(
+                    "The file does not mention: " + ", ".join(missing_text)
+                    + " — it may be for the wrong period or the wrong report"
+                )
 
         if rules.max_age_hours is not None:
             age_hours = (self._now() - path.stat().st_mtime) / 3600

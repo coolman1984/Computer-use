@@ -56,7 +56,10 @@ const errorBox = document.getElementById("error");
 
 if (!runId) showError(errorBox, new Error("No run selected. Go back and choose one."));
 
+let currentRun = null;
+
 function renderRunInfo(run) {
+  currentRun = run;
   const grid = document.getElementById("run-info");
   grid.innerHTML = "";
   const card = (title, value) => {
@@ -70,7 +73,15 @@ function renderRunInfo(run) {
   grid.appendChild(card("Result", statusBadge(RUN_STATUS_LABELS, run.status)));
   grid.appendChild(card("Started", formatDate(run.started_at)));
   grid.appendChild(card("Finished", formatDate(run.finished_at)));
-  document.getElementById("retry-button").disabled = ["succeeded", "cancelled"].includes(run.status);
+  const button = document.getElementById("retry-button");
+  // A succeeded run has nothing to retry; anything else does, and the label says
+  // which of the two things the button will do.
+  button.disabled = run.status === "succeeded";
+  button.textContent = ["failed", "cancelled"].includes(run.status) ? "Try again" : "Continue this run";
+  if (run.params?.retry_of) {
+    document.getElementById("retry-hint").innerHTML =
+      `This is a new attempt after an earlier run. <a class="link" href="run.html?id=${encodeURIComponent(run.params.retry_of)}">See the one it replaced</a>`;
+  }
 }
 
 /* A failed run explains itself here: what happened, what to do, and one button
@@ -162,12 +173,21 @@ async function load() {
   }
 }
 
+/* A finished-but-failed run is retried as a new attempt (and the page follows
+   that new run); an unfinished one is simply continued. Sending both down the
+   same endpoint is what used to make this button a no-op on failed runs. */
 document.getElementById("retry-button").addEventListener("click", async (event) => {
   const button = event.target;
+  const failed = currentRun && ["failed", "cancelled"].includes(currentRun.status);
   button.disabled = true;
-  document.getElementById("retry-hint").textContent = "Running…";
+  document.getElementById("retry-hint").textContent = failed ? "Starting a new attempt…" : "Continuing…";
   clearError(errorBox);
   try {
+    if (failed) {
+      const fresh = await postJSON(`/api/runs/${encodeURIComponent(runId)}/retry`, {});
+      location.href = `run.html?id=${encodeURIComponent(fresh.id)}`;
+      return;
+    }
     await postJSON(`/api/runs/${encodeURIComponent(runId)}/start`, {});
     document.getElementById("retry-hint").textContent = "";
     await load();

@@ -365,6 +365,25 @@ class RunRepository(BaseRepository):
         )
         return [self._row_to_run(row) for row in rows]
 
+    def stranded(self, *, now: datetime | None = None, limit: int = 100) -> list[Run]:
+        """Runs left mid-execution by a crash: RUNNING with no live worker on them.
+
+        due() deliberately never returns these — a run being executed right now
+        must not be handed to a second worker. The consequence, until recovery
+        existed, was that a run interrupted by a restart stayed RUNNING forever:
+        never finished, never failed, never picked up again, and counted as
+        "active" on the overview. The lock lease is what distinguishes the two
+        cases — a live worker holds an unexpired lease, a dead one does not.
+        """
+        moment = to_iso(now or self.clock.now())
+        rows = self.db.connection.execute(
+            "SELECT * FROM runs WHERE status = 'running'"
+            " AND (lock_token IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= ?)"
+            " ORDER BY created_at ASC LIMIT ?",
+            (moment, limit),
+        )
+        return [self._row_to_run(row) for row in rows]
+
     def update(self, run: Run) -> Run:
         with self.db.transaction() as tx:
             tx.execute(

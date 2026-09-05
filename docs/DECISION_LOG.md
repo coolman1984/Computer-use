@@ -160,3 +160,82 @@ extraction, replay, connection test, sign-in, and the recorder — at a specific
 browser. Without it, a machine that ran only the launcher and never
 `playwright install` fails on every browser action with a raw Playwright message.
 A missing browser is now detected and reported as its own actionable case.
+
+## D034 — One run, one output folder
+Raw output was addressed by date (`raw/YYYY/MM/DD/<system>/<report>/`), so the
+second run of a day wrote over the first one's file — same folder, same
+server-suggested filename — while both database rows still pointed at that one
+path. The earlier result was gone with nothing to show it had existed. The run
+id is now a path segment. That makes a result impossible to overwrite, makes
+"which run produced this file" answerable from the path alone, and — the part
+that was not obvious — revives the duplicate-hash check, which excludes the
+file's own path and so could never fire while two runs shared it.
+
+## D035 — A file is identified by its content, not its name
+A portal that has lost your session answers a download with an HTML page. It
+arrives with the right filename, a healthy size, and a unique hash, so every
+check passed and a login screen was filed as a valid report. The validator now
+sniffs the leading bytes and rejects a web page whatever its extension, rejects
+an empty file outright, and rejects an `.xlsx` that is not really a zip. A
+`must_contain` rule covers the wrong-period case, which no structural check can
+catch: a report exported for the wrong month is a perfectly valid file that
+happens to be the wrong answer.
+
+## D036 — A session file is not a session
+`session_exists` only asked whether a file was on disk. A storage_state written
+before a sign-in completed, or one whose cookies had since expired, passed —
+so the platform let the user record and schedule against a system it could not
+reach, and the failure surfaced overnight with nobody present. `session_is_usable`
+requires at least one unexpired cookie or an origin carrying storage. Proving
+the session opens a protected page stays with the connection test, which is the
+one place already paying for a browser launch.
+
+## D037 — Recording, testing and running share one session
+The recorder used its own persistent browser profile, so a user signed in twice
+and could record as a different account than the automation would later run as.
+It now seeds from the system's saved session and writes back to it, which also
+means a sign-in performed inside a recording serves every later run.
+
+## D038 — A retry is a new attempt, not a resumed one
+The retry button called `drive()` on the failed run. `execute()` returns
+immediately for anything terminal, and FAILED is terminal, so the button did
+nothing at all — silently, forever. Even had it re-entered, the engine skips
+steps already recorded as succeeded, so it would have resumed a finished run
+rather than repeating the work. `runner.retry()` creates a new run with the same
+workflow and parameters and a `retry_of` link back. Every attempt keeps its own
+record and its own files, which is what makes "it worked on the third try"
+visible. `/start` still continues an unfinished run; conflating the two is what
+hid the defect.
+
+## D039 — Startup settles whatever a crash left behind
+`due()` deliberately never returns RUNNING runs, so a second worker cannot grab
+one mid-flight — but that also meant a run interrupted by a restart stayed
+RUNNING forever: never finished, never failed, never picked up, and counted as
+active on the overview. The lock lease distinguishes a live worker from a dead
+one, and `RecoveryService` re-queues the dead ones (the engine is resumable, so
+completed steps are not repeated), settles automations stranded mid-test from
+their run's real outcome, and never marks anything succeeded on a guess. It runs
+during `Services` construction, because starting the platform is the only
+trigger a non-technical user will ever pull.
+
+## D040 — The worker is supervised, and health means "working"
+Nothing watched the background worker. If its thread ended, the server stayed
+up, health still said ok, and every schedule stopped firing with no signal.
+The loop now survives a failed cycle, records when it last completed one, and a
+supervisor restarts it and recovers stranded work. `is_healthy()` is liveness of
+the loop rather than of the thread, because a wedged thread reports the same
+`is_running()` as a working one.
+
+## D041 — Monitoring asks whether results are arriving
+Every "is anything wrong" check rested on incidents and run status, which is
+blind to the failure that matters most: silence. An automation that quietly
+stops producing files raises no incident, because nothing failed and nothing
+ran. `overdue_automations` compares each scheduled automation's last *validated*
+file against its own schedule, with one period of slack, so a stopped scheduler
+turns the monitoring stage red instead of leaving it green.
+
+## D042 — One automation, one run at a time
+The scheduler already refused to stack runs, but a second click on "Run it now"
+did not. Two runs of one automation share a browser session and a target system
+and can each half-download the same report. `ProcessManager.active_run` is now
+the single answer to "is it running", used by both paths.

@@ -52,6 +52,7 @@ class Services:
         sleeper: Callable[[float], None] = time.sleep,
         create_directories: bool = True,
         credential_store: CredentialStore | None = None,
+        recover_on_start: bool = True,
     ) -> None:
         self.settings = settings or load_settings()
         self.clock = clock or SystemClock()
@@ -100,7 +101,6 @@ class Services:
 
         from .recordings.manager import RecordingManager
         self.recording_manager = RecordingManager(self)
-        self.recording_manager.recover()
         from .recordings.recovery import RecordingRecovery
         self.recording_recovery = RecordingRecovery(self)
 
@@ -119,6 +119,16 @@ class Services:
         from .workflows.builtin import register_builtins
 
         register_builtins(self)
+
+        # Last, because it needs every repository and manager above it. Starting
+        # the platform is the only trigger a non-technical user will ever pull,
+        # so it is the one that has to clear whatever a crash left behind —
+        # interrupted runs, half-finished tests, dead recordings.
+        from .recovery import RecoveryService
+
+        self.recovery = RecoveryService(self)
+        if recover_on_start:
+            self.recovery.recover_all()
 
     def _build_agent_runner(self) -> Any:
         """Build a CliAgentRunner if explicitly enabled in settings, otherwise return None.

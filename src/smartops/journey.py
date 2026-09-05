@@ -30,7 +30,7 @@ from typing import Any
 
 from .core.errors import ErrorClass, SmartOpsError
 from .domain.enums import IncidentStatus, ProcessStatus, RunStatus, ValidationStatus
-from .sessions import session_exists
+from .sessions import session_is_usable
 
 # Stage keys, in order. The order is the dependency chain.
 STAGES = (
@@ -123,12 +123,13 @@ def build_journey(services: Any) -> Journey:
     valid_files = [f for f in files if f.validation_status is ValidationStatus.PASSED]
     open_incidents = services.incidents.list(status=IncidentStatus.OPEN, limit=200)
     succeeded_runs = services.runs.list(status=RunStatus.SUCCEEDED, limit=50)
+    overdue = overdue_automations(services)
 
     needs_signin = [
         s
         for s in systems
         if s.auth.mode != "none"
-        and not session_exists(services.settings.storage.sessions_dir, s.key)
+        and not session_is_usable(services.settings.storage.sessions_dir, s.key)
     ]
     connected = [s for s in systems if s.key in services.connection_checks]
 
@@ -283,11 +284,18 @@ def build_journey(services: Any) -> Journey:
             # This stage is "done" while there is nothing wrong. It is the only
             # stage that can go back to not-done on its own, which is the point:
             # it is the ongoing one, not a box to tick once.
-            done=bool(scheduled) and not open_incidents,
+            #
+            # "Nothing wrong" is judged on real results, not on a clean log. An
+            # automation that quietly stopped producing files raises no incident
+            # at all — nothing failed, nothing ran — and would otherwise leave
+            # this stage green while the thing it exists for had stopped.
+            done=bool(scheduled) and not open_incidents and not overdue,
             detail=(
                 f"{_plural(len(open_incidents), 'issue')} need attention."
                 if open_incidents
-                else "Nothing needs attention."
+                else f"{_plural(len(overdue), 'automation')} have not produced a result when expected."
+                if overdue
+                else "Everything is running and producing results."
                 if scheduled
                 else "Waiting on step 10."
             ),
@@ -309,6 +317,55 @@ def build_journey(services: Any) -> Journey:
             blocking_found = True
 
     return Journey(stages=stages, current=current)
+
+
+def overdue_automations(services: Any) -> list[Any]:
+    """Scheduled automations that should have produced a result by now and have not.
+
+    Silence is the failure mode a log cannot show. If the scheduler stops, or a
+    run never gets picked up, nothing fails — there is simply no new file, and
+    every "did anything go wrong" check based on incidents or run status answers
+    no. This asks the only question that matters: when did this automation last
+    actually produce a validated file, and is that longer ago than its own
+    schedule allows?
+    """
+    now = services.clock.now()
+    overdue: list[Any] = []
+    for process in services.processes.scheduled():
+        allowed = _expected_gap_seconds(process)
+        if allowed is None:
+            continue
+        last = _last_successful_result_at(services, process)
+        # Never yet produced anything: judged from when it was approved, so a
+        # freshly scheduled automation is not reported overdue on day one.
+        reference = last or process.approved_at or process.created_at
+        if reference is None:
+            continue
+        # One full period of slack: a run that starts on time but takes a while
+        # is not late, and neither is a schedule that fires a few minutes off.
+        if (now - reference).total_seconds() > allowed * 2:
+            overdue.append(process)
+    return overdue
+
+
+def _expected_gap_seconds(process: Any) -> float | None:
+    if process.schedule_every_seconds:
+        return float(process.schedule_every_seconds)
+    if process.schedule_daily_at:
+        return 24 * 3600.0
+    return None
+
+
+def _last_successful_result_at(services: Any, process: Any) -> Any:
+    """When this automation last produced a file that passed its checks."""
+    for artifact in services.files.list(limit=500):
+        if (
+            artifact.system == process.system_key
+            and artifact.report == process.report_key
+            and artifact.validation_status is ValidationStatus.PASSED
+        ):
+            return artifact.created_at
+    return None
 
 
 # ---------- gates enforced by the API ----------
@@ -341,10 +398,13 @@ def require_signed_in(services: Any, system_key: str) -> None:
                 href="credentials.html",
             )
         return
-    if not session_exists(services.settings.storage.sessions_dir, system_key):
+    if not session_is_usable(services.settings.storage.sessions_dir, system_key):
+        # Deliberately not "is there a file": an incomplete or expired saved
+        # session is exactly the case that used to pass this gate and then fail
+        # overnight with nobody watching.
         raise StageBlocked(
-            f"Sign in to '{system.name}' first. Without a saved session this would only "
-            "capture the login page.",
+            f"Sign in to '{system.name}' first. There is no working saved sign-in, so this "
+            "would only reach the login page.",
             stage="signin",
             action="Sign in now",
             href="credentials.html",

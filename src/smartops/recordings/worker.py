@@ -41,8 +41,15 @@ document.addEventListener('click', e => {
 """
 
 class PlaywrightRecordingWorker:
-    def __init__(self, recording_id: str, artifact_dir: Path, start_url: str, on_step: Callable[[dict], None], on_heartbeat: Callable[[], None], on_finished: Callable[[str | None], None], executable_path: str = "") -> None:
+    def __init__(self, recording_id: str, artifact_dir: Path, start_url: str, on_step: Callable[[dict], None], on_heartbeat: Callable[[], None], on_finished: Callable[[str | None], None], executable_path: str = "", session_state_path: Path | None = None) -> None:
         self.recording_id, self.artifact_dir, self.start_url = recording_id, artifact_dir, start_url
+        # The one saved session for this system — the same file the connection
+        # test, the test run and every scheduled run use. Recording in its own
+        # private profile meant you signed in twice (once to record, once for
+        # real) and could record against a different account than the one the
+        # automation would later run as. It is read in and written back out, so
+        # a sign-in done during a recording also serves later runs.
+        self.session_state_path = session_state_path
         # Empty means "use the installed Google Chrome". A configured path lets
         # a machine without Chrome record with whatever Chromium it does have,
         # instead of failing with a raw Playwright message.
@@ -65,12 +72,19 @@ class PlaywrightRecordingWorker:
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
             for item in ("screenshots", "downloads", "network", "trace", "session", "profile"): (self.artifact_dir / item).mkdir(exist_ok=True)
             with sync_playwright() as p:
-                launch_kwargs = {"headless": False, "accept_downloads": True}
+                launch_kwargs = {"headless": False}
                 if self.executable_path:
                     launch_kwargs["executable_path"] = self.executable_path
                 else:
                     launch_kwargs["channel"] = "chrome"
-                context = p.chromium.launch_persistent_context(str(self.artifact_dir / "profile"), **launch_kwargs)
+                browser = p.chromium.launch(**launch_kwargs)
+                # A normal context seeded from the shared session, rather than a
+                # persistent profile of its own: same credentials as every later
+                # run, and downloads and tracing work identically.
+                context_kwargs: dict = {"accept_downloads": True}
+                if self.session_state_path and Path(self.session_state_path).exists():
+                    context_kwargs["storage_state"] = str(self.session_state_path)
+                context = browser.new_context(**context_kwargs)
                 try:
                     context.tracing.start(screenshots=True, snapshots=True, sources=False)
                     # Context-level, not page-level: applies to every page this
@@ -133,9 +147,18 @@ class PlaywrightRecordingWorker:
                     # transient error must not throw away the whole recording.
                     try: context.storage_state(path=str(self.artifact_dir / "session" / "storage-state.json"))
                     except Exception: pass
+                    # Write the session back to the shared file too, so a
+                    # sign-in the user performed inside the recording window is
+                    # the same session later runs will use.
+                    if self.session_state_path:
+                        try:
+                            Path(self.session_state_path).parent.mkdir(parents=True, exist_ok=True)
+                            context.storage_state(path=str(self.session_state_path))
+                        except Exception: pass
                     try: context.tracing.stop(path=str(self.artifact_dir / "trace" / "trace.zip"))
                     except Exception: pass
                     context.close()
+                    browser.close()
             (self.artifact_dir / "network" / "sanitized-summary.json").write_text(json.dumps(network, ensure_ascii=False), encoding="utf-8")
             self.on_finished(None)
         except Exception as exc:

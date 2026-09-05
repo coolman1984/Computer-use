@@ -13,7 +13,9 @@ Two rules shape this file:
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -44,13 +46,15 @@ from ..journey import (
 )
 from ..recordings.artifacts import CONTENT_TYPES, preview_path
 from ..recordings.converter import describe_plan, review_plan
-from ..sessions import session_age_hours, session_exists
+from ..sessions import session_age_hours, session_is_usable, session_state_summary
 from ..services import Services
 from ..worker import Worker
 from .ws import create_ws_router
 
 # The operations center (static web UI) lives in web/ at the repository root, next to src/.
 WEB_DIR = Path(__file__).resolve().parents[3] / "web"
+
+logger = logging.getLogger("smartops.api")
 
 _services: Services | None = None
 
@@ -128,14 +132,23 @@ def create_app(services: Services | None = None) -> FastAPI:
         one-off tooling opt out with SMARTOPS_DISABLE_WORKER=1.
         """
         app.state.worker = None
+        app.state.supervisor = None
         if os.getenv("SMARTOPS_DISABLE_WORKER") != "1":
             svc = provide()
             worker = Worker(svc, scheduler=svc.scheduler)
             worker.start()
             app.state.worker = worker
+            # A worker that dies takes every schedule with it, silently. The
+            # supervisor restarts it and says so in the log, so "automatic runs"
+            # stays true rather than merely having been true at startup.
+            app.state.supervisor = _Supervisor(svc, worker_holder=app.state)
+            app.state.supervisor.start()
         try:
             yield
         finally:
+            supervisor = getattr(app.state, "supervisor", None)
+            if supervisor is not None:
+                supervisor.stop()
             worker = getattr(app.state, "worker", None)
             if worker is not None:
                 worker.stop()
@@ -179,13 +192,19 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.get("/health")
     def health(svc: Services = Depends(provide)) -> dict[str, Any]:
         worker = getattr(app.state, "worker", None)
+        # "Running" is not the same as "working": a wedged thread is still alive.
+        # Report the loop's real liveness, so the badge cannot say automatic runs
+        # are on while nothing has been polled for minutes.
+        healthy = bool(worker is not None and worker.is_healthy())
         return {
             "status": "ok",
             "service": "smartops",
             "recorder": svc.recording_recovery.health(),
-            # A user reading "automatic runs: on" is how they know the platform
-            # will still work when they are not looking at it.
-            "automatic_runs": bool(worker is not None and worker.is_running()),
+            "automatic_runs": healthy,
+            "seconds_since_last_check": (
+                worker.seconds_since_last_poll() if worker is not None else None
+            ),
+            "restarts": getattr(getattr(app.state, "supervisor", None), "restarts", 0),
         }
 
     @app.get("/")
@@ -245,11 +264,26 @@ def create_app(services: Services | None = None) -> FastAPI:
 
     @app.post("/api/runs/{run_id}/start")
     def start_run(run_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
+        """Continue a run that has not finished (queued, waiting, or interrupted)."""
         if svc.runs.get(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         run = svc.runner.drive(run_id)
         _settle_owning_process(svc, run)
         return run.to_dict()
+
+    @app.post("/api/runs/{run_id}/retry", status_code=201)
+    def retry_run(run_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
+        """Try a failed run again, as a genuinely new attempt.
+
+        Separate from /start on purpose: continuing an unfinished run and making
+        a fresh attempt at a finished one are different things, and conflating
+        them is what made the old retry button silently do nothing.
+        """
+        try:
+            retried = svc.runner.retry(run_id)
+        except SmartOpsError as exc:
+            raise _fail(exc) from exc
+        return _queue_or_drive(svc, retried).to_dict()
 
     @app.get("/api/runs/{run_id}/events")
     def run_events(
@@ -346,8 +380,15 @@ def create_app(services: Services | None = None) -> FastAPI:
             "login_url": system.auth.login_url,
             "logged_in_selector": system.auth.logged_in_selector,
             "login_selector": system.auth.login_selector,
+            # "signed in" means the saved session is actually usable; a file
+            # that exists but carries nothing live is not being signed in.
             "session_exists": (
-                session_exists(svc.settings.storage.sessions_dir, system.key)
+                session_is_usable(svc.settings.storage.sessions_dir, system.key)
+                if needs_session
+                else None
+            ),
+            "session": (
+                session_state_summary(svc.settings.storage.sessions_dir, system.key)
                 if needs_session
                 else None
             ),
@@ -502,7 +543,10 @@ def create_app(services: Services | None = None) -> FastAPI:
                     "credential_ref": ref,
                     "credential_stored": stored,
                     "username": username,
-                    "session_exists": session_exists(
+                    "session_exists": session_is_usable(
+                        svc.settings.storage.sessions_dir, system.key
+                    ),
+                    "session": session_state_summary(
                         svc.settings.storage.sessions_dir, system.key
                     ),
                     "session_age_hours": session_age_hours(
@@ -898,6 +942,52 @@ def create_app(services: Services | None = None) -> FastAPI:
         return _queue_or_drive(svc, run).to_dict()
 
     return app
+
+
+class _Supervisor:
+    """Keeps the background worker alive for as long as the server is.
+
+    The worker and the scheduler are the platform's promise that things happen
+    without the user. Nothing was watching them: if the loop's thread ended, the
+    server stayed up, health still said "ok", and every schedule stopped firing
+    with no signal at all.
+    """
+
+    def __init__(self, services: Services, *, worker_holder: Any, interval: float = 15.0) -> None:
+        self.services = services
+        self.holder = worker_holder
+        self.interval = interval
+        self.restarts = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._watch, name="smartops-supervisor", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _watch(self) -> None:
+        while not self._stop.wait(self.interval):
+            worker = getattr(self.holder, "worker", None)
+            if worker is None or worker.is_healthy():
+                continue
+            logger.warning("The background worker stopped responding; starting a new one")
+            try:
+                worker.stop()
+            except Exception:
+                pass
+            replacement = Worker(self.services, scheduler=self.services.scheduler)
+            replacement.start()
+            self.holder.worker = replacement
+            self.restarts += 1
+            # Recovery matters here too: whatever the dead worker was mid-way
+            # through is stranded exactly as it would be after a crash.
+            try:
+                self.services.recovery.recover_stranded_runs()
+            except Exception:
+                logger.exception("Could not recover stranded runs after restarting the worker")
 
 
 def _settle_owning_process(svc: Services, run: Any) -> None:

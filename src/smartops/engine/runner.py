@@ -102,6 +102,45 @@ class WorkflowRunner:
         finally:
             self.services.runs.release(run.id, token)
 
+    def retry(self, run_id: str) -> Run:
+        """Start a genuinely new attempt at what a failed run was trying to do.
+
+        The retry button used to call drive() on the failed run itself. execute()
+        returns immediately for anything terminal, and FAILED is terminal — so
+        the button did nothing at all, silently, forever. Even had it re-entered,
+        the engine skips steps already recorded as succeeded, so a "retry" would
+        have resumed a finished run rather than repeating the work.
+
+        A retry is therefore a new run with the same workflow and parameters,
+        carrying a link back to the attempt it replaces. That keeps every attempt
+        in the history as its own record with its own files, which is what makes
+        "it worked on the third try" a thing you can actually see.
+        """
+        original = self.services.runs.get(run_id)
+        if original is None:
+            raise SmartOpsError(f"Run not found: {run_id}", error_class=ErrorClass.PERMANENT)
+        if original.status is RunStatus.SUCCEEDED:
+            raise SmartOpsError(
+                "This run already succeeded, so there is nothing to try again. "
+                "Run the automation again if you want a fresh result.",
+                error_class=ErrorClass.PERMANENT,
+            )
+        if original.status not in TERMINAL_RUN_STATUSES:
+            raise SmartOpsError(
+                "This run has not finished yet. Wait for it, or let it fail, before trying again.",
+                error_class=ErrorClass.PERMANENT,
+            )
+
+        params = {**original.params, "retry_of": original.id}
+        retried = self.create_run(original.workflow_key, params=params, trigger=TriggerType.RETRY)
+        self.services.events.emit(
+            EventType.RUN_CREATED,
+            run_id=retried.id,
+            message="New attempt created after a failed run",
+            payload={"retry_of": original.id},
+        )
+        return retried
+
     def drive(self, run_id: str, *, max_cycles: int = 20) -> Run:
         """Resume the run until it finishes or starts waiting on a future time. For CLI use and scheduling."""
         run = self.execute(run_id)

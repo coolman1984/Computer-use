@@ -104,7 +104,14 @@ def _save_session(services, system_key: str) -> None:
 
     path = session_path(services.settings.storage.sessions_dir, system_key)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"cookies": [], "origins": []}), encoding="utf-8")
+    path.write_text(json.dumps({
+        # A session with a live cookie. Writing an empty storage_state here would
+        # be writing the very defect the platform now rejects: a file that exists
+        # but carries nothing that would get you through the door.
+        "cookies": [{"name": "sid", "value": "test-session", "domain": "example.local",
+                     "path": "/", "expires": 4102444800}],
+        "origins": [],
+    }), encoding="utf-8")
 
 
 def _record_check(services, system_key: str) -> None:
@@ -136,7 +143,12 @@ class _FakeBrowser:
         assert request.plan.get("actions"), "a replay must receive the recorded actions"
         target = Path(request.destination_dir) / "daily_sales.csv"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"date,amount\n2026-01-01,42\n")
+        # New figures on every run, as a real daily report has. Serving identical
+        # bytes would (correctly) trip the duplicate check, which exists because a
+        # source that has not refreshed is not a new result.
+        target.write_bytes(
+            f"date,amount\n2026-01-01,{42 + len(self.replayed_plans)}\n".encode()
+        )
         return ExtractionResult(
             ok=True,
             layer_used=ExtractionLayer.DOM,

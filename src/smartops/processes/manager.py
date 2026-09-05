@@ -13,8 +13,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..core.errors import ConfigurationError, PermanentError
-from ..domain.enums import EventType, ProcessStatus, RunStatus, Severity, TriggerType
+from ..core.errors import ConcurrencyError, ConfigurationError, PermanentError
+from ..domain.enums import (
+    TERMINAL_RUN_STATUSES,
+    EventType,
+    ProcessStatus,
+    RunStatus,
+    Severity,
+    TriggerType,
+)
 from ..domain.models import Process
 from ..recordings.converter import review_plan
 from ..workflows.profiles import validate_schedule
@@ -216,12 +223,36 @@ class ProcessManager:
                 "then approve it.",
                 details={"status": process.status.value, "next": _next_action(process)},
             )
+        active = self.active_run(process_id)
+        if active is not None:
+            # Two runs of one automation share a browser session and a target
+            # system, and can each half-download the same report. The scheduler
+            # already refused to stack them; an impatient second click on "Run it
+            # now" could, and produced exactly that.
+            raise ConcurrencyError(
+                "This automation is already running. Wait for it to finish before starting "
+                "it again.",
+                details={"run_id": active.id, "status": active.status.value},
+            )
         run = self.services.runner.create_run(
             "process.replay", params=process.to_run_params(), trigger=trigger
         )
         process.last_run_id = run.id
         self.services.processes.save(process)
         return run
+
+    def active_run(self, process_id: str, *, lookback: int = 200) -> Any | None:
+        """The unfinished run of this automation, if one exists.
+
+        One place answers "is it running", so the manual path and the scheduler
+        cannot disagree about it.
+        """
+        for run in self.services.runs.list(workflow_key="process.replay", limit=lookback):
+            if run.params.get("process_id") != process_id:
+                continue
+            if run.status not in TERMINAL_RUN_STATUSES:
+                return run
+        return None
 
     # ---------- scheduling ----------
 

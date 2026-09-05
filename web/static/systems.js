@@ -142,9 +142,14 @@ function signInCell(system) {
     ]);
   }
   if (!system.session_exists) {
+    const expired = system.session?.exists;
     return el("td", {}, [
-      badge("Not signed in", "red"),
-      el("div", { class: "muted hint" }, ["Sign in from the Sign-in page — one click, no terminal."]),
+      badge(expired ? "Sign-in expired" : "Not signed in", expired ? "orange" : "red"),
+      el("div", { class: "muted hint" }, [
+        expired
+          ? "The saved sign-in no longer works. Sign in again from the Sign-in page."
+          : "Sign in from the Sign-in page — one click, no terminal.",
+      ]),
     ]);
   }
   const hours = system.session_age_hours != null ? system.session_age_hours.toFixed(1) : "?";
