@@ -17,6 +17,8 @@ venv/
 /incidents/
 /config/system.yaml
 /config/systems/
+/work/
+*.egg-info/
 playwright-report/
 test-results/
 *.db
