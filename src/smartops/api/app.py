@@ -23,11 +23,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from ..adapters.notify.local import LocalLogNotifier
 from ..checks import check_system
-from ..core.errors import SmartOpsError
+from ..config import load_settings
+from ..core.errors import ConfigurationError, SmartOpsError
 from ..domain.enums import (
     EventType,
     IncidentStatus,
@@ -81,6 +82,16 @@ class DraftRequest(BaseModel):
     report_key: str = Field(default="", max_length=120)
 
 
+class DraftActionUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    locator_candidates: list[str] | None = None
+    inputs: dict[str, Any] | None = None
+    success: dict[str, Any] | None = None
+    wait_timeout_seconds: float | None = None
+    retry: dict[str, Any] | None = None
+
+
 class CredentialRequest(BaseModel):
     username: str = Field(min_length=1, max_length=256)
     password: SecretStr = Field(min_length=1, max_length=1024)
@@ -121,6 +132,16 @@ class ScheduleRequest(BaseModel):
 def create_app(services: Services | None = None) -> FastAPI:
     def provide() -> Services:
         return services or get_services()
+
+    configured = services.settings if services is not None else load_settings()
+    if (
+        os.getenv("SMARTOPS_DISABLE_WORKER") == "1"
+        and configured.safety.allow_development_features is not True
+    ):
+        raise ConfigurationError(
+            "Disabling the background worker is a development-only feature. "
+            "Enable safety.allow_development_features explicitly in an isolated test setup."
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -230,6 +251,17 @@ def create_app(services: Services | None = None) -> FastAPI:
 
     @app.post("/api/runs", status_code=201)
     def create_run(body: CreateRunRequest, svc: Services = Depends(provide)) -> dict[str, Any]:
+        if (
+            body.workflow in {"process.replay", "collect.report"}
+            and svc.settings.safety.allow_development_features is not True
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "This internal workflow cannot be started directly. Use the approved "
+                    "automation or report action in SmartOps."
+                ),
+            )
         try:
             run = svc.runner.create_run(
                 body.workflow, params=body.params, trigger=TriggerType.MANUAL
@@ -773,6 +805,27 @@ def create_app(services: Services | None = None) -> FastAPI:
             "review": plan.get("review"),
         }
 
+    @app.patch("/api/recordings/{recording_id}/draft/actions/{seq}")
+    def update_recording_action(
+        recording_id: str,
+        seq: int,
+        body: DraftActionUpdateRequest,
+        svc: Services = Depends(provide),
+    ) -> dict[str, Any]:
+        """Edit only the fields the review screen can change without inventing a step."""
+        try:
+            record, action = svc.recording_manager.update_draft_action(
+                recording_id, seq, body.model_dump(exclude_unset=True, exclude_none=True)
+            )
+        except SmartOpsError as exc:
+            raise _fail(exc) from exc
+        return {
+            "recording": record.to_dict(),
+            "action": action,
+            "review": record.automation_draft.get("review"),
+            "plan_summary": describe_plan(record.automation_draft),
+        }
+
     @app.get("/api/recordings/{recording_id}/artifacts/{name:path}")
     def recording_artifact(
         recording_id: str, name: str, svc: Services = Depends(provide)
@@ -925,7 +978,7 @@ def create_app(services: Services | None = None) -> FastAPI:
         _settle_owning_process(svc, driven)
         return driven
 
-    # ---------- YAML-defined report collection (unchanged path, now queued) ----------
+    # ---------- legacy direct collection (development-only) ----------
 
     @app.post("/api/systems/{system_key}/{report_key}/collect", status_code=201)
     def collect_now(
@@ -938,6 +991,14 @@ def create_app(services: Services | None = None) -> FastAPI:
             raise _blocked(exc) from exc
         except SmartOpsError as exc:
             raise _fail(exc, status=404) from exc
+        if svc.settings.safety.allow_development_features is not True:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Direct report collection bypasses recording approval and is disabled. "
+                    "Create, test, and approve a recorded process instead."
+                ),
+            )
         run = svc.runner.create_run("collect.report", params=params, trigger=TriggerType.MANUAL)
         return _queue_or_drive(svc, run).to_dict()
 
