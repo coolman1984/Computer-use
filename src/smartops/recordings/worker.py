@@ -465,7 +465,13 @@ class PlaywrightRecordingWorker:
     def _finish_download(self, item: tuple) -> None:
         download, page, page_url = item
         name = download.suggested_filename or f"download-{self._download_count + 1}"
-        target = self.artifact_dir / "downloads" / name
+        directory = self.artifact_dir / "downloads"
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / name
+        suffix = 2
+        while target.exists():
+            target = directory / f"{Path(name).stem}-{suffix}{Path(name).suffix}"
+            suffix += 1
         download.save_as(str(target))
         if not (target.exists() and target.stat().st_size > 0):
             return
@@ -475,8 +481,8 @@ class PlaywrightRecordingWorker:
             "action": "download",
             "target": {"page": self._page_name(page), "frame": ""},
             "locator": {},
-            "inputs": {"file_name": name},
-            "download_ref": f"downloads/{name}",
+            "inputs": {"file_name": target.name},
+            "download_ref": f"downloads/{target.name}",
             # A file arriving is its own proof; nothing else to check.
             "success": {"type": "download_started"},
             # Never repeat a download on its own: the click that caused it is the

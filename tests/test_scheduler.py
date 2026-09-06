@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,10 @@ def scheduled_services(services, tmp_path: Path):
 
     (tmp_path / "erp.yaml").write_text(SYSTEM_YAML, encoding="utf-8")
     services.systems = SystemRegistry.load(tmp_path)
+    services.settings = replace(
+        services.settings,
+        safety=replace(services.settings.safety, allow_development_features=True),
+    )
     return services
 
 

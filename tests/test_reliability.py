@@ -70,10 +70,14 @@ def _system(services, key="erp", mode="none"):
     )
 
 
-def _approved_process(services, key="erp"):
+def _approved_process(services, key="erp", *, safe_to_repeat: bool = False):
     record = services.recording_manager.create("Daily export", key)
-    services.recordings.save_step(RecordingStep(record.id, 1, "click", selector="#export",
-                                                page_url_redacted="https://erp.example.local/daily"))
+    services.recordings.save_step(RecordingStep(
+        record.id, 1, "click", selector="#export",
+        page_url_redacted="https://erp.example.local/daily",
+        retry={"max_attempts": 3 if safe_to_repeat else 1,
+               "safe_to_repeat": safe_to_repeat},
+    ))
     services.recordings.save_step(RecordingStep(record.id, 2, "download", download_ref="downloads/x.csv"))
     record.status = RecordingStatus.COMPLETED
     services.recordings.save(record)
@@ -279,7 +283,10 @@ def test_retrying_a_failed_run_makes_a_real_new_attempt(services) -> None:
     browser = Flaky()
     services.browser = browser
     _system(services)
-    process = _approved_process(services)
+    # This synthetic task only downloads a report and has no external side
+    # effect, so the fixture declares it repeatable. Unsafe plans are covered by
+    # the separate refusal test and must never reach this retry path.
+    process = _approved_process(services, safe_to_repeat=True)
 
     browser.failing = True
     failed = services.runner.drive(services.process_manager.run(process.id).id)
@@ -319,7 +326,7 @@ def test_a_run_left_running_by_a_crash_is_recovered(services) -> None:
     """
     services.browser = CountingBrowser()
     _system(services)
-    process = _approved_process(services)
+    process = _approved_process(services, safe_to_repeat=True)
     run = services.process_manager.run(process.id)
 
     # Simulate the crash: marked running, lock long expired, never finished.

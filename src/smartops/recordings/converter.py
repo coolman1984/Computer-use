@@ -85,6 +85,11 @@ def build_plan(
     for step in steps:
         action_kind = step.action or step.kind
         if action_kind == "download":
+            # The recording observed the file immediately after the preceding
+            # action. That observation is legitimate success evidence for the
+            # action which caused it; it is not a guessed selector or outcome.
+            if actions and (actions[-1].get("success") or {}).get("type", "none") == "none":
+                actions[-1]["success"] = {"type": "download_started"}
             continue
         actions.append(_action_from(step, seq=len(actions) + 1))
 
@@ -139,6 +144,7 @@ def _action_from(step: RecordingStep, *, seq: int) -> dict[str, Any]:
         "x_ratio": step.x_ratio,
         "y_ratio": step.y_ratio,
         "url": step.page_url_redacted,
+        "page_title": step.page_title,
         "label": step.target_text_redacted or step.selector or action_kind,
         "confidence": _LAYER_CONFIDENCE[layer],
     }
@@ -181,20 +187,20 @@ def review_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "using keyboard shortcuts."
         )
     if weak:
-        warnings.append(
-            f"{len(weak)} step(s) will be repeated by screen position because the page gave no "
-            "stable name for the element. They still work, but they are the first thing to "
-            "break if the site's layout changes."
+        problems.append(
+            f"{len(weak)} step(s) can only be found by screen position. That is not reliable "
+            "enough to approve. Add a real element selector in review, or record those steps again."
         )
 
-    # A step with no evidence of success is repeated blind: the platform will
-    # click and move on whether or not anything happened. Worth saying, but not
-    # worth blocking — many clicks genuinely have no single visible consequence.
+    # A step with no evidence of success is repeated blind. It cannot pass the
+    # review gate: the reviewer must add observable evidence or record the step
+    # again. A final file is not proof that every earlier filter/navigation step
+    # happened correctly.
     unproven = [a for a in actions if (a.get("success") or {}).get("type", "none") == "none"]
     if unproven:
-        warnings.append(
-            f"{len(unproven)} step(s) have no way to confirm they worked, so a run will move "
-            "past them even if the site did nothing. The final download is still checked."
+        problems.append(
+            f"{len(unproven)} step(s) have no proof of success. Add an observable result in "
+            "the review screen, or record those steps again; they cannot be approved as guesses."
         )
 
     return {

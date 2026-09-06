@@ -48,3 +48,6 @@ safety:
   allow_destructive_actions: false
   require_approval_for_sensitive_actions: true
   allow_recording_purge: false
+  # Keep false in normal use. This unlocks test-only modes such as recording
+  # without a visible browser and disabling the background worker.
+  allow_development_features: false

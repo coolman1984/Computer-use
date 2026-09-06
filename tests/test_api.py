@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -149,6 +151,10 @@ def test_collect_now_runs_workflow_with_wired_fake_browser(services, tmp_path) -
     services.systems = SystemRegistry.load(tmp_path)
     services.browser = FakeBrowser()
     services.validator = FakeValidator()
+    services.settings = replace(
+        services.settings,
+        safety=replace(services.settings.safety, allow_development_features=True),
+    )
     # The system signs in by session, and the platform refuses to collect
     # without one (see the gate test below), so stand a saved session up first.
     _save_fake_session(services, "erp_demo")
@@ -169,3 +175,12 @@ def test_collect_now_is_blocked_until_the_system_is_signed_in(client_with_system
     assert detail["details"]["blocked_stage"] == "signin"
     # A refusal is only useful if it says where to go next.
     assert detail["guidance"]["action"]["href"] == "credentials.html"
+
+
+def test_collect_now_is_disabled_outside_explicit_development_mode(client_with_system, services) -> None:
+    _save_fake_session(services, "erp_demo")
+
+    response = client_with_system.post("/api/systems/erp_demo/daily_sales/collect")
+
+    assert response.status_code == 403
+    assert "approve" in response.json()["detail"].lower()

@@ -9,6 +9,12 @@ from ..domain.enums import EventType, RecordingStatus, Severity
 from ..domain.models import Recording, RecordingStep
 from ..sessions import session_path
 from .converter import build_plan, review_plan
+
+_PROOF_TYPES = {
+    "selector_visible", "selector_hidden", "value_equals", "value_not_empty",
+    "checked_is", "url_changed", "new_page", "page_available", "download_started",
+}
+_NO_ELEMENT_ACTIONS = {"navigate", "switch_page", "switch_frame", "wait_for"}
 from .worker import PlaywrightRecordingWorker
 
 _ACTIVE = {RecordingStatus.STARTING, RecordingStatus.RECORDING, RecordingStatus.PAUSED, RecordingStatus.STOPPING}
@@ -126,6 +132,156 @@ class RecordingManager:
             plan["start_url"] = self._system_url(record.system_key)
         record.automation_draft={**plan, "review": review_plan(plan)}
         self.services.recordings.save(record); self._emit(EventType.RECORDING_DRAFT_CREATED, record, "Reviewable automation draft created"); return record
+
+    def update_draft_action(
+        self, recording_id: str, seq: int, changes: dict[str, Any]
+    ) -> tuple[Recording, dict[str, Any]]:
+        """Apply the small, safe edits offered by the review screen.
+
+        The action type and its page/frame are facts captured from the human
+        session, so this endpoint never invents or relocates them. A reviewer can
+        reorder real locator candidates, correct a non-secret input, choose
+        observable success evidence, and make retries stricter. Secret values
+        and an escalation from unsafe to repeatable are rejected in the backend.
+        """
+        record = self._required(recording_id)
+        if record.status is not RecordingStatus.COMPLETED:
+            raise PermanentError("Finish the recording before editing its review plan.")
+        plan = dict(record.automation_draft or {})
+        actions = [dict(item) for item in (plan.get("actions") or [])]
+        match = next((item for item in actions if int(item.get("seq", 0)) == seq), None)
+        if match is None:
+            raise PermanentError("The recorded step was not found. Build the plan again.")
+
+        allowed = {"locator_candidates", "inputs", "success", "wait_timeout_seconds", "retry"}
+        unknown = set(changes) - allowed
+        if unknown:
+            raise PermanentError(f"These review fields cannot be changed: {', '.join(sorted(unknown))}")
+        self._edit_locator(match, changes)
+        self._edit_inputs(match, changes)
+        self._edit_success(match, changes)
+        self._edit_wait(match, changes)
+        self._edit_retry(match, changes)
+
+        plan["actions"] = actions
+        plan["review"] = review_plan(plan)
+        record.automation_draft = plan
+        self.services.recordings.save(record)
+        self._emit(EventType.RECORDING_DRAFT_CREATED, record, f"Recorded step {seq} updated during review")
+        return record, match
+
+    @staticmethod
+    def _edit_locator(action: dict[str, Any], changes: dict[str, Any]) -> None:
+        if "locator_candidates" not in changes:
+            return
+        values = changes["locator_candidates"]
+        if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
+            raise PermanentError("Element locators must be a list of text selectors.")
+        cleaned: list[str] = []
+        for value in values:
+            value = value.strip()
+            if not value or value == "[redacted]" or len(value) > 500:
+                raise PermanentError("Each element locator must be a real, non-redacted selector.")
+            if value not in cleaned:
+                cleaned.append(value)
+        if not cleaned and (action.get("action") or "click") not in _NO_ELEMENT_ACTIONS:
+            raise PermanentError("This step needs at least one real way to find its element.")
+        action["locator"] = {
+            "strategy": "css",
+            "value": cleaned[0] if cleaned else "",
+            "fallbacks": cleaned[1:],
+        }
+        action["selector"] = action["locator"]["value"]
+        if cleaned:
+            action["layer"] = "dom"
+            action["confidence"] = "high"
+
+    @staticmethod
+    def _edit_inputs(action: dict[str, Any], changes: dict[str, Any]) -> None:
+        if "inputs" not in changes:
+            return
+        current = action.get("inputs") or {}
+        if current.get("secret_ref"):
+            raise PermanentError(
+                "Secret inputs are never editable or stored in a review plan. Update the saved credential instead."
+            )
+        supplied = changes["inputs"]
+        if not isinstance(supplied, dict):
+            raise PermanentError("Step inputs must be a structured value.")
+        kind = action.get("action") or "click"
+        allowed_by_kind = {
+            "fill": {"value"}, "select": {"value"}, "check": {"checked"},
+            "press": {"key"}, "navigate": {"url"}, "wait_for": {"seconds"},
+            "click": set(), "switch_page": set(), "switch_frame": set(),
+        }
+        allowed = allowed_by_kind.get(kind, set())
+        if set(supplied) - allowed:
+            raise PermanentError("That input does not belong to this kind of step.")
+        lowered = " ".join(supplied).lower()
+        if any(word in lowered for word in ("password", "passwd", "token", "secret", "otp", "cookie")):
+            raise PermanentError("Secrets cannot be stored inside an automation plan.")
+        if "seconds" in supplied:
+            seconds = float(supplied["seconds"])
+            if seconds < 0 or seconds > 300:
+                raise PermanentError("A wait must be between 0 and 300 seconds.")
+            supplied = {"seconds": seconds}
+        for value in supplied.values():
+            if isinstance(value, str) and len(value) > 2000:
+                raise PermanentError("A reviewed input is too long to store safely.")
+        action["inputs"] = dict(supplied)
+
+    @staticmethod
+    def _edit_success(action: dict[str, Any], changes: dict[str, Any]) -> None:
+        if "success" not in changes:
+            return
+        proof = changes["success"]
+        if not isinstance(proof, dict) or proof.get("type") not in _PROOF_TYPES:
+            raise PermanentError("Choose a supported, observable proof of success.")
+        kind = proof["type"]
+        if kind in {"selector_visible", "selector_hidden", "value_equals", "url_changed"}:
+            value = proof.get("value")
+            if not isinstance(value, str) or not value.strip() or len(value) > 1000:
+                raise PermanentError("This proof needs a real expected value or selector.")
+        action_kind = action.get("action") or "click"
+        inputs = action.get("inputs") or {}
+        if inputs.get("secret_ref") and kind != "value_not_empty":
+            raise PermanentError("A secret field can only be checked as filled; its value is never stored.")
+        if action_kind in {"fill", "select"} and not inputs.get("secret_ref"):
+            if kind != "value_equals" or proof.get("value") != inputs.get("value"):
+                raise PermanentError("A field must be proved by checking the same value entered into it.")
+        if action_kind == "check":
+            if kind != "checked_is" or bool(proof.get("value")) != bool(inputs.get("checked")):
+                raise PermanentError("A checkbox must be proved in the state selected for it.")
+        action["success"] = dict(proof)
+
+    @staticmethod
+    def _edit_wait(action: dict[str, Any], changes: dict[str, Any]) -> None:
+        if "wait_timeout_seconds" not in changes:
+            return
+        seconds = float(changes["wait_timeout_seconds"])
+        if seconds < 1 or seconds > 300:
+            raise PermanentError("The success wait must be between 1 and 300 seconds.")
+        action["wait_timeout_seconds"] = seconds
+
+    @staticmethod
+    def _edit_retry(action: dict[str, Any], changes: dict[str, Any]) -> None:
+        if "retry" not in changes:
+            return
+        supplied = changes["retry"]
+        if not isinstance(supplied, dict) or set(supplied) - {"max_attempts", "safe_to_repeat"}:
+            raise PermanentError("Retry settings are not valid.")
+        old_safe = bool((action.get("retry") or {}).get("safe_to_repeat", False))
+        new_safe = bool(supplied.get("safe_to_repeat", old_safe))
+        if new_safe and not old_safe:
+            raise PermanentError(
+                "A step recorded as unsafe cannot be made repeatable by editing. Record it again if that fact is wrong."
+            )
+        attempts = int(supplied.get("max_attempts", 1))
+        if attempts < 1 or attempts > 5:
+            raise PermanentError("Retry attempts must be between 1 and 5.")
+        if not new_safe and attempts != 1:
+            raise PermanentError("An unsafe step can have only one attempt.")
+        action["retry"] = {"max_attempts": attempts, "safe_to_repeat": new_safe}
     def recover(self, stale_seconds: int = 90) -> int:
         now=self.services.clock.now(); count=0
         for record in self.services.recordings.list(limit=1000):

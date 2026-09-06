@@ -87,12 +87,13 @@ way the change takes effect immediately, with no restart.
 This is the heart of the platform.
 
 1. You record the task once, in a real browser window.
-2. The captured clicks become a **plan** — an ordered list of steps, each pinned
-   to a stable name on the page where possible, and to a relative position on
-   screen where not. Never to absolute screen coordinates.
+2. The captured actions become a **plan** — an ordered list of typed values,
+   selections, keys, tabs, frames and clicks, each pinned to ordered element
+   selectors. A position-only step is visible in review but cannot be approved.
 3. The plan is **reviewed**: if a step could not be captured well enough to
    repeat, the platform says so and asks you to record again, rather than
-   letting you build an automation that would fail later.
+   letting you build an automation that would fail later. Safe fields can be
+   corrected in this screen; secrets are never displayed or accepted as values.
 4. A good plan becomes an **automation** — the thing that gets tested, approved,
    run and scheduled.
 
@@ -141,10 +142,12 @@ Python · FastAPI · Playwright · SQLite · DuckDB · Parquet · WebSocket
 
 ## Build status
 
-The journey is complete and tested end to end: a browser test walks all eleven
-stages in one session, and the replay engine has been driven against a real
-website — clicking through, downloading a file, validating it, and then running
-again on its own from a schedule with nobody present.
+The repository contains an end-to-end browser acceptance test for all eleven
+stages, plus restart and multi-file contract tests. The deterministic suite
+proves persistence, approval gates, two-file validation/history, scheduling and
+safe crash recovery. Browser acceptance still depends on a locally installed
+Chromium and has not been claimed from an environment where that binary is
+missing.
 
 **Not yet run against a real production system.** Everything is proven against
 local sites and controlled fakes. The first run against a real corporate portal

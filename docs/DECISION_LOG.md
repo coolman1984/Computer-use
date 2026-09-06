@@ -273,8 +273,8 @@ A click that lands on a dead button and a click that opens a report are
 indistinguishable until the page says which. Every step names its own evidence —
 an element appeared or vanished, a value took, a tab opened, a file started
 downloading, the page moved — and a step that cannot prove itself fails the run
-at that step, naming it. A step with no recorded evidence is allowed but flagged
-in review, because many clicks genuinely have no single visible consequence.
+at that step, naming it. A step with no recorded evidence blocks review and must
+be given observable evidence or recorded again; it is never approved as a guess.
 
 ## D047 — Downloads are collected at the context, and counted
 `expect_download` armed around one action could only ever return one file, so a
@@ -304,3 +304,31 @@ recorded steps do not exist and step one failed as "the element is no longer on
 the page" — reporting a change to the site that had never happened. The first
 captured page URL is the start; the system URL is only the fallback for a
 recording that never reached a real page.
+
+## D051 — Review edits facts; it never invents a recording
+The review screen shows every action's page, tab, frame, ordered selectors,
+non-secret input, success evidence, timeout, checkpoint, and retry safety. It may
+edit only selectors, non-secret inputs, evidence, timeout, and retry limits.
+Action type and browser scope stay immutable. A secret is never returned or
+accepted as a literal, and an unsafe action cannot be relabelled safe; either
+case requires a new recording or an updated credential.
+
+## D052 — `file_paths` is the result contract
+Extraction and replay hand the workflow a list even when one file arrives.
+Registration, validation, UI history, and Parquet history process every member.
+Recorded tasks also enforce their expected count at the workflow boundary, so a
+different browser adapter cannot turn a partial result into success. `file_path`
+and `file_id` remain output aliases only for old callers.
+
+## D053 — Development switches need a separate explicit permission
+Headless human recording, disabling the embedded worker, invoking internal
+workflows directly, and legacy YAML scheduling are refused unless
+`safety.allow_development_features` is explicitly true. These checks live in
+the service/API/scheduler boundaries, not in hidden buttons.
+
+## D054 — Interrupted unsafe work stops for review
+A failed or stranded replay containing an action that is not safe to repeat is
+never retried automatically. Because the browser replay is one engine step, a
+crash cannot prove whether that external effect happened before state was saved.
+The truthful recovery is therefore a failed run requiring human review, while a
+fully repeatable replay can still be re-queued.

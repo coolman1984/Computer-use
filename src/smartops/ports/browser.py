@@ -89,7 +89,7 @@ class ExtractionResult:
     def __post_init__(self) -> None:
         # Keep the singular and plural views of the files consistent whichever
         # one the caller filled in.
-        if self.file_paths and self.file_path is None:
+        if self.file_paths:
             self.file_path = self.file_paths[0]
         elif self.file_path is not None and not self.file_paths:
             self.file_paths = [self.file_path]

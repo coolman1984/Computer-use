@@ -1,9 +1,8 @@
-"""Schedule collect.report runs from the system definitions (F-08).
+"""Schedule approved recorded processes.
 
-No new schema: due-ness is computed from the last recorded run for each
-(system, report) pair, inside the existing runs table. The target scale is
-small (a handful of systems and reports), so filtering happens in Python
-instead of a SQL query over JSON1 — simpler, and enough for the current scale.
+Due-ness is computed from each approved Process and its last recorded run. The
+legacy YAML scheduler remains available only under the explicit development
+permission while installations migrate those definitions to reviewed Processes.
 """
 
 from __future__ import annotations
@@ -13,9 +12,11 @@ from datetime import datetime
 from typing import Any
 
 from .core.clock import Clock, SystemClock
+from .core.errors import ConcurrencyError
 from .domain.enums import TERMINAL_RUN_STATUSES, TriggerType
 from .domain.models import Process, Run
 from .workflows.profiles import ScheduleProfile
+from .recordings.converter import review_plan
 
 logger = logging.getLogger("smartops.scheduler")
 
@@ -41,7 +42,7 @@ def is_due(schedule: ScheduleProfile, last_run_at: datetime | None, now: datetim
 
 
 class Scheduler:
-    """Checks the system definitions on every tick and creates the due collect.report runs."""
+    """Creates due runs for approved processes, without overlapping prior work."""
 
     def __init__(self, services: Any, *, clock: Clock | None = None, lookback: int = 500) -> None:
         self.services = services
@@ -58,7 +59,12 @@ class Scheduler:
         """
         moment = now or self.clock.now()
         created: list[Run] = []
-        created.extend(self._tick_reports(moment))
+        # YAML report schedules predate the review/test/approval lifecycle. In
+        # ordinary use they would execute unattended without any approved
+        # process, so they remain available only to explicit development setups
+        # while installations migrate to recorded processes.
+        if self.services.settings.safety.allow_development_features is True:
+            created.extend(self._tick_reports(moment))
         created.extend(self._tick_processes(moment))
         return created
 
@@ -100,6 +106,12 @@ class Scheduler:
         return created
 
     def _maybe_create_process_run(self, process: Process, now: datetime) -> Run | None:
+        if not review_plan(process.plan or {})["ready"]:
+            logger.error(
+                "Approved automation %s uses an obsolete or unproven plan; schedule skipped",
+                process.id,
+            )
+            return None
         schedule = ScheduleProfile(
             daily_at=process.schedule_daily_at,
             every_seconds=process.schedule_every_seconds,
@@ -112,12 +124,13 @@ class Scheduler:
         last_run_at = process_runs[0].created_at if process_runs else None
         if not is_due(schedule, last_run_at, now):
             return None
-        run = self.services.runner.create_run(
-            "process.replay", params=process.to_run_params(), trigger=TriggerType.SCHEDULE
-        )
-        process.last_run_id = run.id
-        self.services.processes.save(process)
-        return run
+        # Use the same atomic launch gate as the manual Run button. A schedule
+        # tick and a user click can otherwise both pass their independent
+        # lookbacks and open the same automation twice.
+        try:
+            return self.services.process_manager.run(process.id, trigger=TriggerType.SCHEDULE)
+        except ConcurrencyError:
+            return None
 
     def _maybe_create_run(
         self, system_key: str, report_key: str, schedule: ScheduleProfile, now: datetime

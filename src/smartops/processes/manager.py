@@ -11,6 +11,7 @@ broken overnight automation.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from ..core.errors import ConcurrencyError, ConfigurationError, PermanentError
@@ -37,6 +38,18 @@ class ProcessManager:
 
     def __init__(self, services: Any) -> None:
         self.services = services
+        self._run_locks: dict[str, threading.Lock] = {}
+        self._run_locks_guard = threading.Lock()
+
+    def _run_lock(self, process_id: str) -> threading.Lock:
+        """One in-process critical section for a process launch.
+
+        Checking for an active run and inserting a new one must be one action;
+        two HTTP requests otherwise both observe "nothing active" and launch
+        the same browser task twice.
+        """
+        with self._run_locks_guard:
+            return self._run_locks.setdefault(process_id, threading.Lock())
 
     # ---------- creation ----------
 
@@ -134,6 +147,7 @@ class ProcessManager:
         process = self.require(process_id)
         if process.status is ProcessStatus.RETIRED:
             raise PermanentError("This automation is retired. Create a new one to replace it.")
+        self._require_ready_plan(process)
 
         run = self.services.runner.create_run(
             "process.replay", params=process.to_run_params(), trigger=TriggerType.MANUAL
@@ -184,6 +198,7 @@ class ProcessManager:
 
     def approve(self, process_id: str) -> Process:
         process = self.require(process_id)
+        self._require_ready_plan(process)
         if process.status is ProcessStatus.APPROVED:
             return process
         if process.status is not ProcessStatus.TESTED:
@@ -216,30 +231,38 @@ class ProcessManager:
 
     def run(self, process_id: str, *, trigger: TriggerType = TriggerType.MANUAL) -> Any:
         """Queue an approved automation. The worker executes it; this returns immediately."""
-        process = self.require(process_id)
-        if not process.is_runnable:
+        with self._run_lock(process_id):
+            process = self.require(process_id)
+            if not process.is_runnable:
+                raise PermanentError(
+                    "This automation is not approved yet, so it cannot be run. Test it first, "
+                    "then approve it.",
+                    details={"status": process.status.value, "next": _next_action(process)},
+                )
+            self._require_ready_plan(process)
+            active = self.active_run(process_id)
+            if active is not None:
+                raise ConcurrencyError(
+                    "This automation is already running. Wait for it to finish before starting "
+                    "it again.",
+                    details={"run_id": active.id, "status": active.status.value},
+                )
+            run = self.services.runner.create_run(
+                "process.replay", params=process.to_run_params(), trigger=trigger
+            )
+            process.last_run_id = run.id
+            self.services.processes.save(process)
+            return run
+
+    @staticmethod
+    def _require_ready_plan(process: Process) -> None:
+        """Re-check stored plans so approvals made under an older contract cannot bypass today."""
+        verdict = review_plan(process.plan or {})
+        if not verdict["ready"]:
             raise PermanentError(
-                "This automation is not approved yet, so it cannot be run. Test it first, "
-                "then approve it.",
-                details={"status": process.status.value, "next": _next_action(process)},
+                verdict["problems"][0],
+                details={"review": verdict, "next": "record_again"},
             )
-        active = self.active_run(process_id)
-        if active is not None:
-            # Two runs of one automation share a browser session and a target
-            # system, and can each half-download the same report. The scheduler
-            # already refused to stack them; an impatient second click on "Run it
-            # now" could, and produced exactly that.
-            raise ConcurrencyError(
-                "This automation is already running. Wait for it to finish before starting "
-                "it again.",
-                details={"run_id": active.id, "status": active.status.value},
-            )
-        run = self.services.runner.create_run(
-            "process.replay", params=process.to_run_params(), trigger=trigger
-        )
-        process.last_run_id = run.id
-        self.services.processes.save(process)
-        return run
 
     def active_run(self, process_id: str, *, lookback: int = 200) -> Any | None:
         """The unfinished run of this automation, if one exists.
@@ -271,6 +294,8 @@ class ProcessManager:
                 "Only an approved automation can be scheduled. Test it and approve it first.",
                 details={"status": process.status.value, "next": _next_action(process)},
             )
+        if enabled:
+            self._require_ready_plan(process)
         validate_schedule(
             daily_at=daily_at, every_seconds=every_seconds, context=f"automation {process.name}"
         )
