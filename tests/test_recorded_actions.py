@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 import pytest
@@ -120,17 +121,97 @@ def test_typing_into_a_field_is_recorded_as_a_value(recorded, site) -> None:
     assert "reference" in typed[0]["locator"]["value"]
 
 
+def test_a_recorded_click_reaches_the_live_monitor_before_stop(recorded, site, tmp_path) -> None:
+    """The webapp replaces the old separate recorder window, so its live
+    counter must receive browser events while the recording is still open.
+    """
+    from smartops.recordings.worker import PlaywrightRecordingWorker
+
+    ready = threading.Event()
+    seen = threading.Event()
+    finished = threading.Event()
+    failures: list[str] = []
+
+    def arm_delayed_human_click(page) -> None:
+        page.evaluate(
+            "setTimeout(() => document.querySelector('#prepare').click(), 100)"
+        )
+        ready.set()
+
+    def receive(step: dict) -> None:
+        if step.get("action") == "click":
+            seen.set()
+
+    def finish(error: str | None) -> None:
+        if error:
+            failures.append(error)
+        finished.set()
+
+    worker = PlaywrightRecordingWorker(
+        "live-monitor",
+        tmp_path / "live-monitor",
+        f"{site.base_url}/report.html",
+        receive,
+        lambda: None,
+        finish,
+        _chromium_path() or "",
+        None,
+        True,
+        arm_delayed_human_click,
+    )
+    worker.start()
+    assert ready.wait(10), "the recording browser did not become ready"
+    delivered_while_open = seen.wait(2)
+    worker.stop()
+    assert finished.wait(15), "the recording browser did not stop"
+    assert not failures
+    assert delivered_while_open, "the live monitor did not receive the click until stop"
+
+
 def test_a_password_is_recorded_as_a_reference_never_a_value(recorded, site) -> None:
     """A recording is stored in the database and shown on a review screen. A
     password captured into it would be a secret sitting in both.
     """
-    steps = _capture(recorded, site, lambda page: page.fill("#secret", "hunter2-not-a-real-password"))
+    # Deliberately avoid words such as "password" or "secret" in the value.
+    # A secret field must protect arbitrary text; keyword redaction is not a
+    # credential boundary.
+    secret_value = "CorrectHorse42!"
+    steps = _capture(recorded, site, lambda page: page.fill("#secret", secret_value))
 
     serialised = json.dumps(steps)
-    assert "hunter2" not in serialised, "the typed secret must never reach the recording"
+    assert secret_value not in serialised, "the typed secret must never reach the recording"
     secret_steps = [s for s in steps if s["action"] == "fill" and s["inputs"].get("secret_ref")]
     assert secret_steps, "a password field must be recorded as a reference to fill at run time"
     assert secret_steps[0]["inputs"].get("value") in (None, "")
+
+
+def test_a_login_username_is_recorded_as_a_reference_never_a_value(recorded, site) -> None:
+    """SSO user-name boxes are credentials too; recording the literal account
+    name would put company identity data into the draft and the coach context.
+    """
+    account_value = "operator-account-8842"
+
+    def type_username(page):
+        page.evaluate(
+            """() => {
+              const input = document.createElement('input');
+              input.id = 'userNameInput';
+              input.type = 'text';
+              document.body.prepend(input);
+            }"""
+        )
+        page.fill("#userNameInput", account_value)
+
+    steps = _capture(recorded, site, type_username)
+
+    serialised = json.dumps(steps)
+    assert account_value not in serialised, "the login username must never reach the recording"
+    username_steps = [
+        step for step in steps
+        if step["action"] == "fill" and step["inputs"].get("secret_field") == "username"
+    ]
+    assert username_steps, "a login username must be filled from the credential store at run time"
+    assert username_steps[0]["inputs"].get("value") in (None, "")
 
 
 def test_choosing_from_a_dropdown_is_recorded_as_a_selection(recorded, site) -> None:

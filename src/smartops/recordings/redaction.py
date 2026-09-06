@@ -10,10 +10,31 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 # substring even though nothing sensitive is there. \b still catches the
 # standalone words these fields actually care about ("password", "id=session").
 _SECRET = re.compile(r"\b(password|passwd|token|cookie|authorization|session|otp|secret|key)\b", re.I)
+_SELECTOR_SECRET_QUERY = re.compile(
+    r"[?&](?:password|passwd|token|cookie|authorization|session|otp|secret|key)=",
+    re.I,
+)
 
 def redact_text(value: str, limit: int = 160) -> str:
     if not value or _SECRET.search(value): return "[redacted]"
     return value[:limit]
+
+
+def redact_selector(value: str, limit: int = 8192) -> str:
+    """Keep generated CSS selectors intact while rejecting risky URL selectors.
+
+    A CSS selector is executable metadata, not display text. Cutting it at the
+    display-text limit can remove its closing quote/bracket and silently turn a
+    valid Nexacro selector into one that can never replay. The recorder only
+    builds selectors from element id/name/test-id/aria-label/href attributes;
+    it never includes the value typed into a field. Href selectors whose query
+    names look secret are rejected whole instead of being partly retained.
+    """
+    if not value:
+        return ""
+    if len(value) > limit or _SELECTOR_SECRET_QUERY.search(value):
+        return "[redacted]"
+    return value
 
 def redact_url(value: str) -> str:
     try:

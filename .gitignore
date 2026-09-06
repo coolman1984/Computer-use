@@ -15,6 +15,8 @@ venv/
 /logs/
 /scratch/
 /incidents/
+/config/system.yaml
+/config/systems/
 playwright-report/
 test-results/
 *.db

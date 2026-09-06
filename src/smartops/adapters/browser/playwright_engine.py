@@ -22,6 +22,8 @@ from ...credentials import CredentialStore
 from ...domain.enums import ExtractionLayer
 from ...ports.browser import ExtractionRequest, ExtractionResult, ReplayRequest
 from .replay import ReplaySession, StepFailed
+from .authentication import ensure_authenticated, prevent_debugger_pauses, session_expired
+from .session import open_browser_context
 from ...storage.paths import slug
 
 
@@ -45,12 +47,6 @@ class PlaywrightBrowserAdapter:
         self._credential_store = credential_store
         # Last failure evidence per (system, report) — used by capture_evidence.
         self._last_evidence: dict[str, dict[str, Any]] = {}
-
-    def _launch(self, playwright: Playwright):
-        kwargs: dict[str, Any] = {"headless": self._settings.headless}
-        if self._executable_path:
-            kwargs["executable_path"] = self._executable_path
-        return playwright.chromium.launch(**kwargs)
 
     def extract(self, request: ExtractionRequest) -> ExtractionResult:
         started = self._clock()
@@ -81,18 +77,15 @@ class PlaywrightBrowserAdapter:
 
         try:
             with sync_playwright() as playwright:
-                browser = self._launch(playwright)
+                session = open_browser_context(
+                    playwright,
+                    self._settings,
+                    executable_path=self._executable_path,
+                    accept_downloads=True,
+                    storage_state_path=request.session_state_path,
+                )
                 try:
-                    context_kwargs: dict[str, Any] = {
-                        "accept_downloads": True,
-                        "viewport": {
-                            "width": self._settings.viewport_width,
-                            "height": self._settings.viewport_height,
-                        },
-                    }
-                    if request.session_state_path and Path(request.session_state_path).exists():
-                        context_kwargs["storage_state"] = str(request.session_state_path)
-                    context = browser.new_context(**context_kwargs)
+                    context = session.context
                     context.set_default_timeout(request.timeout_seconds * 1000)
                     try:
                         context.tracing.start(screenshots=True, snapshots=True)
@@ -102,7 +95,7 @@ class PlaywrightBrowserAdapter:
                     self._finish_tracing(context, request, result)
                     return result
                 finally:
-                    browser.close()
+                    session.close()
         except PlaywrightTimeoutError as exc:
             return self._failure(request, ExtractionLayer.DOM, f"Timed out: {exc}", started)
         except Exception as exc:  # never fail silently on an unexpected error
@@ -187,82 +180,24 @@ class PlaywrightBrowserAdapter:
             return None
 
     def _session_expired(self, page, filters: dict[str, Any]) -> bool:
-        """Check for session-expiry signs after any goto: a visible login form, or a
-        post-login element that is missing."""
-        login_selector = filters.get("login_selector")
-        logged_in_selector = filters.get("logged_in_selector")
-        if login_selector and page.locator(login_selector).count() > 0:
-            return True
-        if logged_in_selector and page.locator(logged_in_selector).count() == 0:
-            return True
-        return False
+        return session_expired(page, filters)
 
     def _ensure_authenticated(
         self, context, page, request: ExtractionRequest, filters: dict[str, Any]
     ) -> str | None:
-        """Use the saved session first, then one credential-backed login attempt.
+        return ensure_authenticated(
+            context,
+            page,
+            system=request.system,
+            filters=filters,
+            credential_store=self._credential_store,
+            session_state_path=request.session_state_path,
+            pause_guard=self._prevent_debugger_pauses,
+        )
 
-        Tracing is stopped before any credential is entered. The password field is
-        cleared in every path before tracing/evidence can resume.
-        """
-        if not self._session_expired(page, filters):
-            return None
-        credential_ref = filters.get("credential_ref")
-        if not credential_ref:
-            return (
-                f"Session expired for {request.system}. "
-                f"Run: python -m smartops login {request.system}"
-            )
-        if self._credential_store is None:
-            return f"Secure credentials are unavailable for {request.system}."
-
-        try:
-            credential = self._credential_store.get(credential_ref)
-        except Exception:
-            return f"Secure credentials could not be read for {request.system}."
-        if credential is None:
-            return f"No secure credentials are stored for {request.system}."
-
-        try:
-            context.tracing.stop()
-        except Exception:
-            pass
-
-        password_field = None
-        try:
-            login_url = filters.get("login_url")
-            if login_url and not page.url.startswith(login_url):
-                page.goto(login_url, wait_until="networkidle")
-            page.locator(filters["username_selector"]).fill(credential.username)
-            password_field = page.locator(filters["password_selector"])
-            password_field.fill(credential.password)
-            page.locator(filters["submit_selector"]).click()
-
-            logged_in_selector = filters.get("logged_in_selector")
-            login_selector = filters.get("login_selector")
-            if logged_in_selector:
-                page.wait_for_selector(logged_in_selector, state="visible")
-            elif login_selector:
-                page.wait_for_selector(login_selector, state="hidden")
-            if self._session_expired(page, filters):
-                return f"Automatic login was rejected for {request.system}."
-
-            if request.session_state_path:
-                Path(request.session_state_path).parent.mkdir(parents=True, exist_ok=True)
-                context.storage_state(path=str(request.session_state_path))
-            return None
-        except Exception:
-            return f"Automatic login failed for {request.system}."
-        finally:
-            if password_field is not None:
-                try:
-                    password_field.fill("")
-                except Exception:
-                    pass
-            try:
-                context.tracing.start(screenshots=True, snapshots=True)
-            except Exception:
-                pass
+    @staticmethod
+    def _prevent_debugger_pauses(context, page) -> None:
+        prevent_debugger_pauses(context, page)
 
     def _extract_via_dom(
         self, context, request: ExtractionRequest, filters: dict[str, Any], started: float
@@ -379,18 +314,15 @@ class PlaywrightBrowserAdapter:
 
         try:
             with sync_playwright() as playwright:
-                browser = self._launch(playwright)
+                session = open_browser_context(
+                    playwright,
+                    self._settings,
+                    executable_path=self._executable_path,
+                    accept_downloads=True,
+                    storage_state_path=request.session_state_path,
+                )
                 try:
-                    context_kwargs: dict[str, Any] = {
-                        "accept_downloads": True,
-                        "viewport": {
-                            "width": self._settings.viewport_width,
-                            "height": self._settings.viewport_height,
-                        },
-                    }
-                    if request.session_state_path and Path(request.session_state_path).exists():
-                        context_kwargs["storage_state"] = str(request.session_state_path)
-                    context = browser.new_context(**context_kwargs)
+                    context = session.context
                     context.set_default_timeout(request.timeout_seconds * 1000)
                     try:
                         context.tracing.start(screenshots=True, snapshots=True)
@@ -400,7 +332,7 @@ class PlaywrightBrowserAdapter:
                     self._finish_tracing(context, self._as_extraction_request(request), result)
                     return result
                 finally:
-                    browser.close()
+                    session.close()
         except PlaywrightTimeoutError as exc:
             return self._replay_failure(request, f"Timed out while repeating the recording: {exc}", started)
         except Exception as exc:
@@ -484,6 +416,8 @@ class PlaywrightBrowserAdapter:
 
         if not session.downloads:
             message = "The recorded steps ran, but no file was downloaded."
+            if session.download_errors:
+                message += f" Saving it failed: {session.download_errors[-1]}"
             self._capture_failure_evidence(page, as_extraction, message)
             return self._replay_failure(request, message, started, step_results=session.step_results)
 

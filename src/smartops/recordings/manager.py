@@ -13,6 +13,7 @@ from .converter import build_plan, review_plan
 _PROOF_TYPES = {
     "selector_visible", "selector_hidden", "value_equals", "value_not_empty",
     "checked_is", "url_changed", "new_page", "page_available", "download_started",
+    "network_response",
 }
 _NO_ELEMENT_ACTIONS = {"navigate", "switch_page", "switch_frame", "wait_for"}
 from .worker import PlaywrightRecordingWorker
@@ -32,6 +33,7 @@ def _default_report_key(name: str) -> str:
 class RecordingManager:
     def __init__(self, services: Any) -> None:
         self.services, self.workers = services, {}
+        self._incomplete_stops: set[str] = set()
     def _emit(self, event: EventType, record: Recording, message: str, severity: Severity = Severity.INFO) -> None:
         self.services.events.emit(event, severity=severity, message=message, payload={"recording_id": record.id, "status": record.status.value})
     def create(self, name: str, system_key: str, parent: Recording | None = None) -> Recording:
@@ -47,8 +49,30 @@ class RecordingManager:
         other = self.services.recordings.active_for_system(record.system_key, record.id)
         if other: raise ConcurrencyError("Another recording is already active for this system")
         record.status, record.error_message, record.started_at = RecordingStatus.STARTING, None, self.services.clock.now(); self.services.recordings.save(record); self._emit(EventType.RECORDING_STARTED, record, "Opening Google Chrome for recording")
+        # Start the read-only coach first. It is advisory and asynchronous, so
+        # a missing CLI can never prevent the actual recorder from opening.
+        self.services.recording_coach.start(record.id)
         url = self._system_url(record.system_key)
-        worker = PlaywrightRecordingWorker(record.id, Path(record.artifact_dir), url, lambda item: self._step(record.id, item), lambda: self._heartbeat(record.id), lambda error: self._finished(record.id, error), self.services.settings.browser.executable_path, session_path(self.services.settings.storage.sessions_dir, record.system_key), self.services.settings.browser.record_headless)
+        system = self.services.systems.get(record.system_key)
+        auth_filters = (
+            system.reports[0].to_run_params(system.auth)["filters"]
+            if system.reports else {}
+        )
+        worker = PlaywrightRecordingWorker(
+            record.id,
+            Path(record.artifact_dir),
+            url,
+            lambda item: self._step(record.id, item),
+            lambda: self._heartbeat(record.id),
+            lambda error: self._finished(record.id, error),
+            self.services.settings.browser.executable_path,
+            session_path(self.services.settings.storage.sessions_dir, record.system_key),
+            self.services.settings.browser.record_headless,
+            system_key=record.system_key,
+            auth_filters=auth_filters,
+            credential_store=self.services.credentials,
+            browser_settings=self.services.settings.browser,
+        )
         self.workers[record.id] = worker
         try:
             worker.start()
@@ -84,6 +108,25 @@ class RecordingManager:
         record=self._required(recording_id)
         if record.status == RecordingStatus.COMPLETED: return record
         if record.status not in {RecordingStatus.RECORDING, RecordingStatus.PAUSED, RecordingStatus.STOPPING}: raise PermanentError("There is no active recording to stop")
+        if record.download_count < 1:
+            raise PermanentError(
+                "No download was detected. Keep recording until the file arrives, or stop as incomplete."
+            )
+        return self._stop_worker(record)
+
+    def stop_incomplete(self, recording_id: str) -> Recording:
+        """Stop capture without claiming that a downloadable workflow completed."""
+        record = self._required(recording_id)
+        if record.status not in {
+            RecordingStatus.RECORDING,
+            RecordingStatus.PAUSED,
+            RecordingStatus.STOPPING,
+        }:
+            raise PermanentError("There is no active recording to stop")
+        self._incomplete_stops.add(record.id)
+        return self._stop_worker(record)
+
+    def _stop_worker(self, record: Recording) -> Recording:
         record.status=RecordingStatus.STOPPING; self.services.recordings.save(record)
         worker=self.workers.get(record.id)
         if worker:
@@ -108,6 +151,85 @@ class RecordingManager:
     def restore(self, recording_id: str) -> Recording:
         record=self._required(recording_id)
         record.deleted_at=None; self.services.recordings.save(record); self._emit(EventType.RECORDING_RESTORED, record, "Recording restored"); return record
+
+    def scrub_legacy_credential_steps(self) -> int:
+        """Replace old login-username values captured before credential detection.
+
+        New recordings are protected in the page binding before a value crosses
+        into Python. This is only a compatibility cleanup for existing local
+        recordings. It never reads the saved Windows credential.
+        """
+        repaired_count = 0
+        for record in self.services.recordings.list(limit=1000):
+            repaired_steps: list[RecordingStep] = []
+            changed_sequences: set[int] = set()
+            for step in self.services.recordings.steps(record.id):
+                if not self._legacy_username_step(step):
+                    repaired_steps.append(step)
+                    continue
+                step.inputs = {"secret_ref": record.system_key, "secret_field": "username"}
+                step.success = {"type": "value_not_empty"}
+                step.target_text_redacted = "[redacted]"
+                self.services.recordings.save_step(step)
+                repaired_steps.append(step)
+                changed_sequences.add(step.seq)
+                repaired_count += 1
+
+            if not changed_sequences:
+                continue
+
+            plan = dict(record.automation_draft or {})
+            actions = [dict(item) for item in (plan.get("actions") or [])]
+            for action in actions:
+                if int(action.get("seq") or 0) not in changed_sequences:
+                    continue
+                action["inputs"] = {
+                    "secret_ref": record.system_key,
+                    "secret_field": "username",
+                }
+                action["success"] = {"type": "value_not_empty"}
+                action["label"] = "login username field"
+                action["target_text_redacted"] = "[redacted]"
+            if actions:
+                plan["actions"] = actions
+                plan["review"] = review_plan(plan)
+                record.automation_draft = plan
+                self.services.recordings.save(record)
+
+            steps_file = Path(record.artifact_dir) / "steps.jsonl"
+            if steps_file.exists():
+                with steps_file.open("w", encoding="utf-8") as output:
+                    for step in repaired_steps:
+                        output.write(json.dumps(step.to_dict(), ensure_ascii=False) + "\n")
+
+            self._emit(
+                EventType.RECORDING_SANITIZED,
+                record,
+                "Legacy login credential fields sanitized",
+            )
+        return repaired_count
+
+    @staticmethod
+    def _legacy_username_step(step: RecordingStep) -> bool:
+        if (step.action or step.kind) != "fill" or step.inputs.get("secret_ref"):
+            return False
+        locator = step.locator or {}
+        candidates = [step.selector, locator.get("value", ""), *(locator.get("fallbacks") or [])]
+        normalized = " ".join(
+            "".join(character.lower() for character in str(candidate) if character.isalnum())
+            for candidate in candidates
+        )
+        return any(
+            marker in normalized
+            for marker in (
+                "usernameinput",
+                "usernamefield",
+                "useridinput",
+                "loginidinput",
+                "loginnameinput",
+                "accountnameinput",
+            )
+        )
     def draft(self, recording_id: str, report_key: str = "") -> Recording:
         """Build the executable replay plan for a completed recording.
 
@@ -180,17 +302,21 @@ class RecordingManager:
         cleaned: list[str] = []
         for value in values:
             value = value.strip()
-            if not value or value == "[redacted]" or len(value) > 500:
+            if not value or value == "[redacted]" or len(value) > 8192:
                 raise PermanentError("Each element locator must be a real, non-redacted selector.")
             if value not in cleaned:
                 cleaned.append(value)
         if not cleaned and (action.get("action") or "click") not in _NO_ELEMENT_ACTIONS:
             raise PermanentError("This step needs at least one real way to find its element.")
+        previous_locator = action.get("locator") or {}
         action["locator"] = {
             "strategy": "css",
             "value": cleaned[0] if cleaned else "",
             "fallbacks": cleaned[1:],
         }
+        for key in ("position_mode", "element_x_ratio", "element_y_ratio"):
+            if key in previous_locator:
+                action["locator"][key] = previous_locator[key]
         action["selector"] = action["locator"]["value"]
         if cleaned:
             action["layer"] = "dom"
@@ -242,6 +368,19 @@ class RecordingManager:
             value = proof.get("value")
             if not isinstance(value, str) or not value.strip() or len(value) > 1000:
                 raise PermanentError("This proof needs a real expected value or selector.")
+        if kind == "network_response":
+            if set(proof) - {"type", "method", "path", "status"}:
+                raise PermanentError("A network proof may contain only method, path, and status.")
+            method = str(proof.get("method") or "").upper()
+            path = str(proof.get("path") or "")
+            status = int(proof.get("status") or 200)
+            if method not in {"GET", "POST"}:
+                raise PermanentError("A network proof needs GET or POST.")
+            if not path.startswith("/") or "?" in path or "#" in path or len(path) > 500:
+                raise PermanentError("A network proof needs a safe URL path without query data.")
+            if status < 100 or status > 599:
+                raise PermanentError("A network proof needs a valid HTTP status.")
+            proof = {"type": kind, "method": method, "path": path, "status": status}
         action_kind = action.get("action") or "click"
         inputs = action.get("inputs") or {}
         if inputs.get("secret_ref") and kind != "value_not_empty":
@@ -324,7 +463,18 @@ class RecordingManager:
     def _finished(self, recording_id: str, error: str | None) -> None:
         record=self.services.recordings.get(recording_id)
         if not record: return
-        record.status=RecordingStatus.FAILED if error else RecordingStatus.COMPLETED; record.error_message=error; record.finished_at=self.services.clock.now(); record.worker_pid=None; self.services.recordings.save(record)
+        incomplete = recording_id in self._incomplete_stops
+        if incomplete:
+            record.status = RecordingStatus.INTERRUPTED
+            record.error_message = "Stopped without a detected download; record again to create an automation"
+        else:
+            record.status = RecordingStatus.FAILED if error else RecordingStatus.COMPLETED
+            record.error_message = error
+        record.finished_at=self.services.clock.now(); record.worker_pid=None; self.services.recordings.save(record)
         Path(record.artifact_dir).mkdir(parents=True, exist_ok=True)
         (Path(record.artifact_dir)/"manifest.json").write_text(json.dumps(record.to_dict(), ensure_ascii=False),encoding="utf-8")
-        self._emit(EventType.RECORDING_FAILED if error else EventType.RECORDING_STOPPED, record, "Recording failed" if error else "Recording completed", Severity.ERROR if error else Severity.INFO); self.workers.pop(recording_id, None)
+        if incomplete:
+            self._emit(EventType.RECORDING_FAILED, record, "Recording stopped as incomplete", Severity.WARNING)
+        else:
+            self._emit(EventType.RECORDING_FAILED if error else EventType.RECORDING_STOPPED, record, "Recording failed" if error else "Recording completed", Severity.ERROR if error else Severity.INFO)
+        self._incomplete_stops.discard(recording_id); self.workers.pop(recording_id, None)

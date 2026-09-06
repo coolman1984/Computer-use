@@ -8,13 +8,13 @@
 
 const NAV = [
   ["overview", "Overview", "index.html", "⌂", null],
-  ["systems", "1 · Systems", "systems.html", "▤", "system"],
-  ["credentials", "2 · Sign-in", "credentials.html", "▣", "signin"],
-  ["recordings", "3 · Recordings", "recordings.html", "●", "recording"],
-  ["processes", "4 · Automations", "processes.html", "⚙", "approval"],
-  ["runs", "5 · Runs", "runs.html", "↗", "run"],
-  ["files", "6 · Results", "files.html", "□", "result"],
-  ["incidents", "7 · Issues", "incidents.html", "!", "monitor"],
+  ["systems", "Systems & reports", "systems.html", "▤", "system"],
+  ["credentials", "Sign-in", "credentials.html", "▣", "signin"],
+  ["recordings", "Record a task", "recordings.html", "●", "recording"],
+  ["processes", "Automations", "processes.html", "⚙", "approval"],
+  ["runs", "Runs", "runs.html", "↗", "run"],
+  ["files", "Results", "files.html", "□", "result"],
+  ["incidents", "Issues", "incidents.html", "!", "monitor"],
 ];
 
 function mountAppShell() {
@@ -162,6 +162,7 @@ const SmartOps = (() => {
     recording_resumed: "Recording resumed", recording_stopped: "Recording finished", recording_failed: "Recording failed",
     recording_deleted: "Recording moved to trash", recording_restored: "Recording restored",
     recording_draft_created: "Automation plan built",
+    recording_sanitized: "Legacy credential field protected",
     process_created: "Automation created", process_test_started: "Automation test started",
     process_tested: "Automation passed its test", process_test_failed: "Automation test failed",
     process_approved: "Automation approved", process_retired: "Automation retired",

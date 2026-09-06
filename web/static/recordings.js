@@ -1,4 +1,4 @@
-/* The recordings list: step 3's entry point.
+/* The recordings list: step 4's entry point.
 
    Only systems that are actually ready to record against are offered. The server
    refuses the rest anyway (connection test, then sign-in), but showing the
@@ -37,12 +37,12 @@ async function load() {
         action = link("Open", `recording.html?id=${encodeURIComponent(record.id)}`);
       }
       body.appendChild(el("tr", {}, [
-        el("td", {}, [el("strong", {}, [record.name]), el("div", { class: "muted hint" }, [`Version ${record.version}`])]),
-        el("td", {}, [record.system_key]),
-        el("td", {}, [statusBadge(RECORDING_STATUS_LABELS, record.status)]),
-        el("td", {}, [String(record.step_count)]),
-        el("td", {}, [formatDate(record.created_at)]),
-        el("td", {}, [action]),
+        el("td", { "data-label": "Task" }, [el("strong", {}, [record.name]), el("div", { class: "muted hint" }, [`Version ${record.version}`])]),
+        el("td", { "data-label": "System" }, [record.system_key]),
+        el("td", { "data-label": "Status" }, [statusBadge(RECORDING_STATUS_LABELS, record.status)]),
+        el("td", { "data-label": "Steps" }, [String(record.step_count)]),
+        el("td", { "data-label": "Recorded" }, [formatDate(record.created_at)]),
+        el("td", { "data-label": "Action" }, [action]),
       ]));
     }
   } catch (err) {
@@ -84,7 +84,7 @@ async function loadSystems() {
       select.appendChild(el("option", { value: system.key }, [`${system.name || system.key}`]));
     }
     if (!data.items.length) {
-      note.textContent = "No systems yet. Add one first on the Systems page.";
+      note.textContent = "No systems yet. Register one first on the Systems & reports page.";
     } else if (!ready.length) {
       const pending = data.items.filter(s => !s.connection_checked).map(s => s.name || s.key);
       note.textContent = pending.length

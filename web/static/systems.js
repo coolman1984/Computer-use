@@ -19,14 +19,21 @@ const reportsBox = document.getElementById("reports");
 function reportRow(report = {}) {
   const row = el("div", { class: "report-row" }, [
     el("div", { class: "field-row" }, [
-      el("label", {}, ["Short name", el("input", { class: "r-key", required: true, value: report.key || "", placeholder: "daily_sales" }, [])]),
-      el("label", {}, ["Title", el("input", { class: "r-title", value: report.title || "", placeholder: "Daily sales" }, [])]),
-      el("label", {}, ["Report page address", el("input", { class: "r-url", type: "url", required: true, value: report.url || "", placeholder: "https://intranet.example.com/reports/daily" }, [])]),
+      el("label", {}, ["Report name", el("input", { class: "r-title", value: report.title || "", placeholder: "Daily sales" }, [])]),
+      el("label", {}, ["Report ID", el("input", { class: "r-key", required: true, value: report.key || "", placeholder: "daily_sales" }, [])]),
+      el("label", {}, ["Report page", el("input", { class: "r-url", type: "url", required: true, value: report.url || "", placeholder: "https://intranet.example.com/reports/daily" }, [])]),
     ]),
-    el("div", { class: "field-row" }, [
-      el("label", {}, ["Download button", el("input", { class: "r-download", value: report.download_selector || "", placeholder: "#export-csv" }, [])]),
-      el("label", {}, ["…or direct file address", el("input", { class: "r-direct", value: report.direct_download_url || "", placeholder: "https://…/export.csv" }, [])]),
-      el("label", {}, ["Wait for (optional)", el("input", { class: "r-wait", value: report.wait_selector || "", placeholder: "#report-ready" }, [])]),
+    el("details", {
+      class: "advanced-settings",
+      open: Boolean(report.download_selector || report.direct_download_url || report.wait_selector),
+    }, [
+      el("summary", {}, ["Advanced direct-download settings (optional)"]),
+      el("p", { class: "muted" }, ["Leave these blank when you will teach the task by recording it."]),
+      el("div", { class: "field-row" }, [
+        el("label", {}, ["Download button locator", el("input", { class: "r-download", value: report.download_selector || "", placeholder: "#export-csv" }, [])]),
+        el("label", {}, ["Direct file address", el("input", { class: "r-direct", type: "url", value: report.direct_download_url || "", placeholder: "https://…/export.csv" }, [])]),
+        el("label", {}, ["Wait until this appears", el("input", { class: "r-wait", value: report.wait_selector || "", placeholder: "#report-ready" }, [])]),
+      ]),
     ]),
   ]);
   const remove = el("button", { type: "button", class: "secondary small" }, ["Remove this report"]);
@@ -54,6 +61,22 @@ function readReports() {
 /* ---------- the form ---------- */
 
 let editingKey = null;
+let keyWasEdited = false;
+
+function systemId(value) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
+}
+
+document.getElementById("name").addEventListener("input", (event) => {
+  if (editingKey || keyWasEdited) return;
+  document.getElementById("key").value = systemId(event.target.value);
+});
+document.getElementById("key").addEventListener("input", () => { keyWasEdited = true; });
 
 function setAuthVisibility() {
   const mode = document.getElementById("auth-mode").value;
@@ -66,9 +89,11 @@ document.getElementById("add-report").addEventListener("click", () => reportsBox
 
 function resetForm() {
   editingKey = null;
+  keyWasEdited = false;
   form.reset();
   document.getElementById("key").disabled = false;
-  document.getElementById("form-title").textContent = "Add a system";
+  document.getElementById("form-title").textContent = "Register a system";
+  form.querySelector("button[type=submit]").textContent = "Register system";
   document.getElementById("cancel-edit").hidden = true;
   document.getElementById("form-hint").textContent = "";
   reportsBox.innerHTML = "";
@@ -78,6 +103,7 @@ function resetForm() {
 
 function fillForm(system) {
   editingKey = system.key;
+  keyWasEdited = true;
   document.getElementById("key").value = system.key;
   // The key names the folders files land in, so changing it would orphan
   // everything already collected. Editing creates a new system instead.
@@ -87,11 +113,18 @@ function fillForm(system) {
   document.getElementById("login-url").value = system.login_url || "";
   document.getElementById("logged-in-selector").value = system.logged_in_selector || "";
   document.getElementById("login-selector").value = system.login_selector || "";
+  document.getElementById("username-selector").value = system.username_selector || "";
+  document.getElementById("password-selector").value = system.password_selector || "";
+  document.getElementById("submit-selector").value = system.submit_selector || "";
+  document.getElementById("language-selector").value = system.language_selector || "";
+  document.getElementById("popup-trigger-selector").value = system.popup_trigger_selector || "";
+  document.getElementById("notice-close-selector").value = system.notice_close_selector || "";
   reportsBox.innerHTML = "";
   for (const report of system.reports.length ? system.reports : [{}]) reportsBox.appendChild(reportRow(report));
   setAuthVisibility();
   document.getElementById("form-title").textContent = `Edit ${system.name || system.key}`;
   document.getElementById("cancel-edit").hidden = false;
+  form.querySelector("button[type=submit]").textContent = "Save changes";
   document.getElementById("form-title").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -113,6 +146,9 @@ form.addEventListener("submit", async (event) => {
     auth.username_selector = document.getElementById("username-selector").value.trim();
     auth.password_selector = document.getElementById("password-selector").value.trim();
     auth.submit_selector = document.getElementById("submit-selector").value.trim();
+    auth.language_selector = document.getElementById("language-selector").value.trim();
+    auth.popup_trigger_selector = document.getElementById("popup-trigger-selector").value.trim();
+    auth.notice_close_selector = document.getElementById("notice-close-selector").value.trim();
   }
   const payload = { key, name: document.getElementById("name").value.trim() || key, auth, reports: readReports() };
 
@@ -134,16 +170,16 @@ form.addEventListener("submit", async (event) => {
 /* ---------- the list ---------- */
 
 function signInCell(system) {
-  if (system.auth_mode === "none") return el("td", {}, [badge("Not needed", "gray")]);
+  if (system.auth_mode === "none") return el("td", { "data-label": "Sign-in" }, [badge("Not needed", "gray")]);
   if (system.auth_mode === "unattended") {
-    return el("td", {}, [
+    return el("td", { "data-label": "Sign-in" }, [
       badge("Username & password", "blue"),
       el("div", { class: "muted hint" }, ["Save the password once on the Sign-in page."]),
     ]);
   }
   if (!system.session_exists) {
     const expired = system.session?.exists;
-    return el("td", {}, [
+    return el("td", { "data-label": "Sign-in" }, [
       badge(expired ? "Sign-in expired" : "Not signed in", expired ? "orange" : "red"),
       el("div", { class: "muted hint" }, [
         expired
@@ -153,14 +189,14 @@ function signInCell(system) {
     ]);
   }
   const hours = system.session_age_hours != null ? system.session_age_hours.toFixed(1) : "?";
-  return el("td", {}, [
+  return el("td", { "data-label": "Sign-in" }, [
     badge("Signed in", "green"),
     el("div", { class: "muted hint" }, [`Saved ${hours} hours ago.`]),
   ]);
 }
 
 function connectionCell(system, onTested) {
-  const cell = el("td", {}, []);
+  const cell = el("td", { "data-label": "Connection" }, []);
   const check = system.connection_check;
   cell.appendChild(check ? badge("Tested", "green") : badge("Not tested", "yellow"));
   if (check?.summary) cell.appendChild(el("div", { class: "muted hint" }, [check.summary]));
@@ -204,7 +240,7 @@ function actionsCell(system) {
       showError(errorBox, err);
     }
   });
-  return el("td", { class: "actions" }, [edit, remove]);
+  return el("td", { class: "actions", "data-label": "Actions" }, [edit, remove]);
 }
 
 async function load() {
@@ -223,13 +259,13 @@ async function load() {
     }
     for (const system of data.items) {
       body.appendChild(el("tr", {}, [
-        el("td", {}, [
+        el("td", { "data-label": "System" }, [
           el("strong", {}, [system.name || system.key]),
           el("div", { class: "muted hint" }, [`${system.reports.length} report(s)`]),
         ]),
         signInCell(system),
         connectionCell(system, load),
-        el("td", {}, [
+        el("td", { "data-label": "Reports" }, [
           el("ul", { class: "plain-list" }, system.reports.map(r => el("li", {}, [r.title || r.key]))),
         ]),
         actionsCell(system),

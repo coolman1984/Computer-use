@@ -240,7 +240,8 @@ def _describe_action(action: dict[str, Any]) -> str:
 
     if kind == "fill":
         if inputs.get("secret_ref"):
-            body = f"Type the saved password into {label}"
+            credential_field = inputs.get("secret_field") or "credential"
+            body = f"Type the saved {credential_field} into {label}"
         else:
             body = f"Type \"{inputs.get('value', '')}\" into {label}"
     elif kind == "select":
@@ -289,5 +290,6 @@ def _describe_proof(action: dict[str, Any]) -> str:
         "new_page": ", and check a new tab opened",
         "page_available": "",
         "download_started": ", and check a file starts downloading",
+        "network_response": ", and check the report service responds successfully",
         "none": "",
     }.get(kind, "")

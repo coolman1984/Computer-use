@@ -56,6 +56,11 @@ Send:
 - The tests required.
 - The permission boundaries.
 
+The Recording Coach is a deliberately narrower exception. It receives generic
+action structure only. It must not receive page addresses, selectors, page
+text, screenshots, response bodies, cookies, credentials, downloaded files, or
+recording artifacts. It runs analyze-only and cannot block the recorder.
+
 ## Agent log
 
 For every agent run:

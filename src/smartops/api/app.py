@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..adapters.notify.local import LocalLogNotifier
 from ..checks import check_system
@@ -90,11 +90,6 @@ class DraftActionUpdateRequest(BaseModel):
     success: dict[str, Any] | None = None
     wait_timeout_seconds: float | None = None
     retry: dict[str, Any] | None = None
-
-
-class CredentialRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=256)
-    password: SecretStr = Field(min_length=1, max_length=1024)
 
 
 class SystemRequest(BaseModel):
@@ -412,6 +407,12 @@ def create_app(services: Services | None = None) -> FastAPI:
             "login_url": system.auth.login_url,
             "logged_in_selector": system.auth.logged_in_selector,
             "login_selector": system.auth.login_selector,
+            "username_selector": system.auth.username_selector,
+            "password_selector": system.auth.password_selector,
+            "submit_selector": system.auth.submit_selector,
+            "language_selector": system.auth.language_selector,
+            "popup_trigger_selector": system.auth.popup_trigger_selector,
+            "notice_close_selector": system.auth.notice_close_selector,
             # "signed in" means the saved session is actually usable; a file
             # that exists but carries nothing live is not being signed in.
             "session_exists": (
@@ -643,6 +644,42 @@ def create_app(services: Services | None = None) -> FastAPI:
             )
         return {"items": items}
 
+    @app.post("/api/credentials/{system_key}/prompt")
+    def start_credential_prompt(
+        system_key: str, request: Request, svc: Services = Depends(provide)
+    ) -> dict[str, Any]:
+        """Open the isolated Windows credential window; no password crosses HTTP."""
+        _require_local_ui(request)
+        system = _credential_system(system_key, svc)
+        if system.auth.mode != "unattended":
+            raise HTTPException(
+                status_code=400, detail="System authentication mode must be unattended."
+            )
+        manager = getattr(svc, "credential_prompts", None)
+        if manager is None:
+            raise HTTPException(status_code=503, detail="Secure Windows prompting is unavailable.")
+        return manager.start(system_key).to_dict()
+
+    @app.get("/api/credentials/{system_key}/prompt")
+    def credential_prompt_status(
+        system_key: str, svc: Services = Depends(provide)
+    ) -> dict[str, Any]:
+        _credential_system(system_key, svc)
+        manager = getattr(svc, "credential_prompts", None)
+        if manager is None:
+            raise HTTPException(status_code=503, detail="Secure Windows prompting is unavailable.")
+        prompt = manager.status(system_key)
+        if prompt is None:
+            return {
+                "system_key": system_key,
+                "status": "idle",
+                "message": "The secure credential window is closed.",
+                "active": False,
+                "saved": False,
+                "error": None,
+            }
+        return prompt.to_dict()
+
     def _credential_system(system_key: str, svc: Services):
         try:
             return svc.systems.get(system_key)
@@ -656,31 +693,6 @@ def create_app(services: Services | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=403, detail="Credential changes must come from the SmartOps UI."
             )
-
-    @app.put("/api/credentials/{system_key}")
-    def save_credential(
-        system_key: str,
-        body: CredentialRequest,
-        request: Request,
-        svc: Services = Depends(provide),
-    ) -> dict[str, Any]:
-        _require_local_ui(request)
-        system = _credential_system(system_key, svc)
-        if system.auth.mode != "unattended":
-            raise HTTPException(
-                status_code=400, detail="System authentication mode must be unattended."
-            )
-        ref = system.auth.credential_ref or system.key
-        try:
-            svc.credentials.put(ref, body.username, body.password.get_secret_value())
-        except (ValueError, OSError, RuntimeError) as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return {
-            "system_key": system_key,
-            "credential_ref": ref,
-            "stored": True,
-            "username": body.username,
-        }
 
     @app.delete("/api/credentials/{system_key}")
     def delete_credential(
@@ -740,6 +752,11 @@ def create_app(services: Services | None = None) -> FastAPI:
         return {
             "recording": record.to_dict(),
             "steps": [s.to_dict() for s in svc.recordings.steps(recording_id)],
+            "coach": (
+                svc.recording_coach.status(recording_id).to_dict()
+                if svc.recording_coach.status(recording_id)
+                else None
+            ),
             # The plan in plain sentences, plus the verdict on whether it is fit
             # to become an automation. This is stage 5 (review) in one payload.
             "plan_summary": describe_plan(plan) if plan.get("actions") else [],
@@ -772,6 +789,12 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.post("/api/recordings/{recording_id}/stop")
     def stop_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
         return _recording_control("stop", recording_id, svc)
+
+    @app.post("/api/recordings/{recording_id}/stop-incomplete")
+    def stop_incomplete_recording(
+        recording_id: str, svc: Services = Depends(provide)
+    ) -> dict[str, Any]:
+        return _recording_control("stop_incomplete", recording_id, svc)
 
     @app.post("/api/recordings/{recording_id}/rerecord")
     def rerecord(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:

@@ -91,14 +91,17 @@ def test_missing_system_key_raises_clear_error() -> None:
         parse_system_profile(raw)
 
 
-def test_report_without_selector_or_direct_url_raises_clear_error() -> None:
+def test_report_can_be_registered_before_its_download_action_is_recorded() -> None:
     import yaml
 
     raw = yaml.safe_load(VALID_YAML)
     raw["reports"][0].pop("download_selector")
 
-    with pytest.raises(ConfigurationError, match="download_selector"):
-        parse_system_profile(raw)
+    profile = parse_system_profile(raw)
+
+    report = profile.reports[0]
+    assert report.download_selector == ""
+    assert report.direct_download_url == ""
 
 
 def test_report_missing_url_raises_clear_error() -> None:
@@ -337,6 +340,29 @@ def test_unattended_auth_requires_selectors_and_passes_only_references() -> None
     assert filters["credential_ref"] == "mes-prod"
     assert filters["login_url"].endswith("/login")
     assert filters["password_selector"] == "#password"
+
+
+def test_unattended_popup_auth_carries_the_reusable_login_sequence() -> None:
+    import yaml
+
+    raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
+    raw["auth"].update({
+        "mode": "unattended",
+        "credential_ref": "mes-prod",
+        "language_selector": "#english",
+        "popup_trigger_selector": "#sso",
+        "username_selector": "#userNameInput",
+        "password_selector": "#passwordInput",
+        "submit_selector": "#submitButton",
+        "notice_close_selector": "#close-notice",
+    })
+
+    profile = parse_system_profile(raw)
+    filters = profile.to_run_params("daily_sales")["filters"]
+
+    assert filters["language_selector"] == "#english"
+    assert filters["popup_trigger_selector"] == "#sso"
+    assert filters["notice_close_selector"] == "#close-notice"
 
 
 def test_iter_scheduled_returns_only_active_pairs(tmp_path: Path) -> None:

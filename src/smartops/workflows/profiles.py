@@ -49,6 +49,9 @@ class AuthProfile:
     username_selector: str = ""
     password_selector: str = ""
     submit_selector: str = ""
+    language_selector: str = ""
+    popup_trigger_selector: str = ""
+    notice_close_selector: str = ""
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,12 @@ class ReportProfile:
                 filters["username_selector"] = auth.username_selector
                 filters["password_selector"] = auth.password_selector
                 filters["submit_selector"] = auth.submit_selector
+                if auth.language_selector:
+                    filters["language_selector"] = auth.language_selector
+                if auth.popup_trigger_selector:
+                    filters["popup_trigger_selector"] = auth.popup_trigger_selector
+                if auth.notice_close_selector:
+                    filters["notice_close_selector"] = auth.notice_close_selector
         params: dict[str, Any] = {
             "report": self.key,
             "period": self.period,
@@ -180,6 +189,9 @@ def _parse_auth(raw: dict[str, Any], *, system_key: str) -> AuthProfile:
     username_selector = raw.get("username_selector", "") or ""
     password_selector = raw.get("password_selector", "") or ""
     submit_selector = raw.get("submit_selector", "") or ""
+    language_selector = raw.get("language_selector", "") or ""
+    popup_trigger_selector = raw.get("popup_trigger_selector", "") or ""
+    notice_close_selector = raw.get("notice_close_selector", "") or ""
     logged_in_selector = raw.get("logged_in_selector", "") or ""
     login_selector = raw.get("login_selector", "") or ""
     if mode == "unattended" and not all((username_selector, password_selector, submit_selector)):
@@ -187,7 +199,9 @@ def _parse_auth(raw: dict[str, Any], *, system_key: str) -> AuthProfile:
             f"unattended auth needs username_selector, password_selector, and submit_selector ({system_key})",
             details={"system": system_key},
         )
-    if mode == "unattended" and not (logged_in_selector or login_selector):
+    if mode == "unattended" and not (
+        logged_in_selector or login_selector or popup_trigger_selector
+    ):
         raise ConfigurationError(
             f"unattended auth needs a login success check ({system_key})",
             details={"system": system_key},
@@ -201,6 +215,9 @@ def _parse_auth(raw: dict[str, Any], *, system_key: str) -> AuthProfile:
         username_selector=username_selector,
         password_selector=password_selector,
         submit_selector=submit_selector,
+        language_selector=language_selector,
+        popup_trigger_selector=popup_trigger_selector,
+        notice_close_selector=notice_close_selector,
     )
 
 
@@ -252,11 +269,11 @@ def _parse_report(raw: Any, *, system_key: str) -> ReportProfile:
     url = _require(raw, "url", context=context)
     download_selector = raw.get("download_selector", "") or ""
     direct_download_url = raw.get("direct_download_url", "") or ""
-    if not download_selector and not direct_download_url:
-        raise ConfigurationError(
-            f"Either download_selector or direct_download_url is required in {context}",
-            details={"system": system_key, "report": key},
-        )
+    # A report page may be registered before its browser task is recorded.
+    # Direct-download details are an optional fast path for legacy/development
+    # collection; the normal production journey learns the download action from
+    # a reviewed recording. Requiring a CSS selector here forced non-technical
+    # users to understand implementation details before they could teach a task.
     return ReportProfile(
         key=key,
         title=raw.get("title", key),
@@ -326,6 +343,9 @@ def system_to_yaml_dict(profile: SystemProfile) -> dict[str, Any]:
         "username_selector",
         "password_selector",
         "submit_selector",
+        "language_selector",
+        "popup_trigger_selector",
+        "notice_close_selector",
     ):
         value = getattr(profile.auth, field_name)
         if value:

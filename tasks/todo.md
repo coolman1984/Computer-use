@@ -18,6 +18,17 @@
 - [x] T13 — Add backup, recovery, retention, and operational runbook.
 - [ ] Checkpoint D — Controlled daily use is approved.
 
+## Approved unattended extension
+
+- [ ] T14 — Isolated Windows credential prompt and web status flow.
+- [x] T15 — Reusable popup-SSO login plan with bounded retry.
+- [ ] T16 — Username and password references during recording/replay.
+- [ ] Checkpoint E — Secure unattended foundation works end to end.
+- [x] T17 — Analyze-only CLI Recording Coach lifecycle.
+- [ ] T18 — Guided live Recording page with proof and download detection.
+- [ ] T19 — Controlled unattended G-MES pilot and schedule.
+- [ ] Checkpoint F — Guided recording and production pilot complete.
+
 ## Per-Task Completion Gate
 
 - [ ] Targeted tests pass.

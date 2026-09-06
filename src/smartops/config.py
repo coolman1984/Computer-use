@@ -56,6 +56,23 @@ class BrowserSettings:
     # Chrome install (or setting SMARTOPS_BROWSER_PATH) avoids a separate
     # download step the user would otherwise have to do from a terminal.
     executable_path: str = ""
+    # Corporate browser integrations can depend on policy-installed extensions
+    # and other profile state that an isolated, throw-away Playwright profile
+    # does not contain.  When this is set, every browser operation uses one
+    # dedicated persistent Chrome user-data directory.  It must live outside
+    # the repository because it contains cookies and company browser state.
+    user_data_dir: str = ""
+    # Chrome profile folder inside ``user_data_dir``.  Samsung corporate
+    # automation uses Profile 19; the user-facing Chrome profile is never
+    # opened directly, which avoids lock conflicts and profile corruption.
+    profile_directory: str = ""
+    # Playwright normally starts Chrome with extensions disabled.  Corporate
+    # SSO profiles need policy-installed extensions, so this is opt-in.
+    enable_extensions: bool = False
+    # Existing unpacked extension folders to load into the dedicated profile.
+    # Each entry may be either a version folder containing manifest.json or a
+    # stable extension-id folder whose newest installed version is selected.
+    extension_paths: tuple[str, ...] = ()
     # Recording is headed by definition: a person has to see the window they are
     # working in. This exists so the capture path can be exercised automatically
     # on a machine with no screen — without it, the only way to check that
@@ -175,6 +192,27 @@ def load_settings(path: Path | str | None = None) -> Settings:
         max_concurrency=int(browser_raw.get("max_concurrency", 4)),
         executable_path=os.getenv(
             "SMARTOPS_BROWSER_PATH", browser_raw.get("executable_path", "") or ""
+        ),
+        user_data_dir=os.path.expandvars(
+            os.getenv(
+                "SMARTOPS_BROWSER_USER_DATA_DIR",
+                browser_raw.get("user_data_dir", "") or "",
+            )
+        ),
+        profile_directory=os.getenv(
+            "SMARTOPS_BROWSER_PROFILE_DIRECTORY",
+            browser_raw.get("profile_directory", "") or "",
+        ),
+        enable_extensions=(
+            os.getenv(
+                "SMARTOPS_BROWSER_ENABLE_EXTENSIONS",
+                "1" if browser_raw.get("enable_extensions") else "",
+            )
+            == "1"
+        ),
+        extension_paths=tuple(
+            os.path.expandvars(str(value))
+            for value in (browser_raw.get("extension_paths") or [])
         ),
         record_headless=(
             os.getenv("SMARTOPS_RECORD_HEADLESS", "1" if browser_raw.get("record_headless") else "")

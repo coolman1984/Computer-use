@@ -1,7 +1,9 @@
 from __future__ import annotations
 from fastapi.testclient import TestClient
+import pytest
 from smartops.api.app import create_app
 from smartops.checks import ConnectionCheck
+from smartops.core.errors import PermanentError
 from smartops.domain.enums import RecordingStatus
 
 
@@ -83,3 +85,24 @@ def test_recording_plan_prefers_a_selector_then_a_relative_click(services) -> No
     assert [a["layer"] for a in plan["actions"]] == ["manual", "dom", "visual"]
     # An unreplayable step blocks the plan from becoming an automation.
     assert plan["review"]["ready"] is False
+
+
+def test_recording_cannot_be_marked_complete_without_a_download(services) -> None:
+    _ready_system(services)
+    manager = services.recording_manager
+    record = manager.create("download report", "local")
+    record.status = RecordingStatus.RECORDING
+    services.recordings.save(record)
+
+    class FakeWorker:
+        def stop(self):
+            manager._finished(record.id, None)
+
+    manager.workers[record.id] = FakeWorker()
+
+    with pytest.raises(PermanentError, match="download"):
+        manager.stop(record.id)
+
+    settled = manager.stop_incomplete(record.id)
+    assert settled.status is RecordingStatus.INTERRUPTED
+    assert "without a detected download" in (settled.error_message or "")

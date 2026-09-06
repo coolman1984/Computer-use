@@ -7,7 +7,7 @@
    button when they are done. */
 
 const {
-  getJSON, postJSON, putJSON, deleteJSON, badge, showError, clearError, showNotice,
+  getJSON, postJSON, deleteJSON, badge, showError, clearError, showNotice,
   el, paintShell,
 } = SmartOps;
 
@@ -17,6 +17,7 @@ const rowsBody = document.getElementById("signin-rows");
 // Systems whose sign-in window is open right now, so polling stops when nothing
 // is in flight rather than hammering the server forever.
 const polling = new Set();
+const credentialPolling = new Set();
 
 function statusCell(item) {
   if (item.auth_mode === "none") return el("td", {}, [badge("Not needed", "gray")]);
@@ -52,7 +53,11 @@ function actionCell(item) {
     return cell;
   }
   if (item.auth_mode === "unattended") {
-    cell.appendChild(el("span", { class: "muted", text: "Save the username and password below." }, []));
+    const open = el("button", { type: "button" }, [
+      item.credential_stored ? "Replace securely" : "Open secure window",
+    ]);
+    open.addEventListener("click", () => startCredentialPrompt(item.system_key, open));
+    cell.appendChild(open);
     return cell;
   }
 
@@ -123,12 +128,12 @@ let pollTimer = null;
 function pollSoon() {
   if (pollTimer) return;
   pollTimer = setInterval(async () => {
-    if (!polling.size) {
+    if (!polling.size && !credentialPolling.size) {
       clearInterval(pollTimer);
       pollTimer = null;
       return;
     }
-    await load();
+    await Promise.all([load(), loadCredentials()]);
   }, 2500);
 }
 
@@ -161,78 +166,78 @@ async function load() {
   }
 }
 
-/* ---------- stored passwords (unattended systems only) ---------- */
+/* ---------- isolated Windows prompt (unattended systems only) ---------- */
 
-const credentialForm = document.getElementById("credential-form");
-const message = document.getElementById("message");
+const credentialMessage = document.getElementById("credential-message");
+
+async function startCredentialPrompt(systemKey, button) {
+  clearError(errorBox);
+  button.disabled = true;
+  button.textContent = "Opening secure window…";
+  credentialMessage.textContent = "Look for the separate Windows username and password window.";
+  try {
+    const prompt = await postJSON(`/api/credentials/${encodeURIComponent(systemKey)}/prompt`, {});
+    if (prompt.active) credentialPolling.add(systemKey);
+    credentialMessage.textContent = prompt.message;
+    await Promise.all([loadCredentials(), load()]);
+    pollSoon();
+  } catch (err) {
+    showError(errorBox, err);
+    button.disabled = false;
+    button.textContent = "Open secure window";
+  }
+}
 
 async function loadCredentials() {
   const body = document.getElementById("rows");
-  const select = document.getElementById("system");
   try {
     const data = await getJSON("/api/credentials");
     body.innerHTML = "";
-    select.innerHTML = "";
     const note = document.getElementById("system-note");
-    const submit = credentialForm.querySelector("button[type=submit]");
 
-    // Only unattended systems appear here at all; saying so beats an empty
-    // dropdown the user cannot explain.
     if (!data.items.length) {
       note.textContent = "No system is set to sign in with a saved username and password, so there is nothing to save here.";
-      select.disabled = true;
-      submit.disabled = true;
       body.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "empty" }, ["Nothing saved"])]));
       return;
     }
-    note.textContent = "";
-    select.disabled = false;
-    submit.disabled = false;
-    for (const item of data.items) {
-      select.appendChild(el("option", { value: item.system_key }, [item.system_key]));
+    note.textContent = "Credentials stay in Windows Credential Manager and are reused whenever an automatic run needs to sign in.";
+    const prompts = await Promise.all(data.items.map(item =>
+      getJSON(`/api/credentials/${encodeURIComponent(item.system_key)}/prompt`).catch(() => null)
+    ));
+    credentialPolling.clear();
+    data.items.forEach((item, index) => {
+      const prompt = prompts[index];
+      if (prompt?.active) credentialPolling.add(item.system_key);
+
+      const open = el("button", { type: "button" }, [
+        item.stored ? "Replace securely" : "Open secure window",
+      ]);
+      open.disabled = Boolean(prompt?.active);
+      open.addEventListener("click", () => startCredentialPrompt(item.system_key, open));
       const remove = el("button", { type: "button", class: "danger small" }, ["Delete"]);
       remove.disabled = !item.stored;
       remove.addEventListener("click", async () => {
         try {
           await deleteJSON(`/api/credentials/${encodeURIComponent(item.system_key)}`);
-          message.textContent = "Password deleted.";
+          credentialMessage.textContent = "Saved credential deleted.";
           await Promise.all([loadCredentials(), load()]);
         } catch (err) { showError(errorBox, err); }
       });
       body.appendChild(el("tr", {}, [
         el("td", {}, [item.system_key]),
         el("td", {}, [item.username || "—"]),
-        el("td", {}, [item.stored ? badge("Saved", "green") : badge("Not saved", "red")]),
-        el("td", {}, [remove]),
+        el("td", {}, [
+          item.stored ? badge("Saved", "green") : badge("Not saved", "red"),
+          prompt?.message ? el("div", { class: "muted hint", text: prompt.message }, []) : null,
+        ]),
+        el("td", {}, [el("div", { class: "table-actions" }, [open, remove])]),
       ]));
-    }
+    });
+    if (credentialPolling.size) pollSoon();
   } catch (err) {
     showError(errorBox, err);
   }
 }
-
-credentialForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  clearError(errorBox);
-  const systemKey = document.getElementById("system").value;
-  const button = credentialForm.querySelector("button[type=submit]");
-  button.disabled = true;
-  try {
-    await putJSON(`/api/credentials/${encodeURIComponent(systemKey)}`, {
-      username: document.getElementById("username").value,
-      password: document.getElementById("password").value,
-    });
-    message.textContent = "Saved securely. Next: record the task you want automated.";
-    // Clear the password from the page as soon as it has been handed over.
-    document.getElementById("password").value = "";
-    await Promise.all([loadCredentials(), load()]);
-    paintShell();
-  } catch (err) {
-    showError(errorBox, err);
-  } finally {
-    button.disabled = false;
-  }
-});
 
 document.getElementById("refresh").addEventListener("click", loadCredentials);
 

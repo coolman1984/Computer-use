@@ -29,8 +29,13 @@ import queue
 import threading
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
-from .redaction import redact_text, redact_url, safe_network_summary
+from ..adapters.browser.authentication import ensure_authenticated
+from ..adapters.browser.session import open_browser_context
+from ..config import BrowserSettings
+from ..credentials import CredentialStore
+from .redaction import redact_selector, redact_text, redact_url, safe_network_summary
 
 # Runs inside every recorded page and every frame. It listens in the CAPTURING
 # phase (the `true` third argument) so it sees the event before the page's own
@@ -67,14 +72,46 @@ _CAPTURE_SCRIPT = """
     return out;
   }
 
-  // A field is sensitive if the browser treats it as one. Type and autocomplete
-  // are what the page itself declares, so this does not depend on guessing at
-  // names in any particular language.
-  function isSecret(el) {
-    if (!el) return false;
-    if (el.type === 'password') return true;
+  // Some web applications (notably canvas-like Nexacro screens) expose one
+  // large DOM surface for many controls. Clicking the surface's centre would
+  // repeat the wrong action, so keep the click as a fraction of that element.
+  // This scales with the element at any desktop resolution and never stores an
+  // absolute screen coordinate.
+  function relativePoint(el, event, viewportWidth, viewportHeight) {
+    if (!el || !el.getBoundingClientRect) return {};
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return {};
+    const tag = (el.tagName || '').toLowerCase();
+    const drawnSurface = tag === 'canvas' || tag === 'svg';
+    const largeSurface = rect.width / viewportWidth >= 0.30 && rect.height / viewportHeight >= 0.15;
+    if (!drawnSurface && !largeSurface) return {};
+    const clamp = (value) => Math.max(0, Math.min(1, value));
+    return {
+      elementX: clamp((event.clientX - rect.left) / rect.width),
+      elementY: clamp((event.clientY - rect.top) / rect.height),
+      relativeToElement: true,
+    };
+  }
+
+  // Return the part of the saved credential this login field needs. Password
+  // and autocomplete are the strongest signals. A small exact-name allowlist
+  // covers corporate SSO pages (including userNameInput) that omit
+  // autocomplete, without treating ordinary fields containing "user" as
+  // credentials.
+  function credentialField(el) {
+    if (!el) return '';
+    if (el.type === 'password') return 'password';
     const auto = (el.getAttribute && el.getAttribute('autocomplete')) || '';
-    return /current-password|new-password|one-time-code/i.test(auto);
+    if (/current-password|new-password|one-time-code/i.test(auto)) return 'password';
+    if (/^username$/i.test(auto)) return 'username';
+    const raw = ((el.id || '') + ' ' + ((el.getAttribute && el.getAttribute('name')) || ''));
+    const names = raw.split(/\\s+/).map(v => v.replace(/[^a-z0-9]/gi, '').toLowerCase());
+    const loginNames = new Set([
+      'username', 'usernameinput', 'usernamefield', 'userid', 'useridinput',
+      'useridentifier', 'loginid', 'loginidinput', 'loginname', 'loginnameinput',
+      'accountname', 'accountnameinput',
+    ]);
+    return names.some(name => loginNames.has(name)) ? 'username' : '';
   }
 
   const report = (payload) => {
@@ -116,7 +153,9 @@ _CAPTURE_SCRIPT = """
     // Something else was being typed and has not been written down yet: commit
     // it first, so the steps stay in the order they really happened.
     if (pendingEl && pendingEl !== el) flushPending();
-    const secret = isSecret(el);
+    const credential = credentialField(el);
+    const secret = Boolean(credential);
+    const details = describe(el);
     pendingEl = el;
     pending = {
       action: 'fill',
@@ -125,7 +164,12 @@ _CAPTURE_SCRIPT = """
       // something must be typed here and where to get it at run time.
       value: secret ? '' : (el.value || ''),
       secret: secret,
-      ...describe(el),
+      credentialField: credential,
+      ...details,
+      // describe() normally uses the field value as its human-readable label.
+      // That is useful for ordinary fields, but would send a password through
+      // the binding even though `value` above is empty.
+      text: secret ? '' : details.text,
     };
   }
 
@@ -153,6 +197,7 @@ _CAPTURE_SCRIPT = """
       action: 'click',
       locator: locatorFor(el),
       x: e.clientX / w, y: e.clientY / h,
+      ...relativePoint(el, e, w, h),
       ...describe(el),
     });
   }, true);
@@ -222,6 +267,10 @@ class PlaywrightRecordingWorker:
         session_state_path: Path | None = None,
         headless: bool = False,
         on_ready: Callable[[Any], None] | None = None,
+        system_key: str = "",
+        auth_filters: dict[str, Any] | None = None,
+        credential_store: CredentialStore | None = None,
+        browser_settings: BrowserSettings | None = None,
     ) -> None:
         self.recording_id, self.artifact_dir, self.start_url = recording_id, artifact_dir, start_url
         # The one saved session for this system — the same file the connection
@@ -241,6 +290,13 @@ class PlaywrightRecordingWorker:
         # this is the only place anything can drive the recorded page. Unused in
         # normal operation, where the hands belong to a person.
         self.on_ready = on_ready
+        self.system_key = system_key
+        self.auth_filters = dict(auth_filters or {})
+        self.credential_store = credential_store
+        self.browser_settings = browser_settings or BrowserSettings(
+            executable_path=executable_path,
+            record_headless=headless,
+        )
         self.on_step, self.on_heartbeat, self.on_finished = on_step, on_heartbeat, on_finished
         self._stop, self._paused = threading.Event(), threading.Event()
         self._thread: threading.Thread | None = None
@@ -249,6 +305,7 @@ class PlaywrightRecordingWorker:
         # page a person would be clicking in, rather than a second browser.
         self.primary_page: Any = None
         self._pages: list[Any] = []
+        self._cdp_sessions: list[Any] = []
         self._download_count = 0
         # Events arrive from inside Playwright's own dispatch — a page binding
         # firing during a click, a download starting during that same click. Any
@@ -320,22 +377,20 @@ class PlaywrightRecordingWorker:
                 (self.artifact_dir / item).mkdir(exist_ok=True)
 
             with sync_playwright() as p:
-                launch_kwargs: dict[str, Any] = {"headless": self.headless}
-                if self.executable_path:
-                    launch_kwargs["executable_path"] = self.executable_path
-                else:
-                    launch_kwargs["channel"] = "chrome"
-                browser = p.chromium.launch(**launch_kwargs)
-                context_kwargs: dict[str, Any] = {"accept_downloads": True}
-                if self.session_state_path and Path(self.session_state_path).exists():
-                    context_kwargs["storage_state"] = str(self.session_state_path)
-                context = browser.new_context(**context_kwargs)
+                session = open_browser_context(
+                    p,
+                    self.browser_settings,
+                    headless=self.headless,
+                    executable_path=self.executable_path,
+                    accept_downloads=True,
+                    storage_state_path=self.session_state_path,
+                )
+                context = session.context
                 try:
                     self._capture(context, network)
                 finally:
                     self._preserve(context)
-                    context.close()
-                    browser.close()
+                    session.close()
             (self.artifact_dir / "network" / "sanitized-summary.json").write_text(
                 json.dumps(network, ensure_ascii=False), encoding="utf-8"
             )
@@ -344,6 +399,11 @@ class PlaywrightRecordingWorker:
             self.on_finished(f"Recorder failed: {type(exc).__name__}: {exc}")
 
     def _capture(self, context: Any, network: list[dict]) -> None:
+        first = self._open_and_authenticate(context)
+
+        # Authentication is deliberately complete before any capture facility
+        # is installed. Credential values therefore cannot enter a screenshot,
+        # trace, network summary, page binding, or recorded step.
         context.tracing.start(screenshots=True, snapshots=True, sources=False)
         # Context-level: applies to every page and every frame this context ever
         # opens, including popups created after this point.
@@ -357,24 +417,138 @@ class PlaywrightRecordingWorker:
         context.expose_binding("__smartopsReport", self._handle_event)
         context.on("page", self._track_page)
 
-        first = context.pages[0] if context.pages else context.new_page()
-        self.primary_page = first
         self._track_page(first)
-        first.goto(self.start_url, wait_until="domcontentloaded", timeout=30000)
+        self._install_capture_on_loaded_page(first)
         self._last_shot = self._shoot(first)
 
         if self.on_ready is not None:
             self.on_ready(first)
 
         while not self._stop.is_set():
+            # Playwright's synchronous API dispatches page bindings and browser
+            # events while an API call is in progress. A plain threading wait
+            # leaves human clicks queued inside Playwright until Stop triggers
+            # the next page call, so the web monitor appears stuck at zero.
+            # Pump one live page briefly; callbacks only enqueue work, and the
+            # drain below persists it outside Playwright's dispatch stack.
+            self._pump_browser_events()
             self._drain(limit=50)
             self.on_heartbeat()
-            self._stop.wait(0.2)
         # A value typed into the last field and never followed by another action
         # is still part of the task; ask every page to commit what it is holding.
         self._flush_pages()
         # Whatever arrived while we were stopping still belongs in the recording.
         self._drain(limit=500)
+
+    def _open_and_authenticate(self, context: Any) -> Any:
+        """Open the entry page and finish saved-credential login before capture."""
+        first = context.pages[0] if context.pages else context.new_page()
+        self.primary_page = first
+        self._prevent_debugger_pauses(first)
+        first.goto(self.start_url, wait_until="domcontentloaded", timeout=30000)
+        if self.auth_filters:
+            authenticated = [first]
+            message = ensure_authenticated(
+                context,
+                first,
+                system=self.system_key,
+                filters=self.auth_filters,
+                credential_store=self.credential_store,
+                session_state_path=self.session_state_path,
+                manage_tracing=False,
+                pause_guard=lambda _context, page: self._prevent_debugger_pauses(page),
+                on_authenticated_page=lambda page: authenticated.__setitem__(0, page),
+            )
+            if message:
+                self._write_auth_diagnostic(context, message)
+                raise RuntimeError(message)
+            first = authenticated[0]
+            self.primary_page = first
+        return first
+
+    def _write_auth_diagnostic(self, context: Any, message: str) -> None:
+        """Save only safe routing/control facts when the SSO handoff fails."""
+        login_selector = self.auth_filters.get("login_selector")
+        pages: list[dict[str, Any]] = []
+        for index, page in enumerate(list(getattr(context, "pages", []))):
+            try:
+                parsed = urlsplit(page.url)
+                route = f"{parsed.scheme}://{parsed.hostname or ''}{parsed.path}"
+                login_visible = bool(
+                    login_selector
+                    and page.locator(login_selector).count() > 0
+                    and page.locator(login_selector).first.is_visible()
+                )
+                ui = page.evaluate(
+                    """
+                    () => {
+                      const visible = (el) => {
+                        const r = el.getBoundingClientRect();
+                        const s = getComputedStyle(el);
+                        return r.width > 0 && r.height > 0 &&
+                          s.display !== 'none' && s.visibility !== 'hidden';
+                      };
+                      const nodes = Array.from(document.querySelectorAll('body *'));
+                      return {
+                        noticeTitles: nodes.filter((el) => visible(el) &&
+                          (el.innerText || el.textContent || '').trim() === 'Notice').length,
+                        closeControlIds: nodes.filter((el) => visible(el) && el.id &&
+                          /closebutton|btnclose|btn_close/i.test(el.id))
+                          .slice(0, 12).map((el) => el.id.slice(-120))
+                      };
+                    }
+                    """
+                )
+                pages.append(
+                    {
+                        "index": index,
+                        "route": route,
+                        "login_visible": login_visible,
+                        "notice_titles": int(ui.get("noticeTitles") or 0),
+                        "close_control_ids": list(ui.get("closeControlIds") or []),
+                    }
+                )
+            except Exception as exc:
+                pages.append({"index": index, "unavailable": type(exc).__name__})
+        target = self.artifact_dir / "session" / "auth-diagnostic.json"
+        target.write_text(
+            json.dumps(
+                {
+                    "error_stage": message,
+                    "page_count": len(pages),
+                    "pages": pages,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _install_capture_on_loaded_page(page: Any) -> None:
+        """Apply the init script to the page loaded before capture was enabled."""
+        try:
+            page.evaluate(_CAPTURE_SCRIPT)
+        except Exception:
+            pass
+        for frame in getattr(page, "frames", []):
+            try:
+                if frame != page.main_frame:
+                    frame.evaluate(_CAPTURE_SCRIPT)
+            except Exception:
+                pass
+
+    def _pump_browser_events(self) -> None:
+        """Give Playwright a short dispatch window for live human actions."""
+        for page in reversed(list(self._pages)):
+            try:
+                if page.is_closed():
+                    continue
+                page.wait_for_timeout(200)
+                return
+            except Exception:
+                continue
+        self._stop.wait(0.2)
 
     def _flush_pages(self) -> None:
         for page in list(self._pages):
@@ -430,6 +604,7 @@ class PlaywrightRecordingWorker:
         if page in self._pages:
             return  # new_page() also fires the "page" event; do not double-bind
         self._pages.append(page)
+        self._prevent_debugger_pauses(page)
         self._bind_downloads(page)
         page.on("close", lambda: self._pages.remove(page) if page in self._pages else None)
         if page is not self.primary_page and self.primary_page is not None:
@@ -451,6 +626,34 @@ class PlaywrightRecordingWorker:
                 "page_url_redacted": redact_url(_safe_url(page)),
                 "target_text_redacted": "a new tab opened",
             }))
+
+    def _prevent_debugger_pauses(self, page: Any) -> None:
+        """Keep corporate SSO anti-debug scripts from freezing popup tabs.
+
+        Playwright controls Chrome through the DevTools Protocol. Some SSO
+        pages execute a ``debugger`` statement when they detect that protocol,
+        which leaves Chrome showing "Debugger paused in another tab" instead
+        of the login form. Apply the protocol's skip-pause setting to every
+        page, including popups, and resume once in case the page paused before
+        the context-level ``page`` event reached us.
+
+        Playwright CDP session:
+        https://playwright.dev/python/docs/api/class-browsercontext#browser-context-new-cdp-session
+        Chrome Debugger.setSkipAllPauses:
+        https://chromedevtools.github.io/devtools-protocol/tot/Debugger/#method-setSkipAllPauses
+        """
+        try:
+            session = page.context.new_cdp_session(page)
+            session.send("Debugger.setSkipAllPauses", {"skip": True})
+            self._cdp_sessions.append(session)
+            try:
+                session.send("Debugger.resume")
+            except Exception:
+                pass  # the normal case: this page was not paused yet
+        except Exception:
+            # Recording still works on non-Chromium test doubles or when a
+            # browser build does not expose CDP; only pause protection is lost.
+            pass
 
     def _bind_downloads(self, page: Any) -> None:
         def on_download(download: Any) -> None:
@@ -526,19 +729,35 @@ class PlaywrightRecordingWorker:
                 "target": {"page": self._page_name(page), "frame": frame_selector},
                 "locator": {
                     "strategy": "css",
-                    "value": redact_text(locator.get("value", "")),
-                    "fallbacks": [redact_text(f) for f in (locator.get("fallbacks") or [])],
+                    "value": redact_selector(locator.get("value", "")),
+                    "fallbacks": [redact_selector(f) for f in (locator.get("fallbacks") or [])],
                 },
                 "inputs": {},
                 "page_url_redacted": redact_url(page_url),
                 "page_title": redact_text(_safe_title(page)),
-                "selector": redact_text(locator.get("value", "")),
-                "target_text_redacted": redact_text(payload.get("text", "")),
+                "selector": redact_selector(locator.get("value", "")),
+                # Treat the field's type as the security boundary. Keyword
+                # redaction cannot protect an arbitrary password value.
+                "target_text_redacted": (
+                    "[redacted]" if payload.get("credentialField") or payload.get("secret")
+                    else redact_text(payload.get("text", ""))
+                ),
                 "x_ratio": payload.get("x"),
                 "y_ratio": payload.get("y"),
                 "before_image": before,
                 "after_image": after,
             }
+            if (
+                payload.get("relativeToElement")
+                and step["locator"].get("value") not in {"", "[redacted]"}
+                and payload.get("elementX") is not None
+                and payload.get("elementY") is not None
+            ):
+                step["locator"].update({
+                    "position_mode": "element_relative",
+                    "element_x_ratio": float(payload["elementX"]),
+                    "element_y_ratio": float(payload["elementY"]),
+                })
             self._fill_contract(step, payload)
             self._emit(step)
         except Exception:
@@ -549,12 +768,15 @@ class PlaywrightRecordingWorker:
         action = step["action"]
 
         if action == "fill":
-            if payload.get("secret"):
+            credential_field = payload.get("credentialField") or (
+                "password" if payload.get("secret") else ""
+            )
+            if credential_field:
                 # The reference names the system whose credential fills this
                 # field at run time. The value itself is never written down.
                 step["inputs"] = {
                     "secret_ref": "",  # resolved to the system key when the plan is built
-                    "secret_field": "password",
+                    "secret_field": credential_field,
                 }
                 step["success"] = {"type": "value_not_empty"}
             else:

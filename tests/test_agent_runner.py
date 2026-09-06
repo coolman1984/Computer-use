@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from smartops.adapters.agents.cli_runner import AgentSafetyViolation, CliAgentRunner
+from smartops.adapters.agents.commands import default_command_builder
 from smartops.domain.enums import AgentMode
 from smartops.ports.agents import AgentRequest
 
@@ -164,3 +165,13 @@ def test_unstartable_command_returns_clear_failure() -> None:
 
     assert response.ok is False
     assert "Could not launch the agent" in response.summary
+
+
+def test_codex_builder_is_ephemeral_noninteractive_and_read_only() -> None:
+    command = default_command_builder("codex")(_request(reason="Guide this recording"))
+
+    assert command[:2] == ["codex", "exec"]
+    assert "--ephemeral" in command
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert "--ignore-user-config" in command
+    assert "--dangerously-bypass-approvals-and-sandbox" not in command

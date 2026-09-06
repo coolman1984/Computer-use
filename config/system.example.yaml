@@ -27,6 +27,14 @@ browser:
   # an existing Chrome/Chromium (or set SMARTOPS_BROWSER_PATH) on a machine
   # where Playwright's own browser was never downloaded.
   executable_path: ""
+  # Corporate SSO may depend on managed Chrome extensions. Point this to a
+  # dedicated absolute folder outside the repository; never point automation
+  # directly at Chrome's normal User Data folder while Chrome is open.
+  user_data_dir: ""
+  profile_directory: ""
+  enable_extensions: false
+  # Optional existing extension version folders, or stable extension-id roots.
+  extension_paths: []
 
 agents:
   codex:

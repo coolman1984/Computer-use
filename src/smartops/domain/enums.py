@@ -83,6 +83,7 @@ class EventType(StrEnum):
     RECORDING_DELETED = "recording_deleted"
     RECORDING_RESTORED = "recording_restored"
     RECORDING_DRAFT_CREATED = "recording_draft_created"
+    RECORDING_SANITIZED = "recording_sanitized"
     PROCESS_CREATED = "process_created"
     PROCESS_TEST_STARTED = "process_test_started"
     PROCESS_TESTED = "process_tested"

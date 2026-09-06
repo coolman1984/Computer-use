@@ -420,8 +420,8 @@ def test_every_page_carries_the_journey_navigation(page, path) -> None:
     # The navigation is the journey, in order, on every page.
     labels = page.locator(".side-nav .nav-label").all_inner_texts()
     assert labels == [
-        "Overview", "1 · Systems", "2 · Sign-in", "3 · Recordings",
-        "4 · Automations", "5 · Runs", "6 · Results", "7 · Issues",
+        "Overview", "Systems & reports", "Sign-in", "Record a task",
+        "Automations", "Runs", "Results", "Issues",
     ]
 
 

@@ -62,11 +62,14 @@ class ReplaySession:
         self.credentials = credential_store
         self.timeout = evidence_timeout_ms
         self.downloads: list[Path] = []
+        self.download_errors: list[str] = []
         self.step_results: list[dict[str, Any]] = []
         self._pages: list[Any] = []
         self._current: Any = None
         self._pending_downloads: list[Any] = []
         self._downloads_before = 0
+        self._responses: list[dict[str, Any]] = []
+        self._responses_before = 0
 
     # ---------- setup ----------
 
@@ -74,8 +77,8 @@ class ReplaySession:
         """Start the task on its first page, watching for downloads from anywhere."""
         # Registered before the first navigation so a file that arrives during
         # the very first action is still caught.
-        self.context.on("download", self._on_download)
         self.context.on("page", self._track)
+        self.context.on("response", self._on_response)
         page = self.context.new_page()
         self._track(page)
         self._current = page
@@ -85,11 +88,25 @@ class ReplaySession:
     def _track(self, page: Any) -> None:
         if page not in self._pages:
             self._pages.append(page)
+            page.on("download", self._on_download)
 
     def _on_download(self, download: Any) -> None:
         # Saving here would re-enter Playwright during the click that caused the
         # download; hold the handle and save it on our own thread instead.
         self._pending_downloads.append(download)
+
+    def _on_response(self, response: Any) -> None:
+        """Keep only response facts needed for success evidence."""
+        try:
+            self._responses.append(
+                {
+                    "method": response.request.method,
+                    "url": response.url,
+                    "status": response.status,
+                }
+            )
+        except Exception:
+            pass
 
     def collect_downloads(self, destination: Path) -> None:
         """Save whatever files the task produced, keeping every one of them."""
@@ -109,7 +126,8 @@ class ReplaySession:
                 download.save_as(str(target))
                 if target.exists() and target.stat().st_size > 0:
                     self.downloads.append(target)
-            except Exception:
+            except Exception as exc:
+                self.download_errors.append(f"{type(exc).__name__}: {exc}")
                 continue  # one file we could not save must not lose the others
 
     # ---------- running a step ----------
@@ -134,6 +152,7 @@ class ReplaySession:
                 # the strength of the first one's file and a task that stopped
                 # producing its second export would still look successful.
                 self._downloads_before = len(self.downloads) + len(self._pending_downloads)
+                self._responses_before = len(self._responses)
                 self._pages_before = len([p for p in self._pages if not _closed(p)])
                 self._active_timeout_ms = int(
                     float(action.get("wait_timeout_seconds", self.timeout / 1000)) * 1000
@@ -200,7 +219,31 @@ class ReplaySession:
         handler(action)
 
     def _do_click(self, action: dict[str, Any]) -> None:
-        self._locate(action).click()
+        locator = self._locate(action)
+        spec = action.get("locator") or {}
+        if spec.get("position_mode") != "element_relative":
+            locator.click()
+            return
+
+        try:
+            box = locator.bounding_box()
+            x_ratio = float(spec["element_x_ratio"])
+            y_ratio = float(spec["element_y_ratio"])
+        except (AttributeError, KeyError, TypeError, ValueError):
+            raise StepFailed(
+                action.get("seq", 0),
+                "the recorded control no longer exposes the area that was clicked",
+            )
+        if not box or box.get("width", 0) <= 0 or box.get("height", 0) <= 0:
+            raise StepFailed(
+                action.get("seq", 0),
+                "the recorded control is present but has no clickable area",
+            )
+        # Playwright expects a point relative to the located element. Clamp the
+        # stored fractions so a changed border cannot put the click outside it.
+        x = min(max(x_ratio, 0.0), 1.0) * float(box["width"])
+        y = min(max(y_ratio, 0.0), 1.0) * float(box["height"])
+        locator.click(position={"x": x, "y": y})
 
     def _do_fill(self, action: dict[str, Any]) -> None:
         self._locate(action).fill(self._value_for(action))
@@ -266,6 +309,28 @@ class ReplaySession:
                 lambda: len(self.downloads) + len(self._pending_downloads) > before,
                 seq, "this step did not start a download",
             )
+            return
+
+        if kind == "network_response":
+            expected_method = str(success.get("method") or "").upper()
+            expected_path = str(success.get("path") or "")
+            expected_status = int(success.get("status") or 200)
+            before = getattr(self, "_responses_before", 0)
+
+            def matched() -> bool:
+                from urllib.parse import urlsplit
+
+                for response in self._responses[before:]:
+                    if expected_method and response.get("method", "").upper() != expected_method:
+                        continue
+                    if expected_path and urlsplit(response.get("url", "")).path != expected_path:
+                        continue
+                    if int(response.get("status") or 0) != expected_status:
+                        continue
+                    return True
+                return False
+
+            self._wait_until(matched, seq, "the expected report response did not arrive")
             return
 
         if kind == "new_page":
@@ -343,7 +408,10 @@ class ReplaySession:
                     return
             except Exception:
                 pass  # mid-navigation the page refuses queries; keep waiting
-            time.sleep(0.15)
+            try:
+                self._page().wait_for_timeout(150)
+            except Exception:
+                time.sleep(0.15)
         raise StepFailed(seq, message)
 
     def _settle(self) -> None:

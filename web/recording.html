@@ -4,18 +4,28 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Recording — SmartOps</title>
+<link rel="icon" href="data:," />
 <link rel="stylesheet" href="static/style.css" />
 </head>
-<body data-page="recordings" data-title="Recording">
+<body data-page="recordings" data-title="Recorded task">
 <header class="top"></header>
 <main>
   <div id="error"></div>
-  <p class="muted"><a class="link" href="recordings.html">← Back to recordings</a></p>
+  <p class="muted"><a class="link" href="recordings.html">← Back to recorded tasks</a></p>
 
   <section class="panel">
     <div id="info">Loading…</div>
-    <p class="muted">Do the whole task in the Chrome window that opens, including signing in or entering an MFA code if you are asked. Nothing you type and no cookie is captured.</p>
+    <p class="muted">Do the business task once in the Chrome window that opens. Sign-in credentials are handled separately: credential fields become secure references, while ordinary business filters are recorded because the automation must repeat them.</p>
     <div id="controls" class="toolbar"></div>
+    <div id="live-capture" class="capture-grid" aria-live="polite"></div>
+    <p id="next-recording-action" class="next-step-title"></p>
+  </section>
+
+  <section class="panel coach-panel" aria-live="polite">
+    <div class="toolbar"><div><p class="section-kicker">RECORDING COACH</p><h2>Your guide for this recording</h2></div><span id="coach-status" class="badge badge-gray">Waiting</span></div>
+    <p id="coach-message" class="muted">The read-only CLI coach starts just before the recording window.</p>
+    <ol id="coach-advice" class="coach-advice"><li>Loading guidance…</li></ol>
+    <p class="muted hint">The coach receives workflow structure only. It cannot see credentials, cookies, screenshots, internal addresses, or downloaded files.</p>
   </section>
 
   <section class="panel">
@@ -23,7 +33,11 @@
     <p class="muted">These are the steps the platform will repeat. Check they match what you did; if a step could not be captured well enough to repeat, it is called out here and you should record again.</p>
     <div id="review"></div>
     <ol class="timeline" id="plan"><li class="empty">No plan built yet</li></ol>
-    <div id="action-editors" class="review-actions"></div>
+    <details class="technical-details">
+      <summary>Advanced step repair</summary>
+      <p class="muted">Open this only when the review above names a broken step.</p>
+      <div id="action-editors" class="review-actions"></div>
+    </details>
   </section>
 
   <section class="panel">
@@ -33,8 +47,11 @@
   </section>
 
   <section class="panel">
-    <h2>Raw captured steps</h2>
-    <ol class="timeline" id="steps"><li class="empty">Nothing captured yet</li></ol>
+    <details class="technical-details">
+      <summary>Raw captured steps</summary>
+      <p class="muted">Technical evidence for troubleshooting. You normally do not need this.</p>
+      <ol class="timeline" id="steps"><li class="empty">Nothing captured yet</li></ol>
+    </details>
   </section>
 </main>
 <script src="static/app.js"></script>

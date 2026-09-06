@@ -150,6 +150,8 @@ class LoginManager:
                 chosen = self._executable_path or settings.executable_path
                 if chosen:
                     launch_kwargs["executable_path"] = chosen
+                else:
+                    launch_kwargs["channel"] = "chrome"
                 browser = playwright.chromium.launch(**launch_kwargs)
                 try:
                     context_kwargs: dict[str, Any] = {

@@ -332,3 +332,70 @@ never retried automatically. Because the browser replay is one engine step, a
 crash cannot prove whether that external effect happened before state was saved.
 The truthful recovery is therefore a failed run requiring human review, while a
 fully repeatable replay can still be re-queued.
+
+## D055 — Register the destination before teaching the task
+A system report needs a name and page address, but no longer requires a CSS
+download selector or direct file URL at registration time. Those fields remain
+an optional advanced fast path; the normal production journey records and
+reviews the actual download action later. This keeps setup usable without
+weakening replay review, testing, approval, or file-validation gates.
+
+## D056 — Use installed Google Chrome for every SmartOps browser launch
+When no explicit browser executable is configured, connection checks, sign-in
+capture, session refresh, recordings, and production browser runs all launch the
+Playwright `chrome` channel. This keeps saved sessions and recorded behavior in
+the same supported browser instead of silently mixing Chrome with bundled
+Chromium.
+
+## D057 — Recording must never pause an SSO popup in the debugger
+The recorder creates a CDP session for every main page and popup, applies
+`Debugger.setSkipAllPauses`, and attempts one resume. Samsung AD SSO uses a
+new tab whose anti-debug script otherwise freezes under Playwright with a grey
+“Debugger paused in another tab” overlay, preventing the login form from
+loading and blocking clean recorder shutdown.
+
+## D058 — The web Recording page is the live recorder controller
+The old separate recorder controller is folded into SmartOps: G-MES remains in
+its own headed Chrome window, while the Recording page shows controls, steps,
+and status. The worker continuously gives Playwright a short event-dispatch
+window so human clicks reach that page before Stop, rather than appearing only
+when the browser closes. Password fields are protected by their declared field
+type at both the browser and Python boundaries; their value never becomes a
+label, selector, event, or review field, regardless of what words it contains.
+
+## D059 — Credential entry belongs to a native child, not HTTP
+The Sign-in page can request a credential prompt and poll only its status. A
+short-lived child process attaches to the operator's visible Windows desktop,
+uses native CredUI, writes directly to Windows Credential Manager, clears its
+buffers, and exits. The browser has no username/password form and the old
+password-accepting HTTP route no longer exists.
+
+## D060 — Login is a reusable pre-workflow with one attempt
+A valid saved session skips login. An expired session runs a small adapter that
+may choose a language, open an SSO popup, disable debugger pauses, fill username
+and password references, submit once, return to the main page, close a notice,
+verify the signed-in state, and refresh storage state. There is no credential
+retry loop: failure stops the run before repeated attempts can lock an account.
+
+## D061 — Username is credential material during recording too
+Known login username fields, including Samsung's `userNameInput`, receive the
+same treatment as password fields. Capture sends only `secret_field=username`;
+replay resolves it from Windows Credential Manager at the moment of filling.
+A startup sanitizer repairs legacy metadata and draft actions without reading
+the stored credential or deleting the user's artifacts.
+
+## D062 — The Recording Coach is advisory, ephemeral, and structure-only
+Each recording attempt starts a read-only Codex CLI run before Chrome. Codex
+runs non-interactively with a read-only sandbox, ignores user customization,
+uses an isolated working directory, and does not persist the session. Its
+context contains only generic capture/goal/privacy labels. Recording keeps
+working with built-in guidance when the CLI is disabled, slow, or unavailable.
+
+## D063 — Selectors are executable metadata; Nexacro surfaces use relative points
+Recorded CSS selectors are preserved whole up to a bounded safety limit instead
+of being shortened like display text. A shortened selector is invalid and cannot
+be repaired after capture. When a click lands on a canvas, SVG, or large shared
+Nexacro DOM surface, the recorder also stores the point as fractions of that
+element. Replay first locates the element and then scales the point to its current
+size, so the action works across normal desktop resolutions without absolute
+screen coordinates. A secret-bearing href selector is rejected whole.

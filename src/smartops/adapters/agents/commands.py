@@ -11,6 +11,7 @@ relying on it in production.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from ...ports.agents import AgentRequest
 
@@ -22,6 +23,19 @@ def default_command_builder(executable: str):
         prompt = request.reason
         if request.context:
             prompt = f"{prompt}\n\nAdditional context (JSON):\n{json.dumps(request.context, ensure_ascii=False)}"
+        if "codex" in Path(executable).stem.lower():
+            return [
+                executable,
+                "exec",
+                "--sandbox",
+                "read-only",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--skip-git-repo-check",
+                "--color",
+                "never",
+                prompt,
+            ]
         return [executable, "-p", prompt]
 
     return build

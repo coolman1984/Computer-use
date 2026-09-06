@@ -392,3 +392,119 @@ For the G-MES pilot, configure `SMARTOPS_RECORDINGS_DIR` and `SMARTOPS_SESSIONS_
 - Before Task 12, select the first G-MES report and its validation rules: expected filename/type, columns, minimum rows, freshness, and schedule.
 - Before permanent purge is enabled, select retention days and backup location.
 
+## Approved Extension: Unattended Recovery and Agent-Guided Recording
+
+Approved by the user on 2026-09-06. The production requirement is unattended
+operation after initial setup, including automatic recovery from an expired
+username/password SSO session when no MFA or CAPTCHA is present.
+
+### Task 14: Move credential entry into an isolated Windows prompt
+
+**Description:** Replace password entry in the browser UI with a separate native
+Windows prompt process. That process writes directly to Windows Credential
+Manager; SmartOps receives only saved/cancelled/failed status.
+
+**Acceptance criteria:**
+
+- [ ] The browser never sends a password to an HTTP endpoint during the normal flow.
+- [ ] The prompt process emits no credential value and clears its password buffer.
+- [ ] The Sign-in page shows prompt progress and stored/not-stored state.
+
+**Verification:** Focused credential prompt manager/API/UI tests plus one manual
+Windows prompt check without saving a real secret.
+
+**Dependencies:** T13. **Estimated scope:** Medium.
+
+### Task 15: Add a reusable popup-SSO login plan
+
+**Description:** Model login as a small recorded plan that may open a popup. A
+run tries the saved session first; only an expired session executes the login
+plan using username/password references from Windows Credential Manager.
+
+**Acceptance criteria:**
+
+- [ ] A valid session skips login completely.
+- [ ] An expired session can select language, open a popup, fill referenced
+  username/password fields, submit once, verify success, and save the new session.
+- [ ] Rejected login uses bounded retries and cannot loop into account lockout.
+
+**Verification:** Local popup fixture tests, then the controlled G-MES pilot.
+
+**Dependencies:** T14. **Estimated scope:** Medium.
+
+### Task 16: Protect both username and password during capture and replay
+
+**Description:** Treat declared/detected username fields as credential references,
+just like password fields, so neither value enters recordings, agent context, or
+review metadata.
+
+**Acceptance criteria:**
+
+- [ ] Arbitrary username and password values are absent from serialized recordings.
+- [ ] Replay resolves both values only at the moment of filling the fields.
+- [ ] Existing affected private recording metadata can be migrated without storing literals.
+
+**Verification:** Red/green real-browser recording and replay tests.
+
+**Dependencies:** T14. **Estimated scope:** Small.
+
+### Task 17: Start an analyze-only Recording Coach with each recording
+
+**Description:** Add a recording-coach module at the agent seam. It receives a
+sanitized context pack and live step summaries, never credentials or raw response
+bodies. Recording remains functional if the CLI agent is disabled or unavailable.
+
+**Acceptance criteria:**
+
+- [ ] Starting a recording creates a logged coach session when an agent is enabled.
+- [ ] Coach status and guidance are available through a stable recording sub-resource.
+- [ ] Agent failure cannot stop or corrupt browser capture.
+
+**Verification:** Fake-CLI contract tests and recording lifecycle tests.
+
+**Dependencies:** T16. **Estimated scope:** Medium.
+
+### Task 18: Make the Recording page a complete guided workflow
+
+**Description:** Show live detection, proof gaps, popup/tab state, download state,
+coach guidance, and the exact next action in the existing full-screen web page.
+
+**Acceptance criteria:**
+
+- [ ] The page shows actions as they arrive and distinguishes captured, weak, and missing proof.
+- [ ] The user can finish only after download detection or explicitly mark the recording incomplete.
+- [ ] No separate native recorder controller is required.
+
+**Verification:** Browser UI tests at standard desktop widths and a headed local recording.
+
+**Dependencies:** T17. **Estimated scope:** Medium.
+
+### Task 19: Prove unattended G-MES operation
+
+**Description:** Split authentication from the business workflow, compile the
+captured report task, validate its Excel output, test session-expiry recovery,
+then approve and schedule it.
+
+**Acceptance criteria:**
+
+- [ ] Normal run, expired-session run, and invalid-credential failure are all evidenced.
+- [ ] The completed Excel file passes structural and report-specific validation.
+- [ ] The machine can execute without the operator present, subject to power,
+  corporate network, and corporate authentication policy availability.
+
+**Verification:** Controlled production pilot and incident review.
+
+**Dependencies:** T14-T18. **Estimated scope:** Medium.
+
+### Checkpoint E: Secure unattended foundation
+
+- Native credential prompt is active.
+- Both credential fields remain outside recordings and agent context.
+- Popup login passes against the local fixture.
+
+### Checkpoint F: Guided recording and production pilot
+
+- Recording Coach is optional but active when configured.
+- The web page explains every captured/missing step live.
+- The G-MES report passes normal and session-expired runs before scheduling.
+

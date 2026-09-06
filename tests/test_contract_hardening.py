@@ -135,6 +135,48 @@ class _Download:
         Path(path).write_bytes(self.body)
 
 
+class _RecorderCdpSession:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def send(self, method: str, params=None) -> None:
+        self.calls.append((method, params))
+
+
+class _RecorderContext:
+    def __init__(self) -> None:
+        self.session = _RecorderCdpSession()
+        self.pages = []
+
+    def new_cdp_session(self, page):
+        self.pages.append(page)
+        return self.session
+
+
+class _RecorderPage:
+    def __init__(self) -> None:
+        self.context = _RecorderContext()
+        self.handlers = {}
+
+    def on(self, event: str, handler) -> None:
+        self.handlers[event] = handler
+
+
+def test_recorder_prevents_new_sso_tabs_from_pausing_in_the_debugger(tmp_path) -> None:
+    worker = PlaywrightRecordingWorker(
+        "rec", tmp_path, "https://example.test", lambda _: None,
+        lambda: None, lambda _: None,
+    )
+    page = _RecorderPage()
+
+    worker._track_page(page)
+
+    assert page.context.pages == [page]
+    assert (
+        "Debugger.setSkipAllPauses", {"skip": True}
+    ) in page.context.session.calls
+
+
 def test_recorder_keeps_two_downloads_with_the_same_suggested_name(tmp_path) -> None:
     worker = PlaywrightRecordingWorker(
         "rec", tmp_path, "https://example.test", lambda _: None,
@@ -244,6 +286,50 @@ def test_broken_selector_never_silently_becomes_a_screen_position_click(tmp_path
     }, page)
 
     assert fallback is None
+
+
+def test_large_dom_surface_click_replays_at_element_relative_position(tmp_path) -> None:
+    calls = []
+
+    class Surface:
+        first = None
+
+        def __init__(self):
+            self.first = self
+
+        def wait_for(self, **kwargs):
+            return None
+
+        def bounding_box(self):
+            return {"x": 25, "y": 40, "width": 600, "height": 300}
+
+        def click(self, **kwargs):
+            calls.append(kwargs)
+
+    surface = Surface()
+
+    class Page(_SinglePage):
+        def locator(self, selector):
+            assert selector == "#nexacro-surface"
+            return surface
+
+    page = Page()
+    session = ReplaySession(object(), artifact_dir=tmp_path)
+    session._pages, session._current = [page], page
+
+    session._do_click({
+        "seq": 1,
+        "action": "click",
+        "layer": "dom",
+        "locator": {
+            "value": "#nexacro-surface",
+            "position_mode": "element_relative",
+            "element_x_ratio": 0.25,
+            "element_y_ratio": 0.60,
+        },
+    })
+
+    assert calls == [{"position": {"x": 150.0, "y": 180.0}}]
 
 
 def test_new_tab_proof_requires_a_tab_created_by_this_step(tmp_path) -> None:

@@ -235,6 +235,62 @@ function renderPromote(review, processes) {
   box.appendChild(el("div", { class: "toolbar" }, [name, reportKey, create]));
 }
 
+function renderCoach(coach) {
+  const status = document.getElementById("coach-status");
+  const message = document.getElementById("coach-message");
+  const advice = document.getElementById("coach-advice");
+  const labels = {
+    analyzing: ["Starting CLI coach…", "blue"],
+    ready: ["Coach ready", "green"],
+    unavailable: ["Built-in guide", "yellow"],
+    failed: ["Built-in guide", "yellow"],
+  };
+  const [label, color] = labels[coach?.status] || ["Waiting", "gray"];
+  status.className = `badge badge-${color}`;
+  status.textContent = label;
+  message.textContent = coach?.message || "The coach starts immediately before the recording window.";
+  advice.innerHTML = "";
+  for (const line of coach?.advice || ["Choose Start recording to begin."]) {
+    advice.appendChild(el("li", {}, [line]));
+  }
+}
+
+function renderLiveCapture(record, steps) {
+  const box = document.getElementById("live-capture");
+  const next = document.getElementById("next-recording-action");
+  const proofGaps = steps.filter(step => (step.success?.type || "none") === "none").length;
+  const tabs = new Set(steps.map(step => step.target?.page || "main"));
+  const credentialFields = steps.filter(step => step.inputs?.secret_ref).length;
+  const cards = [
+    ["Actions captured", record.step_count],
+    ["Windows / tabs", tabs.size || 1],
+    ["Proof gaps", proofGaps],
+    ["Files detected", record.download_count],
+    ["Credential fields protected", credentialFields],
+  ];
+  box.innerHTML = "";
+  for (const [label, value] of cards) {
+    box.appendChild(el("div", { class: "capture-stat" }, [
+      el("span", { class: "muted hint" }, [label]),
+      el("strong", {}, [String(value)]),
+    ]));
+  }
+
+  if (["draft", "failed", "interrupted"].includes(record.status)) {
+    next.textContent = "Next: start recording, then work only in the Chrome task window.";
+  } else if (["recording", "paused"].includes(record.status) && !record.download_count) {
+    next.textContent = "Next: continue until the expected file finishes downloading.";
+  } else if (["recording", "paused"].includes(record.status)) {
+    next.textContent = "File detected. Next: choose Finish and save.";
+  } else if (record.status === "completed" && !record.automation_draft?.actions) {
+    next.textContent = "Next: build the automation plan and review any proof gaps.";
+  } else if (record.status === "completed") {
+    next.textContent = "Next: review the plan, then create the automation.";
+  } else {
+    next.textContent = "SmartOps is saving the recording…";
+  }
+}
+
 async function buildPlan() {
   clearError(errorBox);
   try {
@@ -253,6 +309,8 @@ async function load() {
     const data = await getJSON(`/api/recordings/${id}`);
     current = data.recording;
     const status = current.status;
+    renderCoach(data.coach);
+    renderLiveCapture(current, data.steps);
 
     const info = document.getElementById("info");
     info.innerHTML = "";
@@ -270,11 +328,13 @@ async function load() {
     const controls = document.getElementById("controls");
     controls.innerHTML = "";
     const recording = ["recording", "paused"].includes(status);
+    const hasDownload = current.download_count > 0;
     controls.append(
       controlButton("Start recording", "start", ["draft", "failed", "interrupted"].includes(status), true),
       controlButton("Pause", "pause", status === "recording"),
       controlButton("Continue", "resume", status === "paused"),
-      controlButton("Finish and save", "stop", recording, true),
+      controlButton(hasDownload ? "Finish and save" : "Finish (waiting for file)", "stop", recording && hasDownload, true),
+      controlButton("Stop as incomplete", "stop-incomplete", recording && !hasDownload),
       controlButton("Record again", "rerecord", ["completed", "failed", "interrupted"].includes(status)),
       controlButton("Delete", "delete", !["recording", "paused", "starting", "stopping"].includes(status)),
     );

@@ -94,6 +94,8 @@ def check_system(
             chosen = executable_path or browser_settings.executable_path
             if chosen:
                 launch_kwargs["executable_path"] = chosen
+            else:
+                launch_kwargs["channel"] = "chrome"
             browser = playwright.chromium.launch(**launch_kwargs)
             try:
                 context_kwargs: dict[str, Any] = {

@@ -3,38 +3,42 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Recordings — SmartOps</title>
+<title>Record a task — SmartOps</title>
+<link rel="icon" href="data:," />
 <link rel="stylesheet" href="static/style.css" />
 </head>
-<body data-page="recordings" data-title="Recordings">
+<body data-page="recordings" data-title="Record a task">
 <header class="top"></header>
 <main>
   <div id="error"></div>
 
   <section class="panel">
-    <h2>Step 3 · Record the task once</h2>
-    <p class="muted">A browser window opens. You do the job exactly as you normally would — click through to the report and download it — and the platform watches so it can repeat it later. Your typed passwords and cookies are never captured.</p>
-    <p class="muted">You can only record against a system that has passed its connection test and is signed in, so you never spend time recording a login screen.</p>
+    <p class="section-kicker">STEP 4</p>
+    <h2>Teach SmartOps by doing the task once</h2>
+    <p>Choose a registered system and name the task. Chrome opens; complete the report exactly as usual, including the final download. SmartOps records the actions, never your password or cookies.</p>
+    <p class="muted"><strong>Before you start:</strong> the system must pass its connection test and be signed in.</p>
     <p id="system-note" class="muted" role="status"></p>
     <form id="create-form" class="toolbar">
       <input id="name" required maxlength="120" aria-label="What is this task called?" placeholder="e.g. Daily sales export" />
       <select id="system" required aria-label="Which system?"></select>
-      <button type="submit">Start a new recording</button>
+      <button type="submit">Open Chrome and record</button>
     </form>
   </section>
 
   <section class="panel">
     <div class="toolbar">
-      <h2>Your recordings</h2>
+      <h2>Tasks you have taught</h2>
       <label class="muted"><input type="checkbox" id="deleted" /> Show deleted</label>
     </div>
-    <table>
+    <div class="table-scroll" role="region" aria-label="Recorded tasks" tabindex="0">
+    <table class="responsive-table">
       <thead><tr><th>Task</th><th>System</th><th>Status</th><th>Steps</th><th>Recorded</th><th></th></tr></thead>
       <tbody id="rows"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
     </table>
+    </div>
   </section>
 </main>
 <script src="static/app.js"></script>
-<script src="static/recordings.js"></script>
+<script src="static/recordings.js?v=2"></script>
 </body>
 </html>

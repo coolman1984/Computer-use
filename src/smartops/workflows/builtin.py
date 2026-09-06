@@ -278,6 +278,12 @@ def _auth_filters(services: Any, system_key: str) -> dict[str, Any]:
                 "submit_selector": auth.submit_selector,
             }
         )
+        if auth.language_selector:
+            filters["language_selector"] = auth.language_selector
+        if auth.popup_trigger_selector:
+            filters["popup_trigger_selector"] = auth.popup_trigger_selector
+        if auth.notice_close_selector:
+            filters["notice_close_selector"] = auth.notice_close_selector
     return filters
 
 

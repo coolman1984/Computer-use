@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from .adapters.agents.cli_runner import CliAgentRunner
@@ -96,6 +99,13 @@ class Services:
         # exist. Real definitions live outside the repo via SMARTOPS_SYSTEMS_DIR (D023).
         self.systems = SystemRegistry.load(self.settings.storage.systems_dir)
 
+        # The web UI can only request this isolated native window. Username and
+        # password are collected by the child process and written directly to
+        # Windows Credential Manager, never returned through HTTP.
+        from .credential_prompt import CredentialPromptManager
+
+        self.credential_prompts = CredentialPromptManager(self)
+
         # Which systems have passed a connection test. Durable on purpose: a
         # restart must not silently undo a completed stage of the journey.
         self.connection_checks = ConnectionCheckStore(
@@ -109,6 +119,7 @@ class Services:
 
         from .recordings.manager import RecordingManager
         self.recording_manager = RecordingManager(self)
+        self.recording_manager.scrub_legacy_credential_steps()
         from .recordings.recovery import RecordingRecovery
         self.recording_recovery = RecordingRecovery(self)
 
@@ -123,6 +134,9 @@ class Services:
         # Enabling it is an operational and security decision for the
         # operator, and is not tested against a real CLI here.
         self.agent_runner: Any = self._build_agent_runner()
+        from .recordings.coach import RecordingCoach
+
+        self.recording_coach = RecordingCoach(self)
 
         from .workflows.builtin import register_builtins
 
@@ -155,7 +169,13 @@ class Services:
                 details={"agent": agent_name, "supported_modes": sorted(_SUPPORTED_AGENT_MODES)},
             )
         executable = agent_settings.executable or agent_name
-        return CliAgentRunner(default_command_builder(executable))
+        if self.settings.app.environment == "test":
+            coach_workspace = self.settings.storage.logs_dir / "recording-coach"
+        else:
+            private_root = Path(os.getenv("LOCALAPPDATA") or tempfile.gettempdir())
+            coach_workspace = private_root / "SmartOps" / "recording-coach"
+        coach_workspace.mkdir(parents=True, exist_ok=True)
+        return CliAgentRunner(default_command_builder(executable), cwd=coach_workspace)
 
     def _chosen_agent(self) -> tuple[str, AgentSettings | None]:
         if self.settings.agents.claude.enabled:
