@@ -55,6 +55,14 @@ class Services:
         recover_on_start: bool = True,
     ) -> None:
         self.settings = settings or load_settings()
+        if (
+            self.settings.browser.record_headless
+            and self.settings.safety.allow_development_features is not True
+        ):
+            raise ConfigurationError(
+                "Headless recording is a development-only feature. Enable "
+                "safety.allow_development_features explicitly in an isolated test setup."
+            )
         self.clock = clock or SystemClock()
         if create_directories:
             ensure_directories(self.settings)

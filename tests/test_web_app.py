@@ -200,6 +200,8 @@ def _completed_recording(services, system_key: str = "erp"):
         RecordingStep(
             record.id, 1, "click", selector="#reports",
             page_url_redacted="https://erp.example.local/reports/daily", target_text_redacted="Reports",
+            success={"type": "selector_visible", "value": "#export"},
+            retry={"max_attempts": 3, "safe_to_repeat": True},
         )
     )
     services.recordings.save_step(
@@ -266,6 +268,14 @@ def test_the_whole_journey_end_to_end(page, services) -> None:
     page.wait_for_selector("#plan li:not(.empty)")
     # The review must say plainly that this recording can be repeated.
     page.wait_for_selector(".notice-box:has-text('can be repeated')")
+    # The review is operational, not just prose: safely reorder real selectors
+    # and persist the edit before creating the automation.
+    first_action = page.locator(".review-action").first
+    first_action.locator(".edit-locators").fill("#reports\n[data-testid=reports]")
+    first_action.locator("button:has-text('Save and re-check this step')").click()
+    page.wait_for_selector("#error:has-text('saved and checked again')")
+    edited = services.recordings.get(record.id).automation_draft["actions"][0]
+    assert edited["locator"]["fallbacks"] == ["[data-testid=reports]"]
 
     # --- Stage 6 setup: promote the reviewed recording to an automation. ---
     page.fill("#promote input[placeholder='Name for this automation']", "Daily sales export")

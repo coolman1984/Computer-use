@@ -18,6 +18,7 @@ from ..domain.enums import (
     TriggerType,
 )
 from ..domain.models import Run, StepDefinition, StepRecord, WorkflowDefinition
+from ..recordings.converter import review_plan
 from .contracts import StepContext, StepOutcome, StepResult
 from .retry import policy_for
 
@@ -130,6 +131,12 @@ class WorkflowRunner:
                 "This run has not finished yet. Wait for it, or let it fail, before trying again.",
                 error_class=ErrorClass.PERMANENT,
             )
+        if self._contains_unsafe_replay(original):
+            raise SmartOpsError(
+                "This task contains an unsafe step whose effect may already have happened. "
+                "SmartOps will not repeat it blindly; review the result before starting a new run.",
+                error_class=ErrorClass.PERMANENT,
+            )
 
         params = {**original.params, "retry_of": original.id}
         retried = self.create_run(original.workflow_key, params=params, trigger=TriggerType.RETRY)
@@ -140,6 +147,17 @@ class WorkflowRunner:
             payload={"retry_of": original.id},
         )
         return retried
+
+    @staticmethod
+    def _contains_unsafe_replay(run: Run) -> bool:
+        """Whether repeating this browser task could duplicate an external effect."""
+        if run.workflow_key != "process.replay":
+            return False
+        actions = ((run.params or {}).get("plan") or {}).get("actions") or []
+        return any(
+            not bool((action.get("retry") or {}).get("safe_to_repeat", False))
+            for action in actions
+        )
 
     def drive(self, run_id: str, *, max_cycles: int = 20) -> Run:
         """Resume the run until it finishes or starts waiting on a future time. For CLI use and scheduling."""
@@ -155,6 +173,45 @@ class WorkflowRunner:
     # ---------- internals ----------
 
     def _execute_locked(self, run: Run, definition: WorkflowDefinition) -> Run:
+        # A queued run can survive a restart and predate the API/process gates.
+        # Never let a worker or the generic start endpoint turn it into a back
+        # door around review and approval.
+        if definition.key == "process.replay":
+            verdict = review_plan((run.params or {}).get("plan") or {})
+            if not verdict["ready"]:
+                run.status = RunStatus.FAILED
+                run.finished_at = self.clock.now()
+                run.error_class = ErrorClass.PERMANENT.value
+                run.error_message = verdict["problems"][0]
+                self.services.runs.update(run)
+                self.services.events.emit(
+                    EventType.RUN_FAILED,
+                    run_id=run.id,
+                    severity=Severity.ERROR,
+                    message="Stored replay run rejected by the review gate",
+                    payload={"review": verdict},
+                )
+                return run
+        if (
+            definition.key == "collect.report"
+            and self.services.settings.app.environment == "production"
+            and self.services.settings.safety.allow_development_features is not True
+        ):
+            run.status = RunStatus.FAILED
+            run.finished_at = self.clock.now()
+            run.error_class = ErrorClass.PERMANENT.value
+            run.error_message = (
+                "Legacy direct collection is disabled in production. Use an approved recorded process."
+            )
+            self.services.runs.update(run)
+            self.services.events.emit(
+                EventType.RUN_FAILED,
+                run_id=run.id,
+                severity=Severity.ERROR,
+                message="Stored legacy collection run rejected in production",
+                payload={"workflow": definition.key},
+            )
+            return run
         first_start = run.started_at is None
         run.status = RunStatus.RUNNING
         run.resume_at = None

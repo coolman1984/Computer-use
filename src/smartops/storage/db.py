@@ -221,26 +221,44 @@ class Database:
         self.path = Path(path)
         self._local = threading.local()
         self._write_lock = threading.Lock()
+        self._connections_lock = threading.Lock()
+        self._connections: list[sqlite3.Connection] = []
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._shared: sqlite3.Connection | None = None
+        # A plain :memory: connection cannot be shared safely by the worker,
+        # request and supervisor threads. Give each thread its own connection to
+        # one private shared-cache database, held alive by this anchor.
+        self._memory_uri = (
+            f"file:smartops-{id(self)}?mode=memory&cache=shared"
+            if str(self.path) == ":memory:"
+            else ""
+        )
+        self._anchor = self._new_connection() if self._memory_uri else None
 
     def _new_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.path), timeout=30, check_same_thread=False)
+        conn = sqlite3.connect(
+            self._memory_uri or str(self.path),
+            timeout=30,
+            check_same_thread=False,
+            uri=bool(self._memory_uri),
+        )
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         if str(self.path) != ":memory:":
             conn.execute("PRAGMA journal_mode = WAL")
+        else:
+            # Shared-cache in-memory databases use table locks instead of WAL.
+            # Reads are status/queue observations and must not crash merely
+            # because another worker is committing a short state transition.
+            conn.execute("PRAGMA read_uncommitted = ON")
         conn.execute("PRAGMA synchronous = NORMAL")
         conn.execute("PRAGMA busy_timeout = 30000")
+        with self._connections_lock:
+            self._connections.append(conn)
         return conn
 
     @property
     def connection(self) -> sqlite3.Connection:
-        if str(self.path) == ":memory:":
-            if self._shared is None:
-                self._shared = self._new_connection()
-            return self._shared
         conn = getattr(self._local, "conn", None)
         if conn is None:
             conn = self._new_connection()
@@ -277,10 +295,9 @@ class Database:
         return int(row["v"] or 0)
 
     def close(self) -> None:
-        conn = getattr(self._local, "conn", None)
-        if conn is not None:
+        with self._connections_lock:
+            connections, self._connections = self._connections, []
+        for conn in connections:
             conn.close()
-            self._local.conn = None
-        if self._shared is not None:
-            self._shared.close()
-            self._shared = None
+        self._local.conn = None
+        self._anchor = None

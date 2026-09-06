@@ -10,6 +10,17 @@ are wired up, recordings that stopped with no heartbeat are settled to
 `interrupted`; their steps or partial evidence are not deleted, and a
 re-record can be started from them.
 
+After finishing a recording, open its review. Every step exposes its captured
+scope, ordered selectors, non-secret input, proof, timeout, checkpoint and retry
+policy. Safe fields may be corrected there. A position-only or unproven step is
+blocked and must be re-recorded unless a real selector and observable proof can
+be supplied. An unsafe step can never be made repeatable in review.
+
+`browser.record_headless`, `SMARTOPS_DISABLE_WORKER=1`, direct internal workflow
+calls and legacy YAML schedules are development tools. They work only when
+`safety.allow_development_features: true` is deliberately set in an isolated
+configuration. Keep it false in normal use.
+
 Check status via `python -m smartops doctor` or `GET /health`. The check
 shows whether the recording and backup paths are writable, and how many
 recorder workers are active.

@@ -69,6 +69,11 @@ class SafetySettings:
     allow_destructive_actions: bool = False
     require_approval_for_sensitive_actions: bool = True
     allow_recording_purge: bool = False
+    # Test-only switches (headless human recording, disabling the worker, and
+    # direct invocation of internal workflows) are inert unless this is set
+    # explicitly.  A setting named "development" is too easy to inherit from
+    # an example file; permission has to be a separate deliberate decision.
+    allow_development_features: bool = False
 
 
 @dataclass(frozen=True)
@@ -183,6 +188,9 @@ def load_settings(path: Path | str | None = None) -> Settings:
             safety_raw.get("require_approval_for_sensitive_actions", True)
         ),
         allow_recording_purge=bool(safety_raw.get("allow_recording_purge", False)),
+        allow_development_features=(
+            safety_raw.get("allow_development_features", False) is True
+        ),
     )
 
     def _agent_settings(name: str) -> AgentSettings:

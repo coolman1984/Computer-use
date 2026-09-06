@@ -98,38 +98,35 @@ def download_report(ctx: StepContext) -> StepResult:
             result.message or f"Session expired for system {system}",
             details={"system": system, "needs_login": True, "no_retry": True, "command": f"python -m smartops login {system}"},
         )
-    if not result.ok or result.file_path is None:
+    if not result.ok or not result.file_paths:
         raise TransientError(
             result.message or "Report extraction failed",
             details={"layer": result.layer_used.value, "evidence": result.evidence},
         )
 
-    artifact = FileArtifact(
-        id=new_id("file"),
-        run_id=ctx.run_id,
-        system=system,
-        report=report,
-        path=str(result.file_path),
-        original_name=result.original_name,
-        size_bytes=result.size_bytes,
-        period=request.period,
-        created_at=now,
-    )
-    ctx.services.files.save(artifact)
-    ctx.emit(
-        EventType.FILE_DOWNLOADED,
-        message=f"Downloaded {report} from {system}",
-        payload={
-            "file_id": artifact.id,
-            "path": artifact.path,
-            "layer": result.layer_used.value,
-            "size_bytes": artifact.size_bytes,
-        },
-    )
+    file_ids: list[str] = []
+    file_paths: list[str] = []
+    for produced in result.file_paths:
+        artifact = FileArtifact(
+            id=new_id("file"), run_id=ctx.run_id, system=system, report=report,
+            path=str(produced), original_name=produced.name,
+            size_bytes=produced.stat().st_size if produced.exists() else 0,
+            period=request.period, created_at=now,
+        )
+        ctx.services.files.save(artifact)
+        file_ids.append(artifact.id)
+        file_paths.append(artifact.path)
+        ctx.emit(
+            EventType.FILE_DOWNLOADED,
+            message=f"Downloaded {produced.name} from {system}",
+            payload={"file_id": artifact.id, "path": artifact.path,
+                     "layer": result.layer_used.value, "size_bytes": artifact.size_bytes},
+        )
     _raise_latency_alert_if_needed(ctx, system=system, report=report, duration_seconds=result.duration_seconds)
     return StepResult.ok(
-        file_id=artifact.id,
-        file_path=artifact.path,
+        file_ids=file_ids, file_paths=file_paths,
+        # Compatibility only. New steps consume the plural keys above.
+        file_id=file_ids[0], file_path=file_paths[0],
         layer_used=result.layer_used.value,
     )
 
@@ -188,6 +185,21 @@ def replay_recording(ctx: StepContext) -> StepResult:
                 # failure: "it failed" is not something anyone can act on.
                 "step_results": result.step_results,
             },
+        )
+
+    expected_count = int(plan.get("expected_download_count") or 0)
+    if expected_count and len(result.file_paths) < expected_count:
+        raise DataQualityError(
+            f"The result is incomplete: this task must produce {expected_count} files, "
+            f"but only {len(result.file_paths)} arrived.",
+            details={"expected_file_count": expected_count,
+                     "actual_file_count": len(result.file_paths)},
+        )
+    normalized_paths = [str(Path(path).resolve()) for path in result.file_paths]
+    if len(set(normalized_paths)) != len(normalized_paths):
+        raise DataQualityError(
+            "The result is incomplete because two downloads point to the same stored file.",
+            details={"file_paths": normalized_paths},
         )
 
     # One task can produce several files. Each is registered and validated in its
@@ -340,6 +352,12 @@ def validate_file(ctx: StepContext) -> StepResult:
     all_failures: list[str] = []
     checksums: list[str] = []
     rows: list[int | None] = []
+    passed_artifacts: list[FileArtifact] = []
+
+    if len(ids) != len(paths):
+        raise ConfigurationError(
+            "The downloaded file group is incomplete: its file records do not match its paths."
+        )
 
     for index, path in enumerate(paths):
         file_id = ids[index] if index < len(ids) else ""
@@ -357,6 +375,8 @@ def validate_file(ctx: StepContext) -> StepResult:
         if report.passed:
             checksums.append(report.sha256)
             rows.append(report.row_count)
+            if artifact is not None:
+                passed_artifacts.append(artifact)
             ctx.emit(
                 EventType.FILE_VALIDATED,
                 message=f"{Path(path).name} is valid",
@@ -380,6 +400,12 @@ def validate_file(ctx: StepContext) -> StepResult:
             "The file did not pass its checks: " + "; ".join(all_failures),
             details={"failures": all_failures},
         )
+
+    # A multi-file output is one result: do not feed history a partial group.
+    # Archive only after every member has passed, not while a later member can
+    # still make the whole run fail.
+    for artifact in passed_artifacts:
+        ctx.services.history.archive(artifact)
 
     return StepResult.ok(
         sha256=checksums[0] if checksums else "",

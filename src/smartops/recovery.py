@@ -57,6 +57,26 @@ class RecoveryService:
         """
         recovered: list[Run] = []
         for run in self.services.runs.stranded():
+            if self.services.runner._contains_unsafe_replay(run):
+                run.status = RunStatus.FAILED
+                run.resume_at = None
+                run.finished_at = self.services.clock.now()
+                run.error_class = "permanent"
+                run.error_message = (
+                    "The program stopped during an unsafe step. Its effect may already have "
+                    "happened, so SmartOps did not repeat it automatically. Review the target "
+                    "system and start a new run only when it is safe."
+                )
+                self.services.runs.update(run)
+                self.services.events.emit(
+                    EventType.RUN_FAILED,
+                    run_id=run.id,
+                    severity=Severity.ERROR,
+                    message="Interrupted unsafe task was stopped for human review",
+                    payload={"recovered": True, "workflow": run.workflow_key},
+                )
+                recovered.append(run)
+                continue
             run.status = RunStatus.QUEUED
             run.resume_at = None
             # Deliberately not touching started_at: the run did start, and the

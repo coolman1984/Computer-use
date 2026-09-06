@@ -178,7 +178,7 @@ class PlaywrightBrowserAdapter:
             return ExtractionResult(
                 ok=True,
                 layer_used=ExtractionLayer.NETWORK,
-                file_path=target,
+                file_paths=[target],
                 original_name=name,
                 size_bytes=len(body),
                 duration_seconds=self._clock() - started,
@@ -306,7 +306,7 @@ class PlaywrightBrowserAdapter:
             return ExtractionResult(
                 ok=True,
                 layer_used=ExtractionLayer.DOM,
-                file_path=target,
+                file_paths=[target],
                 original_name=suggested,
                 size_bytes=target.stat().st_size,
                 duration_seconds=self._clock() - started,

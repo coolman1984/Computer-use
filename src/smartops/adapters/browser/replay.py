@@ -102,8 +102,10 @@ class ReplaySession:
                 # Two files with the same suggested name in one task would
                 # otherwise overwrite each other, which is the same silent loss
                 # the per-run folders exist to prevent.
-                if target.exists():
-                    target = destination / f"{target.stem}-{len(self.downloads) + 1}{target.suffix}"
+                suffix = 2
+                while target.exists():
+                    target = destination / f"{Path(name).stem}-{suffix}{Path(name).suffix}"
+                    suffix += 1
                 download.save_as(str(target))
                 if target.exists() and target.stat().st_size > 0:
                     self.downloads.append(target)
@@ -132,6 +134,10 @@ class ReplaySession:
                 # the strength of the first one's file and a task that stopped
                 # producing its second export would still look successful.
                 self._downloads_before = len(self.downloads) + len(self._pending_downloads)
+                self._pages_before = len([p for p in self._pages if not _closed(p)])
+                self._active_timeout_ms = int(
+                    float(action.get("wait_timeout_seconds", self.timeout / 1000)) * 1000
+                )
                 self._dispatch(action)
                 self._verify(action)
                 self._record(seq, action, ok=True, attempt=attempt, started=started)
@@ -263,8 +269,11 @@ class ReplaySession:
             return
 
         if kind == "new_page":
-            before = len(self._pages)
-            self._wait_until(lambda: len(self._pages) >= before, seq, "no new tab opened")
+            before = getattr(self, "_pages_before", len(self._pages))
+            self._wait_until(
+                lambda: len([p for p in self._pages if not _closed(p)]) > before,
+                seq, "no new tab opened",
+            )
             return
 
         if kind == "page_available":
@@ -275,7 +284,9 @@ class ReplaySession:
         if kind == "selector_visible":
             selector = success.get("value", "")
             try:
-                self._scope(action).locator(selector).first.wait_for(state="visible", timeout=self.timeout)
+                self._scope(action).locator(selector).first.wait_for(
+                    state="visible", timeout=getattr(self, "_active_timeout_ms", self.timeout)
+                )
             except Exception:
                 raise StepFailed(seq, f"'{selector}' never appeared, so the step did not take effect")
             return
@@ -283,7 +294,9 @@ class ReplaySession:
         if kind == "selector_hidden":
             selector = success.get("value", "")
             try:
-                self._scope(action).locator(selector).first.wait_for(state="hidden", timeout=self.timeout)
+                self._scope(action).locator(selector).first.wait_for(
+                    state="hidden", timeout=getattr(self, "_active_timeout_ms", self.timeout)
+                )
             except Exception:
                 raise StepFailed(seq, f"'{selector}' was still on the page, so the step did not take effect")
             return
@@ -323,7 +336,7 @@ class ReplaySession:
         raise StepFailed(seq, f"'{kind}' is not a kind of proof the platform understands")
 
     def _wait_until(self, condition, seq: int, message: str) -> None:
-        deadline = time.time() + self.timeout / 1000
+        deadline = time.time() + getattr(self, "_active_timeout_ms", self.timeout) / 1000
         while time.time() < deadline:
             try:
                 if condition():
@@ -379,10 +392,17 @@ class ReplaySession:
         target = action.get("target") or {}
         wanted_page = target.get("page") or "main"
         # A step naming a tab acts there without needing an explicit switch.
-        page = self._try_page(wanted_page) or self._page()
+        page = self._try_page(wanted_page)
+        if page is None:
+            if wanted_page not in ("", "main"):
+                raise StepFailed(action.get("seq", 0), f"the tab '{wanted_page}' is not open")
+            page = self._page()
         if page is not self._current and wanted_page not in ("", "main"):
             self._current = page
-        frame = self._frame_for(page, target.get("frame") or "")
+        frame_ref = target.get("frame") or ""
+        frame = self._frame_for(page, frame_ref)
+        if frame_ref and frame is None:
+            raise StepFailed(action.get("seq", 0), "the frame this step needs is not on the page")
         return frame if frame is not None else page
 
     def _frame(self, action: dict[str, Any]) -> Any:
@@ -451,6 +471,12 @@ class ReplaySession:
         )
 
     def _position_locator(self, action: dict[str, Any], scope: Any) -> Any | None:
+        # A DOM step must fail when all of its recorded selectors fail. Falling
+        # through to an old coordinate would turn a clear site-change failure
+        # into a click on an arbitrary element. Pure positional plans are marked
+        # visual and are blocked by the review gate before production use.
+        if action.get("layer") != "visual":
+            return None
         spec = action.get("locator") or {}
         x_ratio, y_ratio = spec.get("x_ratio"), spec.get("y_ratio")
         if x_ratio is None or y_ratio is None:

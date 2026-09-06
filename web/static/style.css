@@ -24,6 +24,14 @@
   --blue-bg: #dbeafe;
 }
 
+.review-actions { display: grid; gap: 1rem; margin-top: 1rem; }
+.review-action { border: 1px solid var(--border); border-radius: 14px; padding: 1rem; background: var(--panel); }
+.review-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .7rem; margin: .8rem 0; }
+.review-fact { display: grid; gap: .2rem; min-width: 0; }
+.review-fact strong { overflow-wrap: anywhere; }
+.review-edit textarea { width: 100%; resize: vertical; }
+.check-label { display: flex !important; align-items: center; gap: .5rem; }
+
 * { box-sizing: border-box; }
 
 body {

@@ -181,6 +181,12 @@ def _cmd_login(args: argparse.Namespace) -> int:
 def _cmd_collect(args: argparse.Namespace) -> int:
     services = _build_services()
     try:
+        if services.settings.safety.allow_development_features is not True:
+            print(
+                "Error: Direct collection bypasses recording approval and is disabled. "
+                "Create, test, and approve a recorded process instead."
+            )
+            return 1
         params = services.systems.run_params(args.system, args.report)
         run = services.runner.create_run("collect.report", params=params)
         run = services.runner.drive(run.id)
