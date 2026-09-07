@@ -377,3 +377,26 @@ def test_the_recorder_does_not_flag_a_well_identified_observed_step_as_weak(site
     worker = _record_one_click(site, tmp_path, "#reveal-well-named")
 
     assert not worker._weak_steps, f"a well-identified, observed click was flagged weak: {worker._weak_steps}"
+
+
+def test_the_locator_editor_lets_a_dialog_step_have_no_element(services) -> None:
+    """A step with nothing to find must not be refused for having nothing to find.
+
+    Three modules had their own copy of "which actions need an element", and two
+    of them had never been told that a browser dialog is answered rather than
+    clicked. Clearing the locators on one in review was refused with a message
+    about finding an element that does not exist. They share one list now; this
+    is the case that proves it.
+    """
+    from smartops.core.errors import PermanentError
+    from smartops.recordings.manager import RecordingManager
+
+    for action in ("dialog", "download"):
+        step = {"action": action, "locator": {"strategy": "css", "value": "[id=\"stale\"]"}}
+        RecordingManager._edit_locator(step, {"locator_candidates": []})
+        assert step["locator"]["value"] == ""
+
+    # And the rule still holds for everything that does need one.
+    clickable = {"action": "click", "locator": {"strategy": "css", "value": "[id=\"btn\"]"}}
+    with pytest.raises(PermanentError, match="at least one real way to find its element"):
+        RecordingManager._edit_locator(clickable, {"locator_candidates": []})

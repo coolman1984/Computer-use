@@ -18,6 +18,21 @@ class RunStatus(StrEnum):
 TERMINAL_RUN_STATUSES = frozenset({RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED})
 RESUMABLE_RUN_STATUSES = frozenset({RunStatus.QUEUED, RunStatus.WAITING, RunStatus.RETRYING, RunStatus.RUNNING})
 
+# Recorded actions that are not performed against an element: moving to another
+# tab or frame, a navigation, a wait, a file that has already arrived, a browser
+# dialog the recording already answered. Everything else needs a way to find
+# something on the page, and a step of that kind with no locator is a step
+# nothing can repeat.
+#
+# This lives here because three modules have to agree about it — the compiler,
+# the review screen's locator editor, and the confidence score — and when they
+# each kept their own copy they drifted: two of them had never been told that a
+# dialog has no element, so clearing the locators on one was refused with a
+# message about finding an element that does not exist.
+ACTIONS_WITHOUT_AN_ELEMENT = frozenset({
+    "navigate", "switch_page", "switch_frame", "wait_for", "download", "dialog",
+})
+
 
 class StepStatus(StrEnum):
     PENDING = "pending"

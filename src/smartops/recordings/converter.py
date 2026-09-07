@@ -20,6 +20,7 @@ import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from ..domain.enums import ACTIONS_WITHOUT_AN_ELEMENT
 from ..domain.models import RecordingStep
 from .confidence import score_step
 
@@ -30,9 +31,7 @@ PLAN_VERSION = 2
 _LAYER_CONFIDENCE = {"dom": "high", "visual": "low", "manual": "none"}
 
 # Actions that do not act on an element and so need no locator.
-# Actions that are not performed against an element: a tab change, a wait, a
-# file arriving, or a dialog the browser answered on its own.
-_NO_ELEMENT = {"switch_page", "switch_frame", "navigate", "wait_for", "download", "dialog"}
+
 _NEXT_ACTIONABLE_ACTIONS = {"click", "fill", "select", "check"}
 _OBSERVED_BEFORE = "_observed_visible_before"
 _OBSERVED_AFTER = "_observed_visible_after"
@@ -57,7 +56,7 @@ def _layer_for(step: RecordingStep) -> str:
     for the steps that act on no element at all, which need no locator to be
     perfectly repeatable.
     """
-    if (step.action or step.kind) in _NO_ELEMENT:
+    if (step.action or step.kind) in ACTIONS_WITHOUT_AN_ELEMENT:
         return "dom"
     if step.selector or (step.locator or {}).get("value"):
         return "dom"

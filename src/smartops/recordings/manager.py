@@ -5,7 +5,7 @@ import json, os
 from pathlib import Path
 from typing import Any
 from ..core.errors import ConcurrencyError, PermanentError
-from ..domain.enums import EventType, RecordingStatus, Severity
+from ..domain.enums import ACTIONS_WITHOUT_AN_ELEMENT, EventType, RecordingStatus, Severity
 from ..domain.models import Recording, RecordingStep
 from ..sessions import session_path
 from .converter import build_plan, review_plan
@@ -15,7 +15,6 @@ _PROOF_TYPES = {
     "checked_is", "url_changed", "new_page", "page_available", "download_started",
     "network_response",
 }
-_NO_ELEMENT_ACTIONS = {"navigate", "switch_page", "switch_frame", "wait_for"}
 from .worker import PlaywrightRecordingWorker
 
 _ACTIVE = {RecordingStatus.STARTING, RecordingStatus.RECORDING, RecordingStatus.PAUSED, RecordingStatus.STOPPING}
@@ -306,7 +305,7 @@ class RecordingManager:
                 raise PermanentError("Each element locator must be a real, non-redacted selector.")
             if value not in cleaned:
                 cleaned.append(value)
-        if not cleaned and (action.get("action") or "click") not in _NO_ELEMENT_ACTIONS:
+        if not cleaned and (action.get("action") or "click") not in ACTIONS_WITHOUT_AN_ELEMENT:
             raise PermanentError("This step needs at least one real way to find its element.")
         previous_locator = action.get("locator") or {}
         action["locator"] = {

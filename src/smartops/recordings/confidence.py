@@ -29,14 +29,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# Actions that never touch an element at all — a tab switch, a wait, a file
-# that already arrived, a browser dialog already answered. Mirrors
-# `converter.py::_NO_ELEMENT` exactly, for the same reason: nothing here needs
-# a locator to be perfectly repeatable, so scoring it on how well it was
-# identified would be scoring the wrong thing. (`manager.py::_NO_ELEMENT_ACTIONS`
-# is a different, smaller set for a different check — it has no "download" or
-# "dialog" — and is not what this mirrors.)
-_NO_ELEMENT_ACTIONS = {"switch_page", "switch_frame", "navigate", "wait_for", "download", "dialog"}
+from ..domain.enums import ACTIONS_WITHOUT_AN_ELEMENT
+
+
 
 # Mirrors the client-side GENERATED_ID pattern in `worker.py`'s capture script.
 # The recorder already ranks a name, a test id, an aria-label, a role-plus-label
@@ -113,7 +108,7 @@ def _has_position_fallback(step: dict[str, Any]) -> bool:
 def score_target_identity(step: dict[str, Any]) -> DimensionScore:
     """How likely this step's locator is to still mean the same thing tomorrow."""
     action = str(step.get("action") or step.get("kind") or "click")
-    if action in _NO_ELEMENT_ACTIONS:
+    if action in ACTIONS_WITHOUT_AN_ELEMENT:
         return DimensionScore(1.0, "This step does not need to find a control on the page.")
 
     candidates = _locator_candidates(step)
