@@ -30,6 +30,8 @@ browser:
   # Corporate SSO may depend on managed Chrome extensions. Point this to a
   # dedicated absolute folder outside the repository; never point automation
   # directly at Chrome's normal User Data folder while Chrome is open.
+  # Only one SmartOps process may hold this profile at a time (single-owner
+  # guard, an owner file inside it); keep max_concurrency at 1 while it is set.
   user_data_dir: ""
   profile_directory: ""
   enable_extensions: false

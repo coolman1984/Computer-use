@@ -409,3 +409,23 @@ separately: whether the login control would actually receive a pointer event
 match, and whether a Notice dialog is open. Only an unambiguous signed-out
 result may trigger the one permitted credential submission; a still-mounted
 login control under a visible signed-in marker never does.
+
+## D065 — The persistent automation profile has one owner, and manual sign-in shares its factory
+A persistent Chrome profile is one on-disk user-data directory; two SmartOps
+processes launching it at once corrupt Chrome's own lock state and can each
+interrupt the other's run. Before launch, `open_browser_context` claims an
+owner file inside the profile (PID plus process start time, not PID alone,
+so a reused PID after a reboot is never mistaken for the previous owner); a
+live owner refuses the new launch by name, a stale one is taken over, and a
+clean close clears the claim. Persistent launches also pass
+`--hide-crash-restore-bubble` so an unattended run never stalls on Chrome's
+post-crash restore dialog, and the doctor command warns when
+`browser.max_concurrency` is above 1 while a persistent profile is configured,
+since one profile can only have one live owner. Manual sign-in (`capture_login`)
+now opens its browser through this same factory instead of a second, separate
+launch path, so it is subject to the same guard and flags and signs into the
+same profile automation later reuses. The doctor command also reports whether
+the corporate SSO extension is present under the profile's `Extensions`
+folder — PRESENT, MISSING, or NOT CONFIGURED — without opening Chrome or
+installing anything; a MISSING result is corporate IT's
+`ExtensionInstallForcelist` to fix, not something SmartOps can remedy itself.

@@ -13,6 +13,8 @@ import argparse
 import sys
 from typing import Sequence
 
+from .adapters.browser.session import concurrency_warning_message
+from .checks import extension_provisioning_status
 from .core.errors import SmartOpsError
 from .sessions import capture_login, session_age_hours
 
@@ -78,6 +80,13 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             writable = exists and _is_writable(path)
             status = "exists and writable" if writable else ("exists but not writable" if exists else "missing")
             print(f"  {label}: {path} — {status}")
+
+        print()
+        extension = extension_provisioning_status(settings.browser)
+        print(f"SSO extension: {extension.status} — {extension.path or '(no persistent profile configured)'}")
+        concurrency_warning = concurrency_warning_message(settings.browser)
+        if concurrency_warning:
+            print(f"WARNING: {concurrency_warning}")
 
         print()
         recorder = services.recording_recovery.health()

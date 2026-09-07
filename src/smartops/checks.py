@@ -23,6 +23,63 @@ from .workflows.profiles import SystemProfile
 
 
 @dataclass
+class ExtensionStatus:
+    """Whether the corporate SSO extension is present in the automation profile.
+
+    This only looks at what is already on disk (5.5): it never launches
+    Chrome, never installs anything, and it cannot decide policy — a missing
+    extension is corporate IT's `ExtensionInstallForcelist` to fix.
+    """
+
+    status: str  # "PRESENT" | "MISSING" | "NOT CONFIGURED"
+    path: str
+    detail: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"status": self.status, "path": self.path, "detail": self.detail}
+
+
+def extension_provisioning_status(settings: BrowserSettings) -> ExtensionStatus:
+    """Look for installed extensions under the persistent automation profile.
+
+    A profile folder holds one subfolder per installed extension ID under
+    ``<profile-directory>/Extensions``. This is an offline, read-only look at
+    that folder — no browser is opened.
+    """
+    if not settings.user_data_dir.strip() or not settings.enable_extensions:
+        return ExtensionStatus(
+            status="NOT CONFIGURED",
+            path="",
+            detail="No persistent automation profile with extensions is configured "
+            "(browser.user_data_dir / browser.enable_extensions).",
+        )
+
+    profile_root = Path(settings.user_data_dir).expanduser()
+    profile_dir = settings.profile_directory.strip() or "Default"
+    extensions_dir = profile_root / profile_dir / "Extensions"
+
+    if not extensions_dir.is_dir():
+        return ExtensionStatus(
+            status="MISSING",
+            path=str(extensions_dir),
+            detail="No Extensions folder found under the automation profile.",
+        )
+
+    installed = [child for child in extensions_dir.iterdir() if child.is_dir()]
+    if not installed:
+        return ExtensionStatus(
+            status="MISSING",
+            path=str(extensions_dir),
+            detail="The Extensions folder exists but has no extension installed.",
+        )
+    return ExtensionStatus(
+        status="PRESENT",
+        path=str(extensions_dir),
+        detail=f"{len(installed)} extension folder(s) found.",
+    )
+
+
+@dataclass
 class ConnectionCheck:
     """The verdict of one connection test, phrased for a non-technical reader."""
 

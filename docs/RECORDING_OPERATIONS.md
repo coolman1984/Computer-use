@@ -49,7 +49,19 @@ configuration. Keep it false in normal use.
 
 Check status via `python -m smartops doctor` or `GET /health`. The check
 shows whether the recording and backup paths are writable, and how many
-recorder workers are active.
+recorder workers are active. It also reports whether the corporate SSO
+extension is present under the automation profile (PRESENT / MISSING / NOT
+CONFIGURED, with the folder it looked at), and warns if
+`browser.max_concurrency` is above 1 while a persistent automation profile is
+configured.
+
+When `browser.user_data_dir` is set, only one SmartOps process may hold that
+profile at a time: launching writes an owner file (PID and start time) inside
+it, and a second concurrent launch is refused with a message naming the PID
+already using it. If you see that refusal but are sure no SmartOps browser is
+actually running, confirm the named process is gone (Task Manager) and simply
+launch again — a dead owner is taken over automatically; there is nothing to
+delete by hand.
 
 To create a restorable private backup, run:
 

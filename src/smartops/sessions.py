@@ -145,27 +145,26 @@ def capture_login(
 
     from playwright.sync_api import sync_playwright  # deferred import: not needed by every module
 
+    from .adapters.browser.session import open_browser_context
+
     target_path = session_path(sessions_dir, system_key)
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright:
-        launch_kwargs: dict = {"headless": False}
-        chosen = executable_path or browser_settings.executable_path
-        if chosen:
-            launch_kwargs["executable_path"] = chosen
-        else:
-            launch_kwargs["channel"] = "chrome"
-        browser = playwright.chromium.launch(**launch_kwargs)
+        # Manual sign-in goes through the same session factory as replay and
+        # recording (5.4) so a configured persistent automation profile gets
+        # the same single-owner guard and launch flags, and signs into the
+        # same profile automation later reuses — instead of a second,
+        # unrelated browser identity.
+        session = open_browser_context(
+            playwright,
+            browser_settings,
+            headless=False,
+            executable_path=executable_path,
+            storage_state_path=target_path if target_path.exists() else None,
+        )
         try:
-            context_kwargs: dict = {
-                "viewport": {
-                    "width": browser_settings.viewport_width,
-                    "height": browser_settings.viewport_height,
-                }
-            }
-            if target_path.exists():
-                context_kwargs["storage_state"] = str(target_path)
-            context = browser.new_context(**context_kwargs)
+            context = session.context
             page = context.new_page()
             page.goto(login_url)
 
@@ -178,9 +177,11 @@ def capture_login(
             else:
                 (wait_for_enter or (lambda: input()))()
 
+            # Under persistent mode the profile itself is the session (E9);
+            # this JSON file is kept as a secondary, human-inspectable copy.
             context.storage_state(path=str(target_path))
         finally:
-            browser.close()
+            session.close()
 
     try:
         os.chmod(target_path, 0o600)
