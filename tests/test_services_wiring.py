@@ -11,9 +11,11 @@ import http.server
 import json
 import os
 import threading
+import zipfile
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import pytest
 
@@ -36,6 +38,7 @@ from smartops.core.errors import ConfigurationError
 from smartops.domain.enums import RunStatus, ValidationStatus
 from smartops.services import Services
 from smartops.storage.db import Database
+from smartops.ports.validation import ValidationRules
 from smartops.workflows.profiles import SystemRegistry
 
 
@@ -144,6 +147,88 @@ PAGE_HTML = """<!doctype html><html><body>
 <a id="dl" download="daily_sales.csv" href="daily_sales.csv">Download</a>
 </body></html>"""
 
+XLSX_PAGE_HTML = """<!doctype html><html><body>
+<a id="dl" download="report.xlsx" href="report.xlsx">Download workbook</a>
+</body></html>"""
+
+
+def _make_xlsx(path: Path, rows: list[list[str]]) -> None:
+    """Build a tiny valid .xlsx file without extra dependencies."""
+    ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    row_xml: list[str] = []
+    for r_idx, row in enumerate(rows, start=1):
+        cells: list[str] = []
+        for c_idx, value in enumerate(row):
+            col_letter = chr(ord("A") + c_idx)
+            ref = f"{col_letter}{r_idx}"
+            cells.append(
+                f'<c r="{ref}" t="inlineStr"><is><t>{escape(str(value))}</t></is></c>'
+            )
+        row_xml.append(f'<row r="{r_idx}">{"".join(cells)}</row>')
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<worksheet xmlns="{ns}"><sheetData>{"".join(row_xml)}</sheetData></worksheet>'
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>""",
+        )
+        archive.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+    Target="xl/workbook.xml"/>
+</Relationships>""",
+        )
+        archive.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"
+    xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/></sheets>
+</workbook>""",
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+</Relationships>""",
+        )
+        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+
+
+def _resolve_google_chrome_path() -> str:
+    env_path = os.environ.get("SMARTOPS_TEST_GOOGLE_CHROME_PATH")
+    if env_path and Path(env_path).exists():
+        return env_path
+    candidates = [
+        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+    ]
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidates.append(
+            Path(local_app_data) / "Google" / "Chrome" / "Application" / "chrome.exe"
+        )
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    raise AssertionError("Google Chrome is required for this test but was not found")
+
 
 def _resolve_executable_path() -> str | None:
     """A workaround for the current development environment only (see
@@ -211,5 +296,75 @@ def test_collect_report_works_end_to_end_with_real_wired_adapters(tmp_path: Path
         assert files[0].validation_status is ValidationStatus.PASSED
         assert files[0].row_count == 2
         assert Path(files[0].path).read_bytes() == CSV_CONTENT
+    finally:
+        svc.close()
+
+
+def test_process_replay_downloads_and_validates_xlsx_with_real_chrome(tmp_path: Path) -> None:
+    """Exercises the real process.replay workflow in a fresh Chrome context against localhost."""
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    page = site_dir / "page.html"
+    workbook = site_dir / "report.xlsx"
+    page.write_text(XLSX_PAGE_HTML, encoding="utf-8")
+    _make_xlsx(workbook, [["customer", "amount"], ["Alice", "10"], ["Bob", "20"]])
+
+    svc = _make_services(tmp_path)
+    svc.browser = PlaywrightBrowserAdapter(
+        svc.settings.browser,
+        executable_path=_resolve_google_chrome_path(),
+    )
+    try:
+        with _local_server(site_dir) as base_url:
+            run = svc.runner.create_run(
+                "process.replay",
+                params={
+                    "system": "local",
+                    "report": "monthly_sales",
+                    "plan": {
+                        "start_url": f"{base_url}/page.html",
+                        "actions": [
+                            {
+                                "seq": 1,
+                                "action": "click",
+                                "target": {"page": "main", "frame": ""},
+                                "locator": {"strategy": "css", "value": "#dl"},
+                                "inputs": {},
+                                "success": {"type": "download_started"},
+                                "retry": {"max_attempts": 1, "safe_to_repeat": False},
+                            }
+                        ],
+                        "expects_download": True,
+                        "expected_download_count": 1,
+                    },
+                    "rules": {
+                        "expected_extensions": [".xlsx"],
+                        "required_columns": ["customer", "amount"],
+                        "min_rows": 2,
+                    },
+                },
+            )
+            run = svc.runner.drive(run.id)
+
+        assert run.status is RunStatus.SUCCEEDED, run.error_message
+        files = svc.files.list(run_id=run.id)
+        assert len(files) == 1
+
+        artifact = files[0]
+        assert artifact.validation_status is ValidationStatus.PASSED
+        assert artifact.row_count == 2
+        assert Path(artifact.path).read_bytes() == workbook.read_bytes()
+
+        report = svc.validator.validate(
+            Path(artifact.path),
+            ValidationRules(
+                expected_extensions=(".xlsx",),
+                required_columns=("customer", "amount"),
+                min_rows=2,
+            ),
+        )
+        assert report.passed
+        assert report.row_count == 2
+        assert report.failures == []
     finally:
         svc.close()

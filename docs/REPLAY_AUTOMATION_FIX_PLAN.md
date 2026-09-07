@@ -3,7 +3,7 @@
 **Project:** SmartOps / G-MES pilot  
 **Date:** 2026-09-06  
 **Broken stage:** Record manually ✅ → **Replay automatically ❌** → Validate → Approve → Schedule  
-**Status of this document:** Diagnosis complete from retained evidence and source review. Steps 2–3 are present on the current branch; Step 4 replay page adoption is implemented in the isolated repair branch and remains subject to the focused test and headed-browser gates below. Nothing in this file contains credentials, cookies, corporate hostnames, or user names.
+**Status of this document:** Diagnosis complete from retained evidence and source review. The published replay-page repair is merged at `2251b3e`; the required focused suite and local real-Chrome workbook replay are green on the target Windows machine. Corporate validation remains blocked at the doctor gate described below. Nothing in this file contains credentials, cookies, corporate hostnames, or user names.
 
 **Isolated repair validation (2026-09-07):** The focused command
 `python3 -m pytest -q tests/test_replay_page_identity.py tests/test_replay_page_adoption.py tests/test_contract_hardening.py tests/test_popup_login.py tests/test_auth_classifier.py`
@@ -11,6 +11,21 @@ completed with **46 passed, 2 skipped**. The identity regression uses a fake dow
 payload to prove page adoption and file capture; it is not Excel validation and does
 not replace headed-browser testing, which is blocked in this environment because
 Chromium is unavailable.
+
+**Target-machine validation (2026-09-07):** The same required command completed with
+**48 passed, 0 skipped** using installed Google Chrome and an isolated, non-corporate
+browser context. A separate `process.replay` integration test downloaded a real OOXML
+workbook through Chrome, registered the artifact, and passed the production validator
+for `.xlsx`, the required columns, and two data rows. The process lifecycle suite
+completed with **12 passed**. A regression first demonstrated that one failed replay
+launched the complete browser session three times; the replay workflow is now capped
+at one whole-session attempt, leaving only explicitly safe action-level retries.
+
+**Corporate gate (2026-09-07):** `python -m smartops doctor` reports the SSO extension
+as **MISSING** from the dedicated automation profile. The automation remains
+`test_failed`, unapproved, and unscheduled. No new corporate run was started because
+the earlier controlled attempt showed a rejected login and the plan forbids another
+credential submission until the browser-profile/credential condition is resolved.
 
 ---
 

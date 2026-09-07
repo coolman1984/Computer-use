@@ -452,7 +452,16 @@ REPLAY_PROCESS = WorkflowDefinition(
     title="Run a recorded automation",
     description="Repeat a reviewed recording, then validate the file it produced.",
     steps=(
-        StepDefinition(name="replay", uses="automation.replay_recording", title="Repeat the recorded steps"),
+        # A replay can submit credentials, start exports, and download files.
+        # Retrying the entire browser session hides the first failure and can
+        # repeat those external effects, so only individual actions that were
+        # recorded as safe may retry inside ReplaySession.
+        StepDefinition(
+            name="replay",
+            uses="automation.replay_recording",
+            title="Repeat the recorded steps",
+            max_attempts=1,
+        ),
         StepDefinition(name="validate", uses="extract.validate_file", title="Validate the file"),
     ),
 )

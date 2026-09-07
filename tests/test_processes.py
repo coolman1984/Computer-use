@@ -162,6 +162,7 @@ def test_a_failing_test_leaves_the_automation_unapproved(ready) -> None:
 
     process, run = ready.process_manager.test(process.id)
 
+    assert ready.browser.calls == 1, "a failed replay must not repeat the whole browser session"
     assert run.status.value == "failed"
     assert process.status is ProcessStatus.TEST_FAILED
     with pytest.raises(SmartOpsError):
