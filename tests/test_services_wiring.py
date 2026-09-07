@@ -19,6 +19,8 @@ from xml.sax.saxutils import escape
 
 import pytest
 
+from tests.conftest import _google_chrome_path, needs_google_chrome
+
 from smartops.adapters.agents.cli_runner import CliAgentRunner
 from smartops.adapters.browser.playwright_engine import PlaywrightBrowserAdapter
 from smartops.adapters.history.archiver import HistoryArchiver
@@ -212,22 +214,10 @@ def _make_xlsx(path: Path, rows: list[list[str]]) -> None:
 
 
 def _resolve_google_chrome_path() -> str:
-    env_path = os.environ.get("SMARTOPS_TEST_GOOGLE_CHROME_PATH")
-    if env_path and Path(env_path).exists():
-        return env_path
-    candidates = [
-        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-        Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
-    ]
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if local_app_data:
-        candidates.append(
-            Path(local_app_data) / "Google" / "Chrome" / "Application" / "chrome.exe"
-        )
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-    raise AssertionError("Google Chrome is required for this test but was not found")
+    """Where branded Chrome is. Non-empty by the time this runs: the guard on the
+    test below has already skipped it on a machine that does not have Chrome,
+    which is a fact about the machine and not a failure of the wiring."""
+    return _google_chrome_path()
 
 
 def _resolve_executable_path() -> str | None:
@@ -300,6 +290,7 @@ def test_collect_report_works_end_to_end_with_real_wired_adapters(tmp_path: Path
         svc.close()
 
 
+@needs_google_chrome
 def test_process_replay_downloads_and_validates_xlsx_with_real_chrome(tmp_path: Path) -> None:
     """Exercises the real process.replay workflow in a fresh Chrome context against localhost."""
     site_dir = tmp_path / "site"

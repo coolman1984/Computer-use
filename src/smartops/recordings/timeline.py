@@ -39,6 +39,7 @@ SUPPORTED_PROOF_TYPES = {
     "selector_visible",
     "selector_hidden",
     "value_equals",
+    "selected_values_are",
     "value_not_empty",
     "checked_is",
     "url_changed",
@@ -54,7 +55,9 @@ SUPPORTED_PROOF_TYPES = {
 # typed value or a checkbox state is proved by reading the field itself, which
 # `worker.py::_fill_contract` already does at the moment of capture; duplicating
 # that here from a locator diff would be a guess, not evidence.
-_DERIVABLE_PROOF_TYPES = {"selector_visible", "selector_hidden", "new_page", "download_started"}
+_DERIVABLE_PROOF_TYPES = {
+    "selector_visible", "selector_hidden", "new_page", "download_started", "url_changed",
+}
 
 
 @dataclass(frozen=True)
@@ -158,7 +161,9 @@ def diff_visible_locators(
     }
 
 
-def _proof_candidates_for(step: dict[str, Any], changes: dict[str, list[str]]) -> list[dict[str, Any]]:
+def _proof_candidates_for(
+    step: dict[str, Any], changes: dict[str, list[str]], url_after: str = ""
+) -> list[dict[str, Any]]:
     """Turn a locator diff and the action's own kind into checkable proof.
 
     A newly-visible locator is `selector_visible` evidence; one that vanished
@@ -180,6 +185,13 @@ def _proof_candidates_for(step: dict[str, Any], changes: dict[str, list[str]]) -
         candidates.append({"type": "new_page"})
     if action == "download":
         candidates.append({"type": "download_started"})
+    # A screen that answers a click by changing its address and nothing else —
+    # an ordinary portal route, where no element appears or vanishes — leaves
+    # the locator diff empty and would otherwise have no evidence at all. Both
+    # addresses are already redacted; only the fact that they differ is used.
+    url_before = str(step.get("page_url_redacted") or "")
+    if url_after and url_before and url_after != url_before:
+        candidates.append({"type": "url_changed"})
     return [candidate for candidate in candidates if candidate["type"] in _DERIVABLE_PROOF_TYPES]
 
 
@@ -263,6 +275,7 @@ class Timeline:
         *,
         quality_before: dict[str, Any] | None = None,
         quality_after: dict[str, Any] | None = None,
+        url_after: str = "",
     ) -> ActionObservation:
         """Build this step's observation from data the recorder already collected, and keep it.
 
@@ -294,7 +307,7 @@ class Timeline:
                 visible_locators=tuple(sorted(_flatten_locators(after_locators))),
             ),
             changes=changes,
-            proof_candidates=_proof_candidates_for(step, changes),
+            proof_candidates=_proof_candidates_for(step, changes, url_after),
         )
         self.append(observation)
         return observation

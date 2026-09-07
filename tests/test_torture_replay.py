@@ -195,3 +195,30 @@ def test_a_control_with_no_stable_id_is_found_by_what_it_is_called(
     ])
 
     _all_ran(result)
+
+
+def test_a_replayed_multi_select_chooses_every_option_again(services, engine, site) -> None:
+    result = _replay(services, engine, site, "multi_select.html", [
+        _action(1, "select", locator={"strategy": "css", "value": '[id="plants"]'},
+                inputs={"values": ["vd", "da", "ce"]},
+                success={"type": "selected_values_are", "value": ["vd", "da", "ce"]},
+                retry={"max_attempts": 2, "safe_to_repeat": True}),
+    ])
+
+    _all_ran(result)
+
+
+def test_a_multi_select_that_loses_an_option_fails_its_own_proof(
+    services, engine, site
+) -> None:
+    """The control case: this is what a recording that kept only one value does."""
+    result = _replay(services, engine, site, "multi_select.html", [
+        _action(1, "select", locator={"strategy": "css", "value": '[id="plants"]'},
+                inputs={"values": ["vd"]},
+                success={"type": "selected_values_are", "value": ["vd", "da", "ce"]},
+                retry={"max_attempts": 1, "safe_to_repeat": True}),
+    ])
+
+    failures = [step for step in _performed(result) if not step[2]]
+    assert failures, "a filter that lost two of its three choices must not pass"
+    assert "every option the recording selected" in failures[0][3]

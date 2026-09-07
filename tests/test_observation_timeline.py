@@ -89,11 +89,11 @@ def recorded(services, site):
     return services
 
 
-def _capture(services, site, script, *, seconds: float = 6.0):
+def _capture(services, site, script, *, page: str = "timeline/actions.html", seconds: float = 6.0):
     from tests.recording_harness import capture_with_recorder
 
     return capture_with_recorder(
-        services, start_url=f"{site.base_url}/timeline/actions.html", script=script,
+        services, start_url=f"{site.base_url}/{page}", script=script,
         executable_path=_chromium_path(), seconds=seconds, system_key="timeline_portal",
     )
 
@@ -247,3 +247,32 @@ def test_the_timeline_sidecar_never_changes_the_recorded_step_contract(recorded,
         RecordingStep(recording_id="rec_contract_check", seq=1, kind=step["kind"], **{
             key: value for key, value in step.items() if key not in ("recording_id", "seq", "kind")
         })
+
+
+def test_a_click_that_only_changes_the_address_still_has_evidence(recorded, site) -> None:
+    """The SPA case: no element appears or vanishes, so the route is the proof.
+
+    The address on a step is read while the event is still being dispatched,
+    before the page has reacted, so a naive comparison would credit the
+    navigation to whichever step came next. This proves it lands on the click
+    that caused it.
+    """
+    def open_the_section(page) -> None:
+        page.click("#openDaily")
+        page.wait_for_function("() => location.search.includes('section=daily')")
+        page.wait_for_timeout(600)
+
+    steps = _capture(recorded, site, open_the_section, page="torture/spa_route.html")
+    record = recorded.recordings.list(limit=1)[0]
+    written = [
+        json.loads(line)
+        for line in (Path(record.artifact_dir) / "timeline.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
+
+    clicks = [item for item in written if item["trigger"]["action"] in {"click", "pointer_click"}]
+    assert clicks, f"the click was not observed: {[s['action'] for s in steps]}"
+    proofs = {candidate["type"] for candidate in clicks[0]["proof_candidates"]}
+    assert "url_changed" in proofs, clicks[0]["proof_candidates"]

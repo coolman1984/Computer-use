@@ -295,3 +295,32 @@ def test_a_drag_is_recorded_with_both_of_its_ends(recorded, site) -> None:
     # Both ends, or replay would have nowhere safe to drop it.
     assert "dropZone" in step["inputs"]["drop_selector"]
     assert step["retry"]["safe_to_repeat"] is False
+
+
+# ---------- a filter the person picked three of ----------
+
+
+def test_every_option_chosen_in_a_multi_select_is_recorded(recorded, site) -> None:
+    """One value stood in for all of them, and the replayed report came back smaller."""
+    def choose_three_plants(page) -> None:
+        page.select_option("#plants", ["vd", "da", "ce"])
+        page.select_option("#shift", "night")
+        page.wait_for_timeout(600)
+
+    steps = _capture(recorded, f"{site.base_url}/torture/multi_select.html", choose_three_plants)
+
+    chosen = [step for step in steps if step["action"] == "select"]
+    assert len(chosen) == 2, f"both lists must be recorded: {_actions(steps)}"
+
+    plants = next(step for step in chosen if "plants" in step["locator"]["value"])
+    assert plants["inputs"]["values"] == ["vd", "da", "ce"]
+    # And the proof has to be the whole set: reading back one value would pass
+    # while two of the three choices were missing.
+    assert plants["success"] == {
+        "type": "selected_values_are", "value": ["vd", "da", "ce"]
+    }
+
+    # A single-choice list is untouched by any of this.
+    shift = next(step for step in chosen if "shift" in step["locator"]["value"])
+    assert shift["inputs"] == {"value": "night"}
+    assert shift["success"] == {"type": "value_equals", "value": "night"}

@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import needs_a_visible_browser
+
 from smartops.config import BrowserSettings
 from smartops.core.clock import FrozenClock
 from smartops.core.errors import ConfigurationError
@@ -81,10 +83,7 @@ LOGIN_PAGE_HTML = """<!doctype html><html><body>
 </body></html>"""
 
 
-@pytest.mark.skipif(
-    os.environ.get("SMARTOPS_SKIP_HEADED_TESTS") == "1",
-    reason="An environment with no display (headless-only CI) does not support a visible browser",
-)
+@needs_a_visible_browser
 def test_capture_login_writes_valid_storage_state(tmp_path: Path) -> None:
     site_dir = tmp_path / "site"
     site_dir.mkdir()

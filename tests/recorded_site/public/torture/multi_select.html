@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Filter by several plants</title>
+<!-- The report is only right when all three plants are chosen. A list like this
+     reports one value however many are picked, so a recording that trusts
+     `value` replays the report filtered by one plant — and a smaller report
+     that looks perfectly valid is the worst kind of wrong. -->
+<body style="font:15px system-ui">
+  <label>Plants
+    <select id="plants" name="plants" multiple size="4">
+      <option value="vd">VD</option>
+      <option value="da">DA</option>
+      <option value="ce">CE</option>
+      <option value="mx">MX</option>
+    </select>
+  </label>
+  <select id="shift" name="shift">
+    <option value="day">Day</option>
+    <option value="night">Night</option>
+  </select>
+  <p id="outcome">nothing yet</p>
+  <script>
+    document.getElementById('plants').addEventListener('change', (event) => {
+      const chosen = Array.from(event.target.selectedOptions).map((o) => o.value);
+      document.getElementById('outcome').textContent = 'plants: ' + chosen.join(',');
+    });
+  </script>
+</body>

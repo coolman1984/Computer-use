@@ -106,6 +106,8 @@ repeat it.
 | A rich-text field | It has no `value`, so what was typed was simply absent | Typing into a contenteditable is captured like any other field |
 | A form two frames deep | — | Kept, with its frame identity, so it replays against the right document |
 | A right-click, and a drag | Both discarded silently — one as "not a left click", the other as a stray hand | Recorded as their own actions, with both ends of the drag |
+| A filter with several choices picked | A list reports only its *first* selection, so a report filtered by three plants replayed filtered by one — and came back smaller, and looked valid | Every chosen option is recorded, replayed, and proved as a set |
+| A click that only changes the address | An SPA route change makes nothing appear or vanish, so the click had no evidence at all | The route change is proof, credited to the click that caused it rather than the step after it |
 
 The rule these share is the one in the last section: **a gesture the platform
 cannot represent must fail loudly, never disappear.** Two of these tests exist

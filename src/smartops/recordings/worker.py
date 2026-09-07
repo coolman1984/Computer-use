@@ -578,11 +578,18 @@ _CAPTURE_SCRIPT = """
       // Whatever was being typed happened first and belongs on the record
       // first; discarding it here lost the value entirely.
       flushPending();
+      // A list the person can pick several things from reports only its
+      // *first* selection through `value`. A report screen filtered by three
+      // plants would replay filtered by one, and produce a smaller report that
+      // looks perfectly valid — the worst kind of wrong. So every chosen option
+      // travels, and a single-choice list keeps its existing shape unchanged.
+      const chosen = Array.from(el.selectedOptions || []);
       report({
         action: 'select',
         locator: locatorFor(el),
         value: el.value,
-        text: (el.selectedOptions && el.selectedOptions[0] && el.selectedOptions[0].text) || '',
+        values: el.multiple ? chosen.map((option) => option.value) : null,
+        text: chosen.map((option) => option.text).join(', ').slice(0, 80),
       });
       return;
     }
@@ -1301,6 +1308,15 @@ class PlaywrightRecordingWorker:
             before = getattr(self, "_last_shot", "")
             before_quality = self._last_shot_quality
             after = self._shoot(page)
+            # The address is read a second time here, on the worker's own loop,
+            # because the one on the step was read while the event was still
+            # being dispatched — before the page had any chance to react. A
+            # click that navigates therefore shows the *old* address on its own
+            # step and the new one on whatever step comes next, which would
+            # credit the navigation to the wrong action. Reading it again after
+            # the frame is taken keeps a route change attached to the click that
+            # caused it.
+            url_after = redact_url(_safe_url(page))
             after_quality = self._last_capture_quality
             if after:
                 self._last_shot = after
@@ -1347,7 +1363,12 @@ class PlaywrightRecordingWorker:
                     "element_y_ratio": float(payload["elementY"]),
                 })
             self._fill_contract(step, payload)
-            self._emit(step, quality_before=before_quality, quality_after=after_quality)
+            self._emit(
+                step,
+                quality_before=before_quality,
+                quality_after=after_quality,
+                url_after=url_after,
+            )
         except Exception:
             pass  # a step we failed to record must not take down the recording
 
@@ -1375,9 +1396,17 @@ class PlaywrightRecordingWorker:
             step["retry"] = {"max_attempts": 3, "safe_to_repeat": True}
 
         elif action == "select":
-            value = payload.get("value", "")
-            step["inputs"] = {"value": value}
-            step["success"] = {"type": "value_equals", "value": value}
+            values = payload.get("values")
+            if isinstance(values, list):
+                chosen = [str(item) for item in values]
+                step["inputs"] = {"values": chosen}
+                # Reading back one value would pass while two of the three
+                # choices were missing, so the whole set is what gets proved.
+                step["success"] = {"type": "selected_values_are", "value": chosen}
+            else:
+                value = payload.get("value", "")
+                step["inputs"] = {"value": value}
+                step["success"] = {"type": "value_equals", "value": value}
             step["retry"] = {"max_attempts": 3, "safe_to_repeat": True}
 
         elif action == "check":
@@ -1450,6 +1479,7 @@ class PlaywrightRecordingWorker:
         *,
         quality_before: dict[str, Any] | None = None,
         quality_after: dict[str, Any] | None = None,
+        url_after: str = "",
     ) -> None:
         step.setdefault("target", {"page": "main", "frame": ""})
         step.setdefault("locator", {})
@@ -1460,7 +1490,12 @@ class PlaywrightRecordingWorker:
         # before it is handed to on_step: the timeline's sequence numbers and the
         # eventual RecordingStep's sequence numbers advance together only because
         # nothing can happen to one without the other in between.
-        observation = self.timeline.record(step, quality_before=quality_before, quality_after=quality_after)
+        observation = self.timeline.record(
+            step,
+            quality_before=quality_before,
+            quality_after=quality_after,
+            url_after=url_after,
+        )
         self._note_confidence(step, observation)
         self.on_step(step)
 

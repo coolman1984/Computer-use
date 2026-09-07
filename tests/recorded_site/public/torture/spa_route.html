@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Report sections</title>
+<!-- A screen that answers a click by changing its address and nothing else.
+     Nothing appears, nothing vanishes, so a recorder that only diffs visible
+     elements finds no evidence the click did anything at all. -->
+<body style="font:15px system-ui">
+  <button id="openDaily">Daily section</button>
+  <script>
+    document.getElementById('openDaily').addEventListener('click', () => {
+      history.pushState({}, '', '/torture/spa_route.html?section=daily');
+    });
+  </script>
+</body>

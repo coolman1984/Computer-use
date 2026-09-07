@@ -442,6 +442,20 @@ class ReplaySession:
             "the recorded press/release control is not uniquely actionable",
         )
 
+    def _selected_values(self, action: dict[str, Any]) -> list[str]:
+        """Every option currently chosen in a list, which `input_value` cannot give.
+
+        Playwright reports one value for a `<select>` however many are picked,
+        so a multi-choice filter has to be read from the element itself.
+        """
+        try:
+            values = self._locate(action).evaluate(
+                "(el) => Array.from(el.selectedOptions || []).map((option) => option.value)"
+            )
+        except Exception:
+            return []
+        return [str(item) for item in values] if isinstance(values, list) else []
+
     def _do_hover(self, action: dict[str, Any]) -> None:
         """Rest the pointer where the person rested it.
 
@@ -482,7 +496,13 @@ class ReplaySession:
         self._locate(action).fill(self._value_for(action))
 
     def _do_select(self, action: dict[str, Any]) -> None:
-        self._locate(action).select_option((action.get("inputs") or {}).get("value", ""))
+        inputs = action.get("inputs") or {}
+        values = inputs.get("values")
+        # A multi-choice list records every option the person picked; a
+        # single-choice one records the one, exactly as it always has.
+        self._locate(action).select_option(
+            [str(item) for item in values] if isinstance(values, list) else inputs.get("value", "")
+        )
 
     def _do_check(self, action: dict[str, Any]) -> None:
         locator = self._locate(action)
@@ -649,6 +669,14 @@ class ReplaySession:
             self._wait_until(
                 lambda: self._current_value(action) == expected,
                 seq, "the field does not hold the value the recording expected",
+            )
+            return
+
+        if kind == "selected_values_are":
+            expected = sorted(str(item) for item in (success.get("value") or []))
+            self._wait_until(
+                lambda: sorted(self._selected_values(action)) == expected,
+                seq, "the list does not hold every option the recording selected",
             )
             return
 
