@@ -41,6 +41,10 @@
 <div id="app-frame" class="hidden">
   <h1>Work list</h1>
   <button id="open-report" type="button">Open report</button>
+  <div id="report-panel" class="hidden">
+    <span id="report-ready">Report ready</span>
+    <input id="report-reference" name="reference" autocomplete="off"/>
+  </div>
 </div>
 
 <div id="notice" class="hidden">
@@ -85,12 +89,23 @@
     document.getElementById('notice').classList.add('hidden');
   });
 
+  // The first step of the recorded workflow. It only works while the signed-in
+  // application frame is mounted, so a reload after login takes it away.
+  document.getElementById('open-report').addEventListener('click', function () {
+    document.getElementById('report-panel').classList.remove('hidden');
+  });
+
   window.addEventListener('message', function (event) {
     if (event.data !== 'signed-in') { return; }
     // The login frame is deliberately left mounted at full size; the
     // application frame is stacked over it, and the Notice over that.
     document.getElementById('app-frame').classList.remove('hidden');
     document.getElementById('notice').classList.remove('hidden');
+    // A single-document application routes without loading a document: the
+    // address gains a route marker while the page — and the session on it —
+    // stays exactly where it is. Anything comparing the whole address to the
+    // recorded start_url now sees a difference that is not a redirect.
+    history.replaceState({}, '', window.location.pathname + '?route=worklist');
   });
 })();
 </script>

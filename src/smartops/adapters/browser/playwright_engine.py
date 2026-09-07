@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Playwright, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
@@ -183,7 +184,13 @@ class PlaywrightBrowserAdapter:
         return session_expired(page, filters)
 
     def _ensure_authenticated(
-        self, context, page, request: ExtractionRequest, filters: dict[str, Any]
+        self,
+        context,
+        page,
+        request: ExtractionRequest,
+        filters: dict[str, Any],
+        *,
+        on_authenticated_page: Any = None,
     ) -> str | None:
         return ensure_authenticated(
             context,
@@ -193,6 +200,7 @@ class PlaywrightBrowserAdapter:
             credential_store=self._credential_store,
             session_state_path=request.session_state_path,
             pause_guard=self._prevent_debugger_pauses,
+            on_authenticated_page=on_authenticated_page,
         )
 
     @staticmethod
@@ -366,13 +374,20 @@ class PlaywrightBrowserAdapter:
         )
         page = session.open(plan["start_url"])
         try:
-            auth_message = self._ensure_authenticated(context, page, as_extraction, filters)
+            auth_message = self._ensure_authenticated(
+                context, page, as_extraction, filters, on_authenticated_page=session.adopt
+            )
             if auth_message:
                 self._capture_failure_evidence(page, as_extraction, auth_message)
                 return self._replay_failure(request, auth_message, started, auth_required=True)
-            # A sign-in redirect can land somewhere else; return to the recorded
-            # starting page before replaying the first action.
-            if page.url != plan["start_url"]:
+            # Sign-in may have handed the session to another tab, so the page to
+            # continue on is the one authentication settled on, not the one we
+            # opened.
+            page = session.current_page() or page
+            # Leftover tabs from the handoff would make "the main tab" ambiguous
+            # for the first step; close the ones that are ours and not this one.
+            session.drop_stale_pages()
+            if self._needs_start_url(page, plan):
                 page.goto(plan["start_url"], wait_until="domcontentloaded")
 
             for action in plan.get("actions") or []:
@@ -397,6 +412,41 @@ class PlaywrightBrowserAdapter:
             message = f"Repeating the recording failed: {exc}"
             self._capture_failure_evidence(page, as_extraction, message)
             return self._replay_failure(request, message, started, step_results=session.step_results)
+
+    @staticmethod
+    def _needs_start_url(page: Any, plan: dict[str, Any]) -> bool:
+        """Whether the first step really has to be reached by navigating.
+
+        The rule, and why it is not "is the address different":
+
+        * The page authentication settled on is the page that holds the
+          session. Reloading it is never free — a single-document application
+          such as Nexacro signs in *inside* the document it is already on, so a
+          reload unmounts the signed-in frames and puts the login screen back,
+          which is exactly how a successful login used to end as a step-1
+          failure.
+        * "Somewhere else" therefore means a different scheme, host, or path.
+          A query or fragment the application rewrote after login is its own
+          routing, not a redirect, and must not trigger a navigation.
+        * Even a genuinely different path is only navigated when the plan
+          depends on ``start_url`` to get there. A plan whose first step opens
+          its own address already says where it wants to be.
+        """
+        start = urlsplit(str(plan.get("start_url") or ""))
+        try:
+            current = urlsplit(str(page.url or ""))
+        except Exception:
+            return True  # no readable address: fall back to the recorded one
+        same_place = (current.scheme, current.netloc, current.path or "/") == (
+            start.scheme,
+            start.netloc,
+            start.path or "/",
+        )
+        if same_place:
+            return False
+        actions = plan.get("actions") or []
+        first = actions[0] if actions else {}
+        return (first.get("action") or "click") != "navigate"
 
     def _replay_outcome(
         self,

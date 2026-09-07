@@ -28,6 +28,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from ...core.errors import PermanentError
 
@@ -84,6 +85,72 @@ class ReplaySession:
         self._current = page
         page.goto(start_url, wait_until="domcontentloaded")
         return page
+
+    def adopt(self, page: Any) -> None:
+        """Continue on the page sign-in settled on, not the one we opened.
+
+        Signing in does not always hand the session back on the same tab: a
+        popup can replace its opener, and a portal can open the application in
+        a second tab and abandon the first. The authentication layer classifies
+        the pages and says which one is signed in; that page is the only one
+        carrying the session, so it becomes the current page here.
+
+        It is also moved to the front of the page list, because a recorded step
+        that says it happened on the "main" tab resolves to the first live page
+        — which would otherwise be the tab we opened and the site abandoned.
+        """
+        if page is None or _closed(page):
+            return  # a closed page carries nothing; keep what we have
+        self._track(page)
+        self._pages = [page] + [tracked for tracked in self._pages if tracked is not page]
+        self._current = page
+
+    def current_page(self) -> Any:
+        """The page the next step will act on."""
+        return self._current
+
+    def drop_stale_pages(self) -> list[str]:
+        """Leave exactly one page for the first step to act on.
+
+        Sign-in can leave leftovers behind: the blank page a persistent Chrome
+        profile starts with, a short-lived relay tab, or a second copy of the
+        portal opened during the handoff. A step recorded on the "main" tab
+        would resolve to whichever of those is first, so they are closed here.
+
+        Only pages this context owns are ever considered, and only when they
+        are blank or on the same host as the page we are keeping — a tab
+        belonging to something else is never touched.
+        """
+        keeper = self._current
+        if keeper is None:
+            return []
+        try:
+            keeper_host = urlsplit(keeper.url or "").netloc
+        except Exception:
+            return []
+        candidates: list[Any] = list(self._pages)
+        for page in list(getattr(self.context, "pages", None) or []):
+            if page not in candidates:
+                candidates.append(page)
+        closed: list[str] = []
+        for page in candidates:
+            if page is keeper or _closed(page):
+                continue
+            try:
+                url = page.url or ""
+            except Exception:
+                continue
+            host = urlsplit(url).netloc
+            if url not in ("", "about:blank") and host != keeper_host:
+                continue
+            try:
+                page.close()
+            except Exception:
+                continue  # a tab we cannot close is not a reason to stop
+            closed.append(url or "about:blank")
+        if closed:
+            self._pages = [tracked for tracked in self._pages if not _closed(tracked)]
+        return closed
 
     def _track(self, page: Any) -> None:
         if page not in self._pages:
