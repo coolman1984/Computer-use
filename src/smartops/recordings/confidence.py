@@ -198,22 +198,39 @@ def score_replay_safety(step: dict[str, Any]) -> DimensionScore:
 
 
 def score_step(step: dict[str, Any], observation: Any = None) -> StepConfidence:
-    """Score one step on every dimension, and report the one that would sink it.
+    """Score one step on every dimension, and report every one that would sink it.
 
     The overall score is the *worst* dimension, not an average: a step scored
     well on two dimensions and badly on the third is exactly as replayable as
     its worst dimension, and averaging would let that one real weakness hide
-    behind two unrelated strengths.
+    behind two unrelated strengths. The reason a person reads is different from
+    the score: a step with a made-up id *and* no observed effect is a more
+    serious, differently-fixed problem than either alone, so every dimension
+    below the weak line is named, worst first — never only the single worst
+    one, which would tell somebody to fix half the step and get flagged again
+    for the other half.
     """
     dimensions = {
         "target_identity": score_target_identity(step),
         "effect_observability": score_effect_observability(step, observation),
         "replay_safety": score_replay_safety(step),
     }
-    _, worst = min(dimensions.items(), key=lambda item: item[1].score)
+    overall = min(dimension.score for dimension in dimensions.values())
+    failing = sorted(
+        (dimension for dimension in dimensions.values() if dimension.score < WEAK_THRESHOLD),
+        key=lambda dimension: dimension.score,
+    )
+    if failing:
+        # Each reason is already a complete, capitalised sentence, so this
+        # reads as flowing prose rather than a bulleted list of fragments.
+        reason = " ".join(dimension.reason for dimension in failing)
+    else:
+        # Nothing is actually wrong; still say something concrete rather than
+        # leaving the field empty for a step that scored fine everywhere.
+        reason = min(dimensions.values(), key=lambda dimension: dimension.score).reason
     return StepConfidence(
-        overall=worst.score,
-        weak=worst.score < WEAK_THRESHOLD,
-        reason=worst.reason,
+        overall=overall,
+        weak=overall < WEAK_THRESHOLD,
+        reason=reason,
         dimensions=dimensions,
     )

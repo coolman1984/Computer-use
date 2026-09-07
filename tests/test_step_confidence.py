@@ -177,6 +177,29 @@ def test_overall_confidence_is_the_weakest_dimension_not_an_average():
     assert confidence.reason == confidence.dimensions["effect_observability"].reason
 
 
+def test_a_step_failing_two_dimensions_names_both_problems_in_its_reason():
+    """A made-up id *and* no observed effect is a more serious, differently-fixed
+    problem than either alone, so the reader must be told about both rather
+    than only whichever one happens to score lowest.
+    """
+    step = _step(
+        locator={"strategy": "css", "value": '[id="ext-gen-58203917"]', "fallbacks": []},
+        success={"type": "none"},
+        retry={"max_attempts": 3, "safe_to_repeat": True},  # kept strong on purpose
+    )
+
+    confidence = score_step(step)
+
+    assert confidence.weak
+    assert "made up when it was loaded" in confidence.reason
+    assert "nothing on the screen was seen to change" in confidence.reason.lower()
+    # Worst dimension first: effect_observability (0.0) scores lower than
+    # target_identity (0.35), so its sentence must lead.
+    assert confidence.reason.lower().index("nothing on the screen") < confidence.reason.lower().index(
+        "made up when it was loaded"
+    )
+
+
 def test_a_weak_steps_reason_is_written_for_a_non_technical_reader():
     # Effect and safety are both made deliberately strong here so the one real
     # weakness -- the generated id -- is unambiguously what the verdict is
