@@ -121,6 +121,43 @@ def test_typing_into_a_field_is_recorded_as_a_value(recorded, site) -> None:
     assert "reference" in typed[0]["locator"]["value"]
 
 
+def test_a_click_the_browser_swallows_is_still_recorded(recorded, site) -> None:
+    """A recording of G-MES lost the "tick the VD organisation" step: Nexacro's
+    tree toggles on mousedown and redraws the node before mouseup, so the
+    browser fires no click event for the gesture. Replay then asked for a
+    report with no organisation selected. The press itself must be recorded,
+    against the node that was pressed, exactly once.
+    """
+    state: dict[str, object] = {}
+
+    def tick_vd(page) -> None:
+        # This fixture replaces the node during mousedown.  Playwright's
+        # high-level locator click waits for the original node to remain
+        # actionable after that replacement, which is not how a human's
+        # physical gesture behaves and can spend the default action timeout
+        # retrying.  Drive the same mouse gesture a person makes instead.
+        box = page.locator("#org-vd-box").bounding_box()
+        assert box, "the fixture organisation control is not drawable"
+        x = box["x"] + box["width"] / 2
+        y = box["y"] + box["height"] / 2
+        page.mouse.move(x, y)
+        page.mouse.down()
+        # Allow the component's mousedown handler to replace the node before
+        # the physical release, precisely the problematic event topology.
+        page.wait_for_timeout(50)
+        page.mouse.up()
+        page.wait_for_timeout(600)  # longer than the recorder's click grace period
+        state["org"] = page.text_content("#org-state")
+        state["click_events"] = page.evaluate("window.__orgClickEvents")
+
+    steps = _capture(recorded, site, tick_vd)
+
+    assert state["org"] == "Org VD", "the fixture control did not toggle on the press"
+    clicks = [s for s in steps if s["action"] == "click"]
+    assert len(clicks) == 1, f"expected exactly one recorded click, got {len(clicks)}"
+    assert "org-vd-box" in clicks[0]["locator"]["value"], clicks[0]["locator"]
+
+
 def test_a_recorded_click_reaches_the_live_monitor_before_stop(recorded, site, tmp_path) -> None:
     """The webapp replaces the old separate recorder window, so its live
     counter must receive browser events while the recording is still open.

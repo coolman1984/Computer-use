@@ -189,17 +189,66 @@ _CAPTURE_SCRIPT = """
 
   document.addEventListener('blur', () => flushPending(), true);
 
+  // Some component libraries act on mousedown and re-render the pressed node
+  // before the mouse button comes back up. Nexacro's organisation tree does
+  // this: the checkbox toggles on the press, the tree redraws, and the browser
+  // never fires a click event for the gesture — or fires it on some ancestor
+  // that says nothing about which box was ticked. That is how a recording of
+  // G-MES lost the "tick VD" step and its replay asked for a report with no
+  // organisation selected. So the press is remembered here: a matching
+  // release with no click event shortly after is reported as the click it was,
+  // and a click that lands on an ancestor of the pressed node is reported
+  // against the node the person actually pressed.
+  const clickPayload = (el, e, w, h) => ({
+    action: 'click',
+    locator: locatorFor(el),
+    x: e.clientX / w, y: e.clientY / h,
+    ...relativePoint(el, e, w, h),
+    ...describe(el),
+  });
+  let press = null;
+  let pressTimer = null;
+  const PRESS_MATCH_PX = 8;
+  const CLICK_GRACE_MS = 250;
+
+  document.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !e.target || !e.target.tagName) return;
+    clearTimeout(pressTimer);
+    const w = innerWidth || 1, h = innerHeight || 1;
+    // The locator is taken now, while the pressed node is still in the DOM.
+    press = { el: e.target, at: Date.now(), x: e.clientX, y: e.clientY,
+              payload: clickPayload(e.target, e, w, h) };
+  }, true);
+
+  document.addEventListener('mouseup', (e) => {
+    if (!press || e.button !== 0) return;
+    const p = press;
+    const moved = Math.abs(e.clientX - p.x) > PRESS_MATCH_PX ||
+                  Math.abs(e.clientY - p.y) > PRESS_MATCH_PX;
+    if (moved || Date.now() - p.at > 1500) { press = null; return; }  // a drag, not a click
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => {
+      if (press !== p) return;  // a click event took care of it
+      press = null;
+      flushPending();
+      report(p.payload);
+    }, CLICK_GRACE_MS);
+  }, true);
+
   document.addEventListener('click', (e) => {
+    clearTimeout(pressTimer);
+    const p = press;
+    press = null;
     flushPending();
     const el = e.target;
     const w = innerWidth || 1, h = innerHeight || 1;
-    report({
-      action: 'click',
-      locator: locatorFor(el),
-      x: e.clientX / w, y: e.clientY / h,
-      ...relativePoint(el, e, w, h),
-      ...describe(el),
-    });
+    if (p && p.el !== el && el && el.contains && el.contains(p.el)) {
+      // The browser settled on a common ancestor because the pressed node was
+      // replaced; the person pressed the node, so record that.
+      report(p.payload);
+      return;
+    }
+    report(clickPayload(el, e, w, h));
   }, true);
 
   // "change" rather than "input": it fires once, when the person has finished,
