@@ -54,7 +54,23 @@ same app step. Do not introduce a second browser framework or a competing
 automation path.
 
 See [docs/DAILY_DOWNLOAD_FLOW.md](docs/DAILY_DOWNLOAD_FLOW.md) for the concise
-operator and troubleshooting guide.
+operator and troubleshooting guide, and
+[docs/RECORDER_ROADMAP.md](docs/RECORDER_ROADMAP.md) for how the capture side is
+being developed and in what order.
+
+## When the screenshots are grey
+
+Some screens cannot be photographed: the machine, not the page, withholds the
+browser's picture. SmartOps measures every frame it takes and will not pass off
+a blank one as evidence. To find out what a screen does offer, open it and run:
+
+```powershell
+python -m smartops probe <system>
+```
+
+It clicks nothing. It reports which sensors that screen exposes — a framework
+object model, accessible control names, stable ids, a usable picture — and which
+identity and which proof a recording there should be built on.
 
 ## Optional diagnostics
 

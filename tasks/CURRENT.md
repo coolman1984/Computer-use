@@ -23,6 +23,10 @@ Corporate replay is still blocked until the dedicated automation Chrome profile 
 
 ## Next proof
 
+0. Run `smartops probe <system>` on the real report screen while the operator is
+   present. It clicks nothing and downloads nothing; it reports which sensors
+   that screen actually exposes, so the recording strategy is chosen from
+   evidence. See `docs/RECORDER_ROADMAP.md`.
 1. Resolve the Chrome-profile / SSO-extension gate.
 2. Run one controlled corporate replay while the operator is present.
 3. Prove the expected report file was downloaded, opened, and validated for the configured workbook rules.
@@ -41,5 +45,6 @@ Read in this order:
 2. `AGENTS.md`
 3. `docs/DAILY_DOWNLOAD_FLOW.md`
 4. `skills/smartops-core-operator/SKILL.md`
-5. `docs/REPLAY_AUTOMATION_FIX_PLAN.md` only when working on replay/authentication
-6. The focused source files and tests for the blocker being changed
+5. `docs/RECORDER_ROADMAP.md` when working on capture, sensors, or agent tools
+6. `docs/REPLAY_AUTOMATION_FIX_PLAN.md` only when working on replay/authentication
+7. The focused source files and tests for the blocker being changed
