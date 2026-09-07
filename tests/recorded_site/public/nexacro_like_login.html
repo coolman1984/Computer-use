@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Nexacro-like single-document login</title>
+<!--
+  Reproduces the mechanism that broke unattended replay, with no corporate
+  detail in it: SSO finishes in a popup that closes itself, and the same
+  document then mounts the application frame and a Notice dialog OVER the
+  login frame. The login frame keeps its size and stays in the DOM, so
+  is_visible() on it still returns true after a successful sign-in.
+-->
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; }
+  #login-frame {
+    position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+    z-index: 1; background: #eef2ff; padding: 24px; box-sizing: border-box;
+  }
+  #app-frame {
+    position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+    z-index: 5; background: #ffffff; padding: 24px; box-sizing: border-box;
+  }
+  #notice {
+    position: absolute; left: 60px; top: 40px; width: 320px; height: 180px;
+    z-index: 9; background: #ffffff; border: 2px solid #333; box-sizing: border-box;
+  }
+  #notice-title { font-weight: bold; padding: 8px; }
+  #notice-close { position: absolute; right: 6px; top: 6px; width: 26px; height: 26px; }
+  #sso-form { position: absolute; left: 0; top: 0; z-index: 20; padding: 24px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div id="login-frame">
+  <h1>Sign in</h1>
+  <button id="sso" type="button">SSO</button>
+</div>
+
+<div id="app-frame" class="hidden">
+  <h1>Work list</h1>
+  <button id="open-report" type="button">Open report</button>
+</div>
+
+<div id="notice" class="hidden">
+  <div id="notice-title">Notice</div>
+  <p>Scheduled maintenance window.</p>
+  <button id="notice-close" type="button" aria-label="Close">x</button>
+</div>
+
+<script>
+(function () {
+  var isSsoWindow = window.location.search.indexOf('sso=1') >= 0;
+
+  if (isSsoWindow) {
+    // The credential fields exist only in the SSO window, never in the
+    // application document, so nothing can autofill them there.
+    document.getElementById('login-frame').classList.add('hidden');
+    document.getElementById('notice').remove();
+    var form = document.createElement('div');
+    form.id = 'sso-form';
+    form.innerHTML =
+      '<h1>Corporate sign-in</h1>' +
+      '<input id="userNameInput" name="user" autocomplete="off"/>' +
+      '<input id="passwordInput" name="pass" type="password" autocomplete="off"/>' +
+      '<button id="submitButton" type="button">Continue</button>';
+    document.body.appendChild(form);
+    document.getElementById('submitButton').addEventListener('click', function () {
+      if (window.opener) {
+        window.opener.postMessage('signed-in', '*');
+      }
+      // Close on the next turn, so the window is not torn down from inside
+      // the click handler that is still being dispatched.
+      setTimeout(function () { window.close(); }, 50);
+    });
+    return;
+  }
+
+  document.getElementById('sso').addEventListener('click', function () {
+    window.open(window.location.pathname + '?sso=1', 'sso', 'width=520,height=420');
+  });
+
+  document.getElementById('notice-close').addEventListener('click', function () {
+    document.getElementById('notice').classList.add('hidden');
+  });
+
+  window.addEventListener('message', function (event) {
+    if (event.data !== 'signed-in') { return; }
+    // The login frame is deliberately left mounted at full size; the
+    // application frame is stacked over it, and the Notice over that.
+    document.getElementById('app-frame').classList.remove('hidden');
+    document.getElementById('notice').classList.remove('hidden');
+  });
+})();
+</script>
+
+</body>
+</html>

@@ -399,3 +399,13 @@ Nexacro DOM surface, the recorder also stores the point as fractions of that
 element. Replay first locates the element and then scales the point to its current
 size, so the action works across normal desktop resolutions without absolute
 screen coordinates. A secret-bearing href selector is rejected whole.
+
+## D064 — Signed-in state is classified from independent signals; a covered login frame is not a sign-out
+A single-document application finishes SSO by mounting its signed-in frames over
+the login frame instead of removing it, so "the login control is visible" says
+nothing about the session. The state is now decided from three signals gathered
+separately: whether the login control would actually receive a pointer event
+(a trial click, not visibility), whether the signed-in marker has any visible
+match, and whether a Notice dialog is open. Only an unambiguous signed-out
+result may trigger the one permitted credential submission; a still-mounted
+login control under a visible signed-in marker never does.

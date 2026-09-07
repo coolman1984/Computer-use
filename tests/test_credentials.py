@@ -31,9 +31,9 @@ reports:
 
 def test_credential_store_round_trip_and_masked_repr() -> None:
     store = InMemoryCredentialStore()
-    store.put("mes_demo", "m.labib", "super-secret")
+    store.put("mes_demo", "demo-operator", "super-secret")
     item = store.get("mes_demo")
-    assert item and item.username == "m.labib" and item.password == "super-secret"
+    assert item and item.username == "demo-operator" and item.password == "super-secret"
     assert "super-secret" not in repr(item)
     assert store.delete("mes_demo") is True
     assert store.get("mes_demo") is None
@@ -48,15 +48,15 @@ def test_credentials_api_never_accepts_or_returns_a_password(services, tmp_path)
     unsupported = client.put(
         "/api/credentials/mes_demo",
         headers={"X-SmartOps-Request": "web"},
-        json={"username": "m.labib", "password": "super-secret"},
+        json={"username": "demo-operator", "password": "super-secret"},
     )
     assert unsupported.status_code == 405
 
     # Simulate what the isolated native child process writes directly to the
     # store, then verify the HTTP read side remains password-free.
-    services.credentials.put("mes_demo", "m.labib", "super-secret")
+    services.credentials.put("mes_demo", "demo-operator", "super-secret")
     listing = client.get("/api/credentials").json()["items"][0]
-    assert listing["stored"] is True and listing["username"] == "m.labib"
+    assert listing["stored"] is True and listing["username"] == "demo-operator"
     assert "password" not in listing and "super-secret" not in str(listing)
 
     deleted = client.delete("/api/credentials/mes_demo", headers={"X-SmartOps-Request": "web"})

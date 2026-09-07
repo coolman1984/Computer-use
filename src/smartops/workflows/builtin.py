@@ -25,6 +25,7 @@ from ..ports.notify import Alert
 from ..ports.validation import ValidationRules
 from ..sessions import session_path
 from ..storage.paths import ensure_raw_dir, slug
+from .profiles import AUTH_TIMEOUT_FIELDS
 
 
 def echo(ctx: StepContext) -> StepResult:
@@ -284,6 +285,10 @@ def _auth_filters(services: Any, system_key: str) -> dict[str, Any]:
             filters["popup_trigger_selector"] = auth.popup_trigger_selector
         if auth.notice_close_selector:
             filters["notice_close_selector"] = auth.notice_close_selector
+        for timeout_field in AUTH_TIMEOUT_FIELDS:
+            timeout_value = getattr(auth, timeout_field, None)
+            if timeout_value is not None:
+                filters[timeout_field] = timeout_value
     return filters
 
 

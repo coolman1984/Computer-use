@@ -52,6 +52,19 @@ class AuthProfile:
     language_selector: str = ""
     popup_trigger_selector: str = ""
     notice_close_selector: str = ""
+    # Optional stage budgets in milliseconds. They stay None unless a system
+    # sets them, so the adapter keeps its own defaults; a system that needs a
+    # longer Notice or sign-in wait can now say so and have it reach the adapter.
+    notice_timeout_ms: int | None = None
+    notice_probe_timeout_ms: int | None = None
+    login_success_timeout_ms: int | None = None
+
+
+AUTH_TIMEOUT_FIELDS = (
+    "notice_timeout_ms",
+    "notice_probe_timeout_ms",
+    "login_success_timeout_ms",
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +125,10 @@ class ReportProfile:
                     filters["popup_trigger_selector"] = auth.popup_trigger_selector
                 if auth.notice_close_selector:
                     filters["notice_close_selector"] = auth.notice_close_selector
+                for timeout_field in AUTH_TIMEOUT_FIELDS:
+                    timeout_value = getattr(auth, timeout_field)
+                    if timeout_value is not None:
+                        filters[timeout_field] = timeout_value
         params: dict[str, Any] = {
             "report": self.key,
             "period": self.period,
@@ -172,6 +189,26 @@ def _parse_alert(raw: dict[str, Any]) -> AlertRule:
     )
 
 
+def _parse_timeout_ms(raw: dict[str, Any], field_name: str, *, system_key: str) -> int | None:
+    """An optional stage budget in milliseconds. Absent stays absent."""
+    value = raw.get(field_name)
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ConfigurationError(
+            f"{field_name} must be a whole number of milliseconds ({system_key})",
+            details={"system": system_key, "field": field_name},
+        ) from None
+    if parsed <= 0:
+        raise ConfigurationError(
+            f"{field_name} must be greater than zero ({system_key})",
+            details={"system": system_key, "field": field_name},
+        )
+    return parsed
+
+
 def _parse_auth(raw: dict[str, Any], *, system_key: str) -> AuthProfile:
     mode = raw.get("mode", "none") or "none"
     if mode not in ("none", "session", "unattended"):
@@ -218,6 +255,13 @@ def _parse_auth(raw: dict[str, Any], *, system_key: str) -> AuthProfile:
         language_selector=language_selector,
         popup_trigger_selector=popup_trigger_selector,
         notice_close_selector=notice_close_selector,
+        notice_timeout_ms=_parse_timeout_ms(raw, "notice_timeout_ms", system_key=system_key),
+        notice_probe_timeout_ms=_parse_timeout_ms(
+            raw, "notice_probe_timeout_ms", system_key=system_key
+        ),
+        login_success_timeout_ms=_parse_timeout_ms(
+            raw, "login_success_timeout_ms", system_key=system_key
+        ),
     )
 
 
@@ -350,6 +394,12 @@ def system_to_yaml_dict(profile: SystemProfile) -> dict[str, Any]:
         value = getattr(profile.auth, field_name)
         if value:
             auth[field_name] = value
+    # Saving a system from the web app must not silently drop a stage budget
+    # someone set by hand, so the optional timeouts round-trip like the rest.
+    for field_name in AUTH_TIMEOUT_FIELDS:
+        timeout_value = getattr(profile.auth, field_name)
+        if timeout_value is not None:
+            auth[field_name] = timeout_value
 
     reports: list[dict[str, Any]] = []
     for report in profile.reports:

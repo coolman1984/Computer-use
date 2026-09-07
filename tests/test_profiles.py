@@ -365,6 +365,71 @@ def test_unattended_popup_auth_carries_the_reusable_login_sequence() -> None:
     assert filters["notice_close_selector"] == "#close-notice"
 
 
+def test_auth_stage_timeouts_reach_the_adapter_and_survive_a_round_trip() -> None:
+    """A Notice budget written in YAML must not be lost on the way to the adapter.
+
+    These three values used to have no field on the auth profile at all, so the
+    adapter always used its own defaults and saving the system from the web app
+    deleted them from the file.
+    """
+    import yaml
+
+    from smartops.workflows.profiles import system_to_yaml_dict
+
+    raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
+    raw["auth"].update({
+        "mode": "unattended",
+        "credential_ref": "mes-prod",
+        "username_selector": "#username",
+        "password_selector": "#password",
+        "submit_selector": "button[type=submit]",
+        "notice_timeout_ms": 60000,
+        "notice_probe_timeout_ms": 5000,
+        "login_success_timeout_ms": 90000,
+    })
+
+    profile = parse_system_profile(raw)
+    assert profile.auth.notice_timeout_ms == 60000
+    assert profile.auth.notice_probe_timeout_ms == 5000
+    assert profile.auth.login_success_timeout_ms == 90000
+
+    filters = profile.to_run_params("daily_sales")["filters"]
+    assert filters["notice_timeout_ms"] == 60000
+    assert filters["notice_probe_timeout_ms"] == 5000
+    assert filters["login_success_timeout_ms"] == 90000
+
+    written = system_to_yaml_dict(profile)
+    assert written["auth"]["notice_timeout_ms"] == 60000
+    reparsed = parse_system_profile(yaml.safe_load(yaml.safe_dump(written)))
+    assert reparsed.auth.notice_timeout_ms == 60000
+    assert reparsed.auth.notice_probe_timeout_ms == 5000
+    assert reparsed.auth.login_success_timeout_ms == 90000
+
+
+def test_auth_stage_timeouts_stay_absent_when_not_configured() -> None:
+    import yaml
+
+    from smartops.workflows.profiles import AUTH_TIMEOUT_FIELDS, system_to_yaml_dict
+
+    profile = parse_system_profile(yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE))
+
+    assert all(getattr(profile.auth, name) is None for name in AUTH_TIMEOUT_FIELDS)
+    filters = profile.to_run_params("daily_sales")["filters"]
+    assert not any(name in filters for name in AUTH_TIMEOUT_FIELDS)
+    written = system_to_yaml_dict(profile)
+    assert not any(name in written["auth"] for name in AUTH_TIMEOUT_FIELDS)
+
+
+def test_auth_stage_timeout_must_be_a_positive_number() -> None:
+    import yaml
+
+    raw = yaml.safe_load(VALID_YAML_WITH_AUTH_AND_SCHEDULE)
+    raw["auth"]["notice_timeout_ms"] = "soon"
+
+    with pytest.raises(ConfigurationError, match="notice_timeout_ms"):
+        parse_system_profile(raw)
+
+
 def test_iter_scheduled_returns_only_active_pairs(tmp_path: Path) -> None:
     (tmp_path / "erp.yaml").write_text(VALID_YAML_WITH_AUTH_AND_SCHEDULE, encoding="utf-8")
     (tmp_path / "unscheduled.yaml").write_text(
