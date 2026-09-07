@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rich text note</title>
+<!-- A div the person types into. It has no `value`, so a recorder that only
+     watches inputs records the click that focused it and nothing that was
+     written in it. -->
+<body style="font:15px system-ui">
+  <div id="note" contenteditable="true"
+       style="border:1px solid #999;min-height:60px;padding:6px">
+  </div>
+  <button id="btnSave">Save</button>
+</body>

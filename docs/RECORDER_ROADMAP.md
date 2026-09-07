@@ -90,6 +90,28 @@ change the plan:
 **Stop condition:** if the probe reports no usable identity, do not record that
 screen. Find the screen that does.
 
+### Phase 3b — Survive the shapes real applications actually have · **done**
+
+Seven ordinary things about modern web applications used to end a recording
+without saying so. Each one now has a page in `tests/recorded_site/public/torture/`
+that reproduces it, a capture path that handles it, and a replay path that can
+repeat it.
+
+| What broke it | What was happening | What happens now |
+| --- | --- | --- |
+| A control inside a web component | The browser reports the *host*, so the recording held the wrapper and replay clicked nothing | The composed path gives the real element |
+| Ids regenerated on every load | A locator that is valid and matches nothing tomorrow | Generated ids rank last, behind what the control is *called* |
+| A menu that opens on hover | Only the click was recorded; replaying it found a closed menu | The revealing hover is recorded as its own step — including CSS-only menus, which fire no event and change no attribute |
+| An export behind a native confirmation | Playwright cancelled it invisibly, and no file was ever made | The dialog is answered, recorded with its message, and answered again at replay |
+| A rich-text field | It has no `value`, so what was typed was simply absent | Typing into a contenteditable is captured like any other field |
+| A form two frames deep | — | Kept, with its frame identity, so it replays against the right document |
+| A right-click, and a drag | Both discarded silently — one as "not a left click", the other as a stray hand | Recorded as their own actions, with both ends of the drag |
+
+The rule these share is the one in the last section: **a gesture the platform
+cannot represent must fail loudly, never disappear.** Two of these tests exist
+only to prove the failure — a plan missing its hover, and a drag with no
+destination, both of which now stop rather than click somewhere arbitrary.
+
 ### Phase 4 — One timeline instead of five subsystems
 
 Today each sense keeps its own notes: steps in the database, frames on disk,
@@ -158,12 +180,12 @@ This is the phase that pays back the previous four, and it cannot be built
 before them: a score is only worth having once there are several senses to
 disagree.
 
-### Phase 9 — Break every sensor on purpose
+### Phase 9 — Break every sensor on purpose · **started**
 
-A local site that is deliberately hostile: generated ids, a popup login, a grid
-that fills late, an element replaced on mousedown, a download with no extension,
-an HTML login page named `.xlsx`, a screen that cannot be photographed. Some of
-these fixtures exist already.
+The torture lab exists (`tests/torture_lab` and `tests/torture_replay`) and
+covers the capture shapes above. Still to add as the later phases land: a grid
+that fills late, a popup login, an HTML login page named `.xlsx`, and a sensor
+that is switched off mid-recording.
 
 The test is not that the recorder succeeds. It is that when a sensor dies, the
 recorder notices and uses the next one — and when none is left, it says so

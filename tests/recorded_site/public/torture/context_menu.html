@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Right-click export</title>
+<!-- Export lives on a right-click menu. A recorder that only watches left
+     clicks loses the whole gesture and the recording jumps from the row to a
+     result nothing produced. -->
+<body style="font:15px system-ui">
+  <div id="resultRow" style="padding:20px;background:#eef">Result row</div>
+  <p id="outcome">nothing yet</p>
+  <script>
+    document.getElementById('resultRow').addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      document.getElementById('outcome').textContent = 'context menu opened';
+    });
+  </script>
+</body>

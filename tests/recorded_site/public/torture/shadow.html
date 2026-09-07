@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Shadow report</title>
+<!-- The control the person clicks lives inside a web component. The browser
+     reports the *host* as the event target, so a recorder that trusts
+     event.target writes down the wrapper and replay clicks the wrong thing —
+     or nothing. -->
+<body style="font:15px system-ui">
+  <report-panel></report-panel>
+  <p id="outcome">nothing yet</p>
+  <script>
+    class ReportPanel extends HTMLElement {
+      connectedCallback() {
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+          <label>Reference <input id="shadowReference" name="reference"></label>
+          <button id="shadowInquiry">Inquiry</button>
+        `;
+        root.getElementById('shadowInquiry').addEventListener('click', () => {
+          document.getElementById('outcome').textContent = 'inquiry ran';
+        });
+      }
+    }
+    customElements.define('report-panel', ReportPanel);
+  </script>
+</body>

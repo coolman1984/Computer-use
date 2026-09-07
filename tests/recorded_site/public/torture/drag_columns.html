@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Reorder columns</title>
+<!-- The report only comes out right if a column is moved first. A press that
+     moves is discarded as a stray hand by every naive recorder, so this whole
+     step used to disappear from the recording without a word. -->
+<style>
+  .slot { display:inline-block; width:120px; padding:14px; margin:4px;
+          border:1px solid #789; background:#eef; text-align:center }
+</style>
+<body style="font:15px system-ui">
+  <div id="colPlant" class="slot" draggable="true">Plant</div>
+  <div id="dropZone" class="slot">Drop here</div>
+  <p id="outcome">nothing yet</p>
+  <script>
+    const zone = document.getElementById('dropZone');
+    document.getElementById('colPlant').addEventListener('dragstart', (event) => {
+      event.dataTransfer.setData('text/plain', 'colPlant');
+    });
+    zone.addEventListener('dragover', (event) => event.preventDefault());
+    zone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      document.getElementById('outcome').textContent = 'column moved';
+    });
+  </script>
+</body>

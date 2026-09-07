@@ -29,7 +29,9 @@ PLAN_VERSION = 2
 _LAYER_CONFIDENCE = {"dom": "high", "visual": "low", "manual": "none"}
 
 # Actions that do not act on an element and so need no locator.
-_NO_ELEMENT = {"switch_page", "switch_frame", "navigate", "wait_for", "download"}
+# Actions that are not performed against an element: a tab change, a wait, a
+# file arriving, or a dialog the browser answered on its own.
+_NO_ELEMENT = {"switch_page", "switch_frame", "navigate", "wait_for", "download", "dialog"}
 _NEXT_ACTIONABLE_ACTIONS = {"click", "fill", "select", "check"}
 _OBSERVED_BEFORE = "_observed_visible_before"
 _OBSERVED_AFTER = "_observed_visible_after"

@@ -111,6 +111,7 @@ class ReplaySession:
         self._downloads_before = 0
         self._responses: list[dict[str, Any]] = []
         self._responses_before = 0
+        self._dialogs: list[dict[str, Any]] = []
 
     # ---------- setup ----------
 
@@ -120,11 +121,26 @@ class ReplaySession:
         # the very first action is still caught.
         self.context.on("page", self._track)
         self.context.on("response", self._on_response)
+        # Answer the browser's own dialogs the way the recording did. Without a
+        # listener Playwright dismisses every one of them, so an export behind a
+        # confirmation silently produces nothing and a beforeunload prompt can
+        # leave the run stuck on a page it is trying to leave.
+        self.context.on("dialog", self._on_dialog)
         page = self.context.new_page()
         self._track(page, main=True)
         self._current = page
         page.goto(start_url, wait_until="domcontentloaded")
         return page
+
+    def _on_dialog(self, dialog: Any) -> None:
+        """Accept a native dialog, matching what the recording accepted."""
+        self._dialogs.append(
+            {"type": getattr(dialog, "type", ""), "message": (getattr(dialog, "message", "") or "")[:200]}
+        )
+        try:
+            dialog.accept()
+        except Exception:
+            pass  # the page closed with the dialog still open
 
     def _track(self, page: Any, *, main: bool = False) -> None:
         """Track a page once and assign a stable replay identity."""
@@ -342,9 +358,16 @@ class ReplaySession:
             "switch_page": self._do_switch_page,
             "switch_frame": self._do_switch_frame,
             "wait_for": self._do_wait,
+            "hover": self._do_hover,
+            "drag": self._do_drag,
+            "context_click": self._do_context_click,
             # A download is the consequence of the click before it, and the
             # context listener already has the file. Nothing to perform.
             "download": lambda _: None,
+            # So is a dialog: it appears because of the action before it, and
+            # the context listener above has already answered it. Repeating it
+            # here would mean summoning a dialog that is no longer on screen.
+            "dialog": lambda _: None,
         }.get(kind)
         if handler is None:
             raise StepFailed(
@@ -418,6 +441,42 @@ class ReplaySession:
             action.get("seq", 0),
             "the recorded press/release control is not uniquely actionable",
         )
+
+    def _do_hover(self, action: dict[str, Any]) -> None:
+        """Rest the pointer where the person rested it.
+
+        Recorded only when the click that followed landed on something that had
+        just appeared — a menu that exists while the pointer is on its trigger.
+        Replaying the click alone finds nothing, because by then it has closed.
+        """
+        self._locate(action).hover()
+
+    def _do_drag(self, action: dict[str, Any]) -> None:
+        """Move one element onto another, the way the recording saw it happen.
+
+        Both ends are resolved from their own locator chains, so a drag whose
+        destination has been renamed fails as a missing element rather than
+        dropping the item somewhere arbitrary.
+        """
+        inputs = action.get("inputs") or {}
+        destination = {
+            "locator": {
+                "strategy": "css",
+                "value": inputs.get("drop_selector", ""),
+                "fallbacks": list(inputs.get("drop_fallbacks") or []),
+            },
+            "target": action.get("target") or {},
+            "seq": action.get("seq", 0),
+        }
+        if not (destination["locator"]["value"] or destination["locator"]["fallbacks"]):
+            raise StepFailed(
+                action.get("seq", 0),
+                "this drag has no recorded destination, so there is nowhere safe to drop it",
+            )
+        self._locate(action).drag_to(self._locate(destination))
+
+    def _do_context_click(self, action: dict[str, Any]) -> None:
+        self._locate(action).click(button="right")
 
     def _do_fill(self, action: dict[str, Any]) -> None:
         self._locate(action).fill(self._value_for(action))

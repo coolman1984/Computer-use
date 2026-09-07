@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rotating ids</title>
+<!-- Every id is regenerated on load. A recording that keeps them looks perfect
+     and matches nothing tomorrow, so the recorder has to prefer an identity
+     that means something: what the control is called. -->
+<body style="font:15px system-ui">
+  <div id="wrap"></div>
+  <p id="outcome">nothing yet</p>
+  <script>
+    const stamp = () => 'ext-gen-' + Math.floor(Math.random() * 1e9);
+    const button = document.createElement('button');
+    button.id = stamp();
+    button.textContent = 'Inquiry';
+    button.addEventListener('click', () => {
+      document.getElementById('outcome').textContent = 'inquiry ran';
+    });
+    const field = document.createElement('input');
+    field.id = stamp();
+    field.setAttribute('aria-label', 'Reference');
+    document.getElementById('wrap').append(field, button);
+  </script>
+</body>

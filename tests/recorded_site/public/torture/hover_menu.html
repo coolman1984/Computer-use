@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Hover menu</title>
+<!-- The menu item only exists while the pointer rests on its trigger. Replaying
+     the click on its own finds nothing, because by then the menu has closed. -->
+<style>
+  .menu { display: none; position: absolute; background: #eef; padding: 8px; }
+  .trigger:hover + .menu, .menu:hover { display: block; }
+</style>
+<body style="font:15px system-ui">
+  <span class="trigger" id="reportsMenu" tabindex="0">Reports</span>
+  <div class="menu"><button id="dailyReport">Daily report</button></div>
+  <p id="outcome">nothing yet</p>
+  <script>
+    document.getElementById('dailyReport').addEventListener('click', () => {
+      document.getElementById('outcome').textContent = 'daily opened';
+    });
+  </script>
+</body>

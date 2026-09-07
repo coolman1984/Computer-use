@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Export behind a confirmation</title>
+<!-- The export only happens if the person agrees to a native confirm. With
+     nothing listening the browser cancels it silently, and the recording ends
+     up holding a click that produced no file. -->
+<body style="font:15px system-ui">
+  <button id="btnExport">Export</button>
+  <p id="outcome">nothing yet</p>
+  <script>
+    document.getElementById('btnExport').addEventListener('click', () => {
+      if (!confirm('Export the daily report now?')) {
+        document.getElementById('outcome').textContent = 'export cancelled';
+        return;
+      }
+      document.getElementById('outcome').textContent = 'export confirmed';
+      const blob = new Blob(['reference,amount\nA-1,10\n'], { type: 'application/octet-stream' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'daily-report';   // deliberately no extension
+      document.body.appendChild(link);
+      link.click();
+    });
+  </script>
+</body>

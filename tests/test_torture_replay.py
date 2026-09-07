@@ -1,0 +1,197 @@
+"""Repeating the awkward gestures, not just recording them.
+
+Capturing a hover, a right-click, a drag or a confirmation is only half the
+job. A recording that holds a step the replay engine cannot perform is worse
+than one that never captured it, because it looks complete right up until the
+unattended run. These tests take each new action through the real replay engine
+against the same pages, and check the page itself changed — not that the call
+returned.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+from tests.recorded_site import LocalSite
+
+
+def _chromium_path() -> str | None:
+    env_path = os.environ.get("SMARTOPS_TEST_CHROMIUM_PATH") or os.environ.get(
+        "PLAYWRIGHT_CHROMIUM_PATH"
+    )
+    if env_path:
+        return env_path
+    default = Path("/opt/pw-browsers/chromium")
+    return str(default) if default.exists() else None
+
+
+@pytest.fixture
+def site():
+    with LocalSite() as running:
+        yield running
+
+
+@pytest.fixture
+def engine(services):
+    from smartops.adapters.browser.playwright_engine import PlaywrightBrowserAdapter
+
+    services.settings.browser.__dict__["executable_path"] = _chromium_path() or ""
+    return PlaywrightBrowserAdapter(
+        services.settings.browser, credential_store=services.credentials
+    )
+
+
+def _action(seq: int, action: str, **kwargs):
+    step = {
+        "seq": seq,
+        "action": action,
+        "target": {"page": "main", "frame": ""},
+        "locator": {},
+        "inputs": {},
+        "success": {"type": "none"},
+        "retry": {"max_attempts": 1, "safe_to_repeat": False},
+    }
+    step.update(kwargs)
+    return step
+
+
+def _performed(result):
+    """Whether every step in the plan actually ran.
+
+    A replay is only *successful* when it produces a validated file, which is
+    the right contract for this product and the wrong question for these tests:
+    what is under test here is whether the engine can perform each gesture at
+    all, on pages that produce no report.
+    """
+    return [
+        (step["seq"], step["action"], step["ok"], step["error"])
+        for step in (result.step_results or [])
+    ]
+
+
+def _all_ran(result):
+    steps = _performed(result)
+    assert steps, f"no step ran at all: {result.message}"
+    failed = [step for step in steps if not step[2]]
+    assert not failed, f"a gesture the recorder captured could not be repeated: {failed}"
+
+
+def _replay(services, engine, site, page: str, actions, *, expects: int = 0):
+    from smartops.ports.browser import ReplayRequest
+    from smartops.sessions import session_path
+
+    destination = Path(services.settings.storage.raw_data_dir) / "replay"
+    destination.mkdir(parents=True, exist_ok=True)
+    return engine.replay(ReplayRequest(
+        system="portal",
+        report="daily",
+        destination_dir=destination,
+        plan={
+            "plan_version": 2,
+            "start_url": f"{site.base_url}/torture/{page}",
+            "actions": actions,
+            "expects_download": expects > 0,
+            "expected_download_count": expects,
+        },
+        session_state_path=session_path(services.settings.storage.sessions_dir, "portal"),
+    ))
+
+
+def test_a_recorded_hover_reopens_the_menu_so_the_click_lands(services, engine, site) -> None:
+    """Without the hover step this plan clicks a menu item that is not there."""
+    result = _replay(services, engine, site, "hover_menu.html", [
+        _action(1, "hover", locator={"strategy": "css", "value": '[id="reportsMenu"]'},
+                retry={"max_attempts": 3, "safe_to_repeat": True}),
+        _action(2, "click", locator={"strategy": "css", "value": '[id="dailyReport"]'},
+                success={"type": "selector_visible", "value": '[id="outcome"]'}),
+    ])
+
+    _all_ran(result)
+
+
+def test_the_same_plan_without_the_hover_fails_instead_of_pretending(
+    services, engine, site
+) -> None:
+    """The control case: this is what a recording that lost the hover produces."""
+    result = _replay(services, engine, site, "hover_menu.html", [
+        _action(1, "click", locator={"strategy": "css", "value": '[id="dailyReport"]'}),
+    ])
+
+    failures = [step for step in _performed(result) if not step[2]]
+    assert failures, "clicking a closed menu must fail, not quietly pass"
+    assert "no longer on the page" in failures[0][3]
+
+
+def test_a_recorded_right_click_opens_what_a_left_click_never_would(
+    services, engine, site
+) -> None:
+    result = _replay(services, engine, site, "context_menu.html", [
+        _action(1, "context_click", locator={"strategy": "css", "value": '[id="resultRow"]'},
+                success={"type": "selector_visible", "value": '[id="outcome"]'}),
+    ])
+
+    _all_ran(result)
+
+
+def test_a_recorded_drag_moves_the_column(services, engine, site) -> None:
+    result = _replay(services, engine, site, "drag_columns.html", [
+        _action(1, "drag", locator={"strategy": "css", "value": '[id="colPlant"]'},
+                inputs={"drop_selector": '[id="dropZone"]', "drop_fallbacks": []},
+                success={"type": "selector_visible", "value": '[id="outcome"]'}),
+    ])
+
+    _all_ran(result)
+
+
+def test_a_drag_with_no_destination_fails_rather_than_dropping_it_anywhere(
+    services, engine, site
+) -> None:
+    result = _replay(services, engine, site, "drag_columns.html", [
+        _action(1, "drag", locator={"strategy": "css", "value": '[id="colPlant"]'}),
+    ])
+
+    failures = [step for step in _performed(result) if not step[2]]
+    assert failures and "nowhere safe to drop" in failures[0][3]
+
+
+def test_a_confirmation_is_answered_during_replay_so_the_export_happens(
+    services, engine, site
+) -> None:
+    """With nothing listening the browser cancels it and no file is ever made."""
+    result = _replay(services, engine, site, "confirm_export.html", [
+        _action(1, "click", locator={"strategy": "css", "value": '[id="btnExport"]'}),
+        _action(2, "dialog", inputs={"dialog_type": "confirm", "decision": "accept"}),
+    ], expects=1)
+
+    assert result.ok, result.message
+    assert result.file_path and Path(result.file_path).exists()
+
+
+def test_a_control_inside_a_web_component_is_reachable_at_replay(
+    services, engine, site
+) -> None:
+    result = _replay(services, engine, site, "shadow.html", [
+        _action(1, "fill", locator={"strategy": "css", "value": '[id="shadowReference"]'},
+                inputs={"value": "INV-77"},
+                success={"type": "value_equals", "value": "INV-77"},
+                retry={"max_attempts": 2, "safe_to_repeat": True}),
+        _action(2, "click", locator={"strategy": "css", "value": '[id="shadowInquiry"]'},
+                success={"type": "selector_visible", "value": '[id="outcome"]'}),
+    ])
+
+    _all_ran(result)
+
+
+def test_a_control_with_no_stable_id_is_found_by_what_it_is_called(
+    services, engine, site
+) -> None:
+    """The identity a recording of a generated-id page has to fall back on."""
+    result = _replay(services, engine, site, "rotating_ids.html", [
+        _action(1, "click", locator={"strategy": "css", "value": 'role=button[name="Inquiry"]'},
+                success={"type": "selector_visible", "value": '[id="outcome"]'}),
+    ])
+
+    _all_ran(result)

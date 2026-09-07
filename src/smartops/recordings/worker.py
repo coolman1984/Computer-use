@@ -54,21 +54,79 @@ _CAPTURE_SCRIPT = """
 (() => {
   const q = (v) => JSON.stringify(v);
 
-  // Several ways to find the same element, best first. Replay tries them in
-  // order, so a page that drops its ids can still be driven by name or label.
+  // The element the person actually touched. Inside a web component the browser
+  // reports the *host* as the event target — click a button in a shadow root and
+  // e.target is the custom element wrapping it, which is useless as a locator
+  // and often not clickable at all. The composed path starts at the real node,
+  // so it is the truth wherever the shadow root is open. A closed one reveals
+  // nothing to anybody, and the host is then recorded honestly as what we saw.
+  const realTarget = (e) => {
+    try {
+      const path = e.composedPath && e.composedPath();
+      if (path && path.length && path[0] && path[0].nodeType === 1) return path[0];
+    } catch (_) { /* not a composed event */ }
+    return e.target;
+  };
+
+  // An id a framework made up this morning. Recording one as the primary way to
+  // find an element is how an automation passes its test run and fails the next
+  // day: the selector is perfectly valid and matches nothing. These ids are
+  // still kept, but last, behind every identity that means something.
+  const GENERATED_ID = /(ext-gen|gwt-uid|yui_|__BVID__|:r[0-9a-z]+:|[0-9a-f]{8}-[0-9a-f]{4}-|\\d{7,})/i;
+
+  // What the control is, when the markup does not say. A page of anonymous divs
+  // with generated ids is still perfectly addressable as "the button called
+  // Inquiry" — which is the only identity some enterprise screens ever offer.
+  const IMPLICIT_ROLE = {
+    a: 'link', button: 'button', select: 'combobox', textarea: 'textbox',
+    summary: 'button', h1: 'heading', h2: 'heading', h3: 'heading',
+  };
+  const roleOf = (el) => {
+    const explicit = el.getAttribute && el.getAttribute('role');
+    if (explicit) return explicit.trim().split(/\\s+/)[0];
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'input') {
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      return { checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button',
+               reset: 'button', search: 'searchbox' }[type] || 'textbox';
+    }
+    if (tag === 'a' && !el.getAttribute('href')) return '';
+    return IMPLICIT_ROLE[tag] || '';
+  };
+  const accessibleName = (el) => {
+    const aria = (el.getAttribute && el.getAttribute('aria-label')) || '';
+    if (aria.trim()) return aria.trim();
+    const title = (el.getAttribute && el.getAttribute('title')) || '';
+    if (title.trim()) return title.trim();
+    const text = (el.innerText || el.textContent || '').trim();
+    // A whole panel's text is not a name. Only something short enough to be a
+    // label is worth addressing an element by.
+    return text.length > 0 && text.length <= 60 ? text.replace(/\\s+/g, ' ') : '';
+  };
+
+  // Several ways to find the same element, strongest identity first. Replay
+  // tries them in order, so a page that regenerates its ids between releases can
+  // still be driven by name, by test id, or by what its controls are called.
   function locatorFor(el) {
     const out = { strategy: 'css', value: '', fallbacks: [] };
     if (!el || !el.tagName) return out;
     const add = (sel) => { if (sel && !out.fallbacks.includes(sel)) out.fallbacks.push(sel); };
-    if (el.id) add('[id=' + q(el.id) + ']');
+    const generated = el.id && GENERATED_ID.test(el.id);
+    if (el.id && !generated) add('[id=' + q(el.id) + ']');
     const name = el.getAttribute && el.getAttribute('name');
     if (name) add('[name=' + q(name) + ']');
     const testId = el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-test'));
     if (testId) add('[data-testid=' + q(testId) + ']');
     const aria = el.getAttribute && el.getAttribute('aria-label');
     if (aria) add('[aria-label=' + q(aria) + ']');
+    const role = roleOf(el), label = accessibleName(el);
+    if (role && label) add('role=' + role + '[name=' + q(label) + ']');
     const tag = el.tagName.toLowerCase();
     if (tag === 'a' && el.getAttribute('href')) add('a[href=' + q(el.getAttribute('href')) + ']');
+    if (label && !role) add('text=' + q(label));
+    // Last, and only because a wrong-looking id still beats no locator at all
+    // when every meaningful identity is missing.
+    if (generated) add('[id=' + q(el.id) + ']');
     out.value = out.fallbacks[0] || '';
     out.fallbacks = out.fallbacks.slice(1);
     return out;
@@ -192,7 +250,7 @@ _CAPTURE_SCRIPT = """
       locator: locatorFor(el),
       // Only a non-secret value travels. For a secret the platform records that
       // something must be typed here and where to get it at run time.
-      value: secret ? '' : (el.value || ''),
+      value: secret ? '' : fieldValue(el),
       secret: secret,
       credentialField: credential,
       ...details,
@@ -203,15 +261,26 @@ _CAPTURE_SCRIPT = """
     };
   }
 
+  // What is currently in a field, wherever the browser keeps it.
+  const fieldValue = (el) => {
+    if (!el) return '';
+    if (el.isContentEditable) return (el.innerText || el.textContent || '');
+    return el.value || '';
+  };
+
   const describe = (el) => ({
     tag: el && el.tagName ? el.tagName.toLowerCase() : '',
     text: (el && (el.innerText || el.value || '') || '').slice(0, 80),
   });
 
   document.addEventListener('input', (e) => {
-    const el = e.target;
+    const el = realTarget(e);
     if (!el || !el.tagName) return;
     const tag = el.tagName.toLowerCase();
+    // A rich-text editor is a div the person types into. It has no `value`, so
+    // the old check skipped it entirely and the recording came back with the
+    // click that focused the editor and nothing that was written in it.
+    if (el.isContentEditable) { rememberFill(el); return; }
     if (tag !== 'input' && tag !== 'textarea') return;
     if (el.type === 'checkbox' || el.type === 'radio') return;
     rememberFill(el);
@@ -229,6 +298,165 @@ _CAPTURE_SCRIPT = """
   // release with no click event shortly after is reported as the click it was,
   // and a click that lands on an ancestor of the pressed node is reported
   // against the node the person actually pressed.
+  // ---- a menu that only exists while the pointer is on its trigger ----
+  //
+  // A person hovers "Reports", the menu opens, they click "Daily". The click is
+  // the only thing an event log sees, and replaying it alone finds nothing:
+  // by then the menu is closed. So two cheap facts are kept — where the pointer
+  // last rested, and when each element appeared — and a click on something that
+  // appeared just after that hover reports the hover first, as the step it was.
+  //
+  // The observer only stamps a time on mutated nodes; it never reads their
+  // content, and it does nothing at all on a page that is not changing.
+  const appearedAt = new WeakMap();
+  try {
+    new MutationObserver((records) => {
+      const now = Date.now();
+      for (const record of records) {
+        if (record.type === 'childList') {
+          for (const node of record.addedNodes) {
+            if (node && node.nodeType === 1) appearedAt.set(node, now);
+          }
+        } else if (record.target && record.target.nodeType === 1) {
+          appearedAt.set(record.target, now);
+        }
+      }
+    }).observe(document, {
+      subtree: true, childList: true, attributes: true,
+      attributeFilter: ['style', 'class', 'hidden', 'aria-hidden', 'aria-expanded'],
+    });
+  } catch (_) { /* a document that refuses observation simply loses this hint */ }
+
+  // A menu can open two ways, and only one of them touches the DOM. A script
+  // that toggles a class is caught by the observer above; a stylesheet rule
+  // like `.trigger:hover + .menu { display: block }` changes nothing at all —
+  // no attribute, no node, no event. Watching for mutations alone therefore
+  // misses the most common hover menu on the web. So the page's own stylesheets
+  // are asked instead: is this element's appearance written as depending on a
+  // hover somewhere? A rule is matched with its `:hover` removed, which is
+  // exactly the element the rule is about.
+  let hoverRules = null;
+  let hoverRuleSheets = -1;
+  function collectHoverRules() {
+    const sheets = document.styleSheets;
+    if (hoverRules !== null && hoverRuleSheets === sheets.length) return hoverRules;
+    hoverRules = [];
+    hoverRuleSheets = sheets.length;
+    for (const sheet of sheets) {
+      let rules = null;
+      // A stylesheet from another origin refuses to be read. That is the
+      // browser's rule, not ours; those pages simply lose this hint.
+      try { rules = sheet.cssRules; } catch (_) { continue; }
+      for (const rule of rules || []) {
+        const selector = rule && rule.selectorText;
+        if (!selector || selector.indexOf(':hover') === -1) continue;
+        for (const part of selector.split(',')) {
+          const bare = part.replace(/:hover/g, '').trim();
+          if (bare) hoverRules.push(bare);
+        }
+      }
+    }
+    return hoverRules;
+  }
+  const appearanceDependsOnHover = (el) => {
+    for (const selector of collectHoverRules()) {
+      try { if (el.matches(selector)) return true; } catch (_) { /* unsupported selector */ }
+    }
+    return false;
+  };
+
+  // Where the pointer has rested recently. A trail rather than one element,
+  // because reaching a menu item means passing over the menu itself, and the
+  // trigger is two or three resting places back by the time it is clicked.
+  const hoverTrail = [];
+  const REVEAL_WINDOW_MS = 3000;
+  document.addEventListener('mouseover', (e) => {
+    const el = realTarget(e);
+    if (!el || !el.tagName) return;
+    const last = hoverTrail[hoverTrail.length - 1];
+    if (last && last.el === el) return;
+    hoverTrail.push({ el: el, at: Date.now() });
+    if (hoverTrail.length > 8) hoverTrail.shift();
+  }, true);
+
+  // The container the clicked thing lives in, if that container only exists
+  // because of a hover — either because it appeared just now, or because the
+  // stylesheet says its appearance is conditional on one.
+  function revealedRootOf(clicked, since) {
+    let node = clicked;
+    for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
+      const stamp = appearedAt.get(node);
+      if ((stamp && stamp >= since) || appearanceDependsOnHover(node)) return node;
+    }
+    return null;
+  }
+
+  function reportRevealingHover(clicked) {
+    if (!clicked || !clicked.tagName || !hoverTrail.length) return;
+    const now = Date.now();
+    const oldest = now - REVEAL_WINDOW_MS;
+    const root = revealedRootOf(clicked, oldest);
+    if (!root) return;
+    // Walk back through the resting places, past the revealed menu itself, to
+    // the last thing the pointer sat on that was not part of what it revealed.
+    for (let i = hoverTrail.length - 1; i >= 0; i--) {
+      const entry = hoverTrail[i];
+      if (entry.at < oldest) break;
+      const el = entry.el;
+      if (!el.isConnected) continue;
+      if (el === clicked || root.contains(el) || el.contains(clicked)) continue;
+      hoverTrail.length = 0;
+      report({
+        action: 'hover',
+        locator: locatorFor(el),
+        observedVisibleLocators: observableLocators(),
+        ...describe(el),
+      });
+      return;
+    }
+  }
+
+  // Dragging one thing onto another. The press/release pair above deliberately
+  // discards a gesture that moved, because that is how a text selection or a
+  // stray hand looks — but a real drag then vanished from the recording without
+  // a word, and the automation quietly did nothing where a person had moved a
+  // column or dropped a row. The browser's own drag events say plainly when a
+  // drag was a drag, so the two ends are recorded together as one step.
+  let dragSource = null;
+  document.addEventListener('dragstart', (e) => {
+    const el = realTarget(e);
+    if (!el || !el.tagName) return;
+    dragSource = { el: el, locator: locatorFor(el), at: Date.now(), ...describe(el) };
+  }, true);
+
+  document.addEventListener('drop', (e) => {
+    const target = realTarget(e);
+    const source = dragSource;
+    dragSource = null;
+    if (!source || !target || !target.tagName) return;
+    if (Date.now() - source.at > 30000) return;  // a stale start, not this drop
+    flushPending();
+    report({
+      action: 'drag',
+      locator: source.locator,
+      dropLocator: locatorFor(target),
+      observedVisibleLocators: observableLocators(),
+      text: source.text,
+      tag: source.tag,
+    });
+  }, true);
+
+  // A right-click opens something a left-click never will. Recorded as its own
+  // action rather than dropped, so a task that needs one is repeatable and a
+  // plan that cannot repeat one says so instead of clicking the wrong way.
+  document.addEventListener('contextmenu', (e) => {
+    const el = realTarget(e);
+    if (!el || !el.tagName) return;
+    flushPending();
+    const w = innerWidth || 1, h = innerHeight || 1;
+    report({ ...clickPayload(el, e, w, h), action: 'context_click', replayAction: 'context_click' });
+  }, true);
+
   const clickPayload = (el, e, w, h) => ({
     action: 'click',
     locator: locatorFor(el),
@@ -243,12 +471,13 @@ _CAPTURE_SCRIPT = """
   const CLICK_GRACE_MS = 250;
 
   document.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 || !e.target || !e.target.tagName) return;
+    const pressed = realTarget(e);
+    if (e.button !== 0 || !pressed || !pressed.tagName) return;
     clearTimeout(pressTimer);
     const w = innerWidth || 1, h = innerHeight || 1;
     // The locator is taken now, while the pressed node is still in the DOM.
-    press = { el: e.target, path: e.composedPath(), at: Date.now(), x: e.clientX, y: e.clientY,
-              payload: { ...clickPayload(e.target, e, w, h), replayAction: 'pointer_click' } };
+    press = { el: pressed, path: e.composedPath(), at: Date.now(), x: e.clientX, y: e.clientY,
+              payload: { ...clickPayload(pressed, e, w, h), replayAction: 'pointer_click' } };
   }, true);
 
   document.addEventListener('mouseup', (e) => {
@@ -271,8 +500,9 @@ _CAPTURE_SCRIPT = """
     const p = press;
     press = null;
     flushPending();
-    const el = e.target;
+    const el = realTarget(e);
     const w = innerWidth || 1, h = innerHeight || 1;
+    reportRevealingHover(el);
     if (p && p.el !== el && p.path && p.path.includes(el)) {
       // The browser settled on an ancestor from the original event path after
       // the pressed node was replaced.  ``el.contains(p.el)`` is no longer
@@ -288,7 +518,7 @@ _CAPTURE_SCRIPT = """
   // instead of once per keystroke. A per-keystroke log would record a hundred
   // steps for one typed reference and leak the value character by character.
   document.addEventListener('change', (e) => {
-    const el = e.target;
+    const el = realTarget(e);
     if (!el || !el.tagName) return;
     const tag = el.tagName.toLowerCase();
     if (tag === 'select') {
@@ -330,9 +560,10 @@ _CAPTURE_SCRIPT = """
     if (e.metaKey) parts.push('Meta');
     if (e.shiftKey) parts.push('Shift');
     parts.push(e.key.length === 1 ? e.key.toUpperCase() : e.key);
+    const focused = realTarget(e);
     report({
-      action: 'press', locator: locatorFor(e.target), key: parts.join('+'),
-      observedVisibleLocators: observableLocators(), ...describe(e.target)
+      action: 'press', locator: locatorFor(focused), key: parts.join('+'),
+      observedVisibleLocators: observableLocators(), ...describe(focused)
     });
   }, true);
 })();
@@ -818,6 +1049,7 @@ class PlaywrightRecordingWorker:
             return  # new_page() also fires the "page" event; do not double-bind
         self._pages.append(page)
         self._prevent_debugger_pauses(page)
+        self._bind_dialogs(page)
         self._bind_downloads(page)
         page.on("close", lambda: self._pages.remove(page) if page in self._pages else None)
         if page is not self.primary_page and self.primary_page is not None:
@@ -867,6 +1099,47 @@ class PlaywrightRecordingWorker:
             # Recording still works on non-Chromium test doubles or when a
             # browser build does not expose CDP; only pause protection is lost.
             pass
+
+    def _bind_dialogs(self, page: Any) -> None:
+        """Answer the browser's own dialogs, and write down that we did.
+
+        Playwright dismisses every alert, confirm and prompt automatically when
+        nothing is listening. During a headed recording that is invisible and
+        wrong: the person clicks Export, a confirmation they never see is
+        cancelled for them, and the recording contains a click that produced
+        nothing. Worse, ``beforeunload`` is dismissed too, so a page can refuse
+        to leave and the recorder simply appears stuck.
+
+        So the dialog is accepted — the answer that lets the demonstrated task
+        continue — and recorded as its own step carrying the message, because a
+        confirmation somebody agreed to is part of the task and belongs in
+        front of a reviewer, not hidden in the browser's default behaviour.
+        """
+
+        def on_dialog(dialog: Any) -> None:
+            kind = getattr(dialog, "type", "") or ""
+            message = getattr(dialog, "message", "") or ""
+            try:
+                dialog.accept()
+            except Exception:
+                pass  # already handled, or the page went away with it open
+            if self._paused.is_set():
+                return
+            self._events.put(("emit", {
+                "kind": "dialog",
+                "action": "dialog",
+                "target": {"page": self._page_name(page), "frame": ""},
+                "locator": {},
+                "inputs": {"dialog_type": str(kind)[:40], "decision": "accept"},
+                # The dialog appearing at all is the proof; it is the click
+                # before it that has to be repeated for this to happen again.
+                "success": {"type": "none"},
+                "retry": {"max_attempts": 1, "safe_to_repeat": False},
+                "page_url_redacted": redact_url(_safe_url(page)),
+                "target_text_redacted": redact_text(str(message)),
+            }))
+
+        page.on("dialog", on_dialog)
 
     def _bind_downloads(self, page: Any) -> None:
         def on_download(download: Any) -> None:
@@ -1027,7 +1300,31 @@ class PlaywrightRecordingWorker:
             # Enter usually submits. Repeating a submit can double-file a request.
             step["retry"] = {"max_attempts": 1, "safe_to_repeat": False}
 
-        else:  # click or explicit pointer_click
+        elif action == "drag":
+            drop = payload.get("dropLocator") or {}
+            step["inputs"] = {
+                "drop_selector": redact_selector(drop.get("value", "")),
+                "drop_fallbacks": [
+                    redact_selector(item) for item in (drop.get("fallbacks") or [])
+                ],
+            }
+            self._attach_observed_locators(step, payload)
+            # Where something ended up is page-specific; review decides the check.
+            step["success"] = {"type": "none"}
+            # Dropping the same thing twice can reorder a list into a different
+            # place than the person left it.
+            step["retry"] = {"max_attempts": 1, "safe_to_repeat": False}
+
+        elif action == "hover":
+            step["inputs"] = {}
+            self._attach_observed_locators(step, payload)
+            # What a hover reveals is decided during review, from what appeared.
+            step["success"] = {"type": "none"}
+            # Resting the pointer somewhere changes nothing on its own, so it is
+            # the one gesture that is always safe to repeat.
+            step["retry"] = {"max_attempts": 3, "safe_to_repeat": True}
+
+        else:  # click, pointer_click or context_click
             step["inputs"] = {}
             self._attach_observed_locators(step, payload)
             step["success"] = {"type": "none"}

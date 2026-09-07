@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8">
+<body style="font:14px system-ui">
+  <label>Deep reference <input id="deepReference" name="deepReference"></label>
+  <button id="btnDeep">Run deep</button>
+  <p id="deepOutcome">nothing yet</p>
+  <script>
+    document.getElementById('btnDeep').addEventListener('click', () => {
+      document.getElementById('deepOutcome').textContent = 'deep ran';
+    });
+  </script>
+</body>
