@@ -35,8 +35,10 @@ from ..adapters.browser.authentication import ensure_authenticated
 from ..adapters.browser.session import open_browser_context
 from ..config import BrowserSettings
 from ..credentials import CredentialStore
+from .confidence import score_step
 from .redaction import redact_selector, redact_text, redact_url, safe_network_summary
 from .probe import probe_page
+from .timeline import ActionObservation, Timeline
 from .vision import PageVision, observe_page
 
 # Runs inside every recorded page and every frame. It listens in the CAPTURING
@@ -620,9 +622,24 @@ class PlaywrightRecordingWorker:
         # picture that comes back blank is noticed and re-taken by a route that
         # does not read the window's surface. See recordings/vision.py.
         self.vision = PageVision(artifact_dir)
+        # One observation per emitted step, tying its before/after picture, its
+        # visible-locator diff and its proof candidates together. A sidecar next
+        # to steps.jsonl, not a replacement for it — see recordings/timeline.py.
+        self.timeline = Timeline(artifact_dir)
+        # Steps scored weak as they are captured, so a person recording live can
+        # be told to redo one while it is still cheap to. Bounded because this is
+        # a live signal for the current recording, not a history worth keeping.
+        self._weak_steps: list[dict[str, Any]] = []
         self._stop, self._paused = threading.Event(), threading.Event()
         self._thread: threading.Thread | None = None
         self._shot_seq = 0  # screenshot counter, unique within one recording
+        # FrameQuality.to_dict() for the frame paired with self._last_shot, and
+        # for whatever _shoot() most recently captured. None is an ordinary
+        # value for both, not a sign anything failed: PageVision only measures a
+        # frame's quality every PageVision.deep_interval captures (see
+        # vision.py), so most frames simply carry no verdict at all.
+        self._last_shot_quality: dict[str, Any] | None = None
+        self._last_capture_quality: dict[str, Any] | None = None
         # The first page the recorder opens. Exposed so a test can drive the same
         # page a person would be clicking in, rather than a second browser.
         self.primary_page: Any = None
@@ -747,6 +764,7 @@ class PlaywrightRecordingWorker:
         self._track_page(first)
         self._install_capture_on_loaded_page(first)
         self._last_shot = self._shoot(first, deep=True)
+        self._last_shot_quality = self._last_capture_quality
 
         if self.on_ready is not None:
             self.on_ready(first)
@@ -986,6 +1004,10 @@ class PlaywrightRecordingWorker:
             "frame": frame.to_dict() if frame else None,
             "evidence": self.vision.summary(),
             "downloads": self._download_count,
+            # Recent steps whose identity or evidence is not good enough to
+            # trust yet, so a person recording live can redo one immediately
+            # instead of finding out during review. See recordings/confidence.py.
+            "weak_steps": list(self._weak_steps[-5:]),
         }
 
     def diagnose_vision(self, timeout: float = 20.0) -> dict[str, Any]:
@@ -1207,9 +1229,12 @@ class PlaywrightRecordingWorker:
             action = payload.get("replayAction") or payload.get("action") or "click"
             locator = payload.get("locator") or {}
             before = getattr(self, "_last_shot", "")
+            before_quality = self._last_shot_quality
             after = self._shoot(page)
+            after_quality = self._last_capture_quality
             if after:
                 self._last_shot = after
+                self._last_shot_quality = after_quality
             # Events are queued before the page reacts; this second sample is
             # taken on the worker's control loop, never in the binding callback.
             # For a human's delayed next action, that next event's before-sample
@@ -1252,7 +1277,7 @@ class PlaywrightRecordingWorker:
                     "element_y_ratio": float(payload["elementY"]),
                 })
             self._fill_contract(step, payload)
-            self._emit(step)
+            self._emit(step, quality_before=before_quality, quality_after=after_quality)
         except Exception:
             pass  # a step we failed to record must not take down the recording
 
@@ -1349,13 +1374,43 @@ class PlaywrightRecordingWorker:
         if after:
             step["inputs"]["_observed_visible_after"] = after
 
-    def _emit(self, step: dict[str, Any]) -> None:
+    def _emit(
+        self,
+        step: dict[str, Any],
+        *,
+        quality_before: dict[str, Any] | None = None,
+        quality_after: dict[str, Any] | None = None,
+    ) -> None:
         step.setdefault("target", {"page": "main", "frame": ""})
         step.setdefault("locator", {})
         step.setdefault("inputs", {})
         step.setdefault("success", {"type": "none"})
         step.setdefault("retry", {"max_attempts": 1, "safe_to_repeat": False})
+        # Built from the step dict about to be emitted, on the same thread, right
+        # before it is handed to on_step: the timeline's sequence numbers and the
+        # eventual RecordingStep's sequence numbers advance together only because
+        # nothing can happen to one without the other in between.
+        observation = self.timeline.record(step, quality_before=quality_before, quality_after=quality_after)
+        self._note_confidence(step, observation)
         self.on_step(step)
+
+    def _note_confidence(self, step: dict[str, Any], observation: ActionObservation) -> None:
+        """Score the step as it is captured, so a weak one can be flagged while recording.
+
+        Scored here rather than only at review time, because the point of
+        catching a weak step is being able to ask the person to redo it while
+        the browser is still open — not forty minutes into a replay that never
+        gets the chance.
+        """
+        confidence = score_step(step, observation)
+        if not confidence.weak:
+            return
+        self._weak_steps.append({
+            "seq": observation.seq,
+            "action": step.get("action") or step.get("kind") or "",
+            "reason": confidence.reason,
+        })
+        del self._weak_steps[:-20]  # a live signal for this recording, not a history to keep
 
     def _shoot(self, page: Any, *, deep: bool = False) -> str:
         """Best-effort screenshot; "" (never None) on failure, so callers treat it uniformly.
@@ -1367,6 +1422,7 @@ class PlaywrightRecordingWorker:
         """
         capture = self.vision.capture(page, deep=deep)
         self._shot_seq = self.vision.frames_taken
+        self._last_capture_quality = capture.quality.to_dict() if capture.quality else None
         return capture.relative_path
 
 

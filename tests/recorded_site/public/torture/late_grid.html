@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A grid that fills after the click returns</title>
+<!-- The search click returns instantly and nothing about it changes; the rows
+     the search actually produced arrive on their own, seconds later. A
+     recording that treats the click as finished the moment it returns has no
+     evidence the search produced anything at all — the only real proof is
+     the rows themselves showing up. -->
+<body style="font:15px system-ui">
+  <button id="btnSearch">Search</button>
+  <p id="outcome">nothing yet</p>
+  <table id="resultsGrid"></table>
+  <script>
+    document.getElementById('btnSearch').addEventListener('click', () => {
+      document.getElementById('outcome').textContent = 'search sent';
+      setTimeout(() => {
+        document.getElementById('resultsGrid').innerHTML =
+          '<tr id="resultRow0"><td>INV-501</td>'
+          + '<td><button id="btnRowDetail">Detail</button></td></tr>';
+        document.getElementById('outcome').textContent = 'rows filled';
+      }, 1500);
+    });
+  </script>
+</body>

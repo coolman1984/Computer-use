@@ -891,6 +891,37 @@ def create_app(services: Services | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="This recording is not running")
         return worker.capabilities()
 
+    @app.get("/api/recordings/{recording_id}/recent-steps")
+    def recording_recent_steps(
+        recording_id: str, since_seq: int = 0, limit: int = 50, svc: Services = Depends(provide)
+    ) -> dict[str, Any]:
+        """What just happened, only the part the caller has not already seen.
+
+        Read-only, and deliberately cheap: an assistant following a long
+        recording calls this again with the `next_since_seq` it was handed
+        last time and gets back only the steps recorded since then, instead
+        of the whole history over again on every question.
+        """
+        if not svc.recordings.get(recording_id):
+            raise HTTPException(status_code=404, detail="Recording not found")
+        return svc.recording_coach.recent_steps(recording_id, since_seq=since_seq, limit=limit)
+
+    @app.get("/api/recordings/{recording_id}/thin-evidence")
+    def recording_thin_evidence(
+        recording_id: str, svc: Services = Depends(provide)
+    ) -> dict[str, Any]:
+        """Which recorded steps still have no proof they worked.
+
+        Read-only, and not a verdict on the recording — a step's proof is
+        routinely filled in later, once a reviewer has seen what it revealed.
+        It is a pointer at exactly the steps worth watching more closely while
+        the person can still redo one of them, instead of finding out during
+        a replay forty minutes from now that nothing was ever checked.
+        """
+        if not svc.recordings.get(recording_id):
+            raise HTTPException(status_code=404, detail="Recording not found")
+        return {"steps": svc.recording_coach.thin_evidence(recording_id)}
+
     # ---------- stage 5: review ----------
 
     @app.post("/api/recordings/{recording_id}/draft")

@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Timeline actions</title></head>
+<body>
+<div id="user-menu">Signed in as tester</div>
+<h1>Timeline fixture</h1>
+
+<!-- Strong on every dimension: a real name, and a click that reveals a real,
+     observable result. Used to prove the good case in both timeline and
+     confidence tests. -->
+<button id="reveal-well-named" data-testid="reveal-button">Reveal result</button>
+<div id="result-revealed" hidden>Result is ready</div>
+
+<!-- Weak on purpose: the only identity this control has is an id a framework
+     invented at load time (matching worker.py's GENERATED_ID pattern), and
+     clicking it changes nothing else on the page. No name, no aria-label, no
+     text — nothing else for the recorder to address it by. -->
+<div id="ext-gen-58203917" style="width:40px;height:20px;display:inline-block;"></div>
+
+<!-- Opens a second tab: exercises the new_page proof candidate. -->
+<a id="open-second-tab" href="second.html" target="_blank">Open second tab</a>
+
+<script>
+  document.getElementById('reveal-well-named').addEventListener('click', () => {
+    document.getElementById('result-revealed').hidden = false;
+  });
+</script>
+</body></html>

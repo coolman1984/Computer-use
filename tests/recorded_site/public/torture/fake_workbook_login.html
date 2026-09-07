@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A login page saved as a workbook</title>
+<!-- A portal whose session has expired often answers a report request with
+     its own sign-in page, under exactly the filename the real report would
+     have used. Nothing about the name says so — only the bytes do, and only
+     something that reads them can catch it. -->
+<body style="font:15px system-ui">
+  <button id="btnDownloadFakeWorkbook">Download report</button>
+  <script>
+    document.getElementById('btnDownloadFakeWorkbook').addEventListener('click', () => {
+      const html = '<!doctype html><html><head><title>Sign in</title></head>'
+        + '<body><h1>Your session has expired</h1><form>'
+        + '<input name="user"><input type="password" name="pass">'
+        + '<button>Sign in</button></form></body></html>';
+      const blob = new Blob([html], { type: 'text/html' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'report.xlsx';
+      document.body.appendChild(link);
+      link.click();
+    });
+  </script>
+</body>

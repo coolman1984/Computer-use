@@ -21,6 +21,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from ..domain.models import RecordingStep
+from .confidence import score_step
 
 PLAN_VERSION = 2
 
@@ -372,8 +373,17 @@ def review_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "export or download button, so the platform knows what a successful run produces."
         )
 
-    weak = [a for a in actions if a.get("layer") == "visual"]
-    manual = [a for a in actions if a.get("layer") == "manual"]
+    def is_visual(action: dict[str, Any]) -> bool:
+        return action.get("layer") == "visual"
+
+    def is_manual(action: dict[str, Any]) -> bool:
+        return action.get("layer") == "manual"
+
+    def is_unproven(action: dict[str, Any]) -> bool:
+        return (action.get("success") or {}).get("type", "none") == "none"
+
+    weak = [a for a in actions if is_visual(a)]
+    manual = [a for a in actions if is_manual(a)]
     if manual:
         problems.append(
             f"{len(manual)} step(s) could not be captured well enough to repeat. Record the "
@@ -390,11 +400,33 @@ def review_plan(plan: dict[str, Any]) -> dict[str, Any]:
     # review gate: the reviewer must add observable evidence or record the step
     # again. A final file is not proof that every earlier filter/navigation step
     # happened correctly.
-    unproven = [a for a in actions if (a.get("success") or {}).get("type", "none") == "none"]
+    unproven = [a for a in actions if is_unproven(a)]
     if unproven:
         problems.append(
             f"{len(unproven)} step(s) have no proof of success. Add an observable result in "
             "the review screen, or record those steps again; they cannot be approved as guesses."
+        )
+
+    # The two checks above catch a step with no selector and a step with no
+    # proof at all. Neither one catches a step that has both — a selector and a
+    # recorded success — and still is not trustworthy, because its only
+    # identity is an id the page invented when it loaded. See
+    # recordings/confidence.py for why that is scored separately from having a
+    # selector at all. Actions already reported above are not reported twice —
+    # scored by position in `actions` rather than by object identity, so this
+    # holds regardless of whether an action dict happens to be shared or
+    # rebuilt anywhere upstream.
+    scores = [score_step(action) for action in actions]
+    low_confidence = [
+        action for action, confidence in zip(actions, scores)
+        if confidence.weak and not (is_visual(action) or is_manual(action) or is_unproven(action))
+    ]
+    if low_confidence:
+        problems.append(
+            f"{len(low_confidence)} step(s) have a selector and a recorded result, but the "
+            "selector itself is not trustworthy enough to approve — usually an id the page "
+            "made up when it loaded rather than one it was actually given. Add a better "
+            "selector in review, or record those steps again."
         )
 
     return {
@@ -404,7 +436,14 @@ def review_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "action_count": len(actions),
         "weak_action_count": len(weak),
         "unproven_action_count": len(unproven),
+        "low_confidence_action_count": len(low_confidence),
         "download_count": int(plan.get("expected_download_count") or 0),
+        # Every action's confidence verdict, for a review screen that wants to
+        # show a reason next to a specific step rather than only a total count.
+        "step_confidence": [
+            {"seq": action.get("seq"), **confidence.to_dict()}
+            for action, confidence in zip(actions, scores)
+        ],
     }
 
 

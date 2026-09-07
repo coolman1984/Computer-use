@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sign-in popup that closes itself</title>
+<!-- Corporate SSO commonly finishes inside a popup window and closes it once
+     the handshake is done. The tab the task started in has to stay itself
+     through that, and the step after the popup closes has to run against the
+     tab the person is actually looking at — not the one that just vanished. -->
+<body style="font:15px system-ui">
+  <button id="btnSignIn">Sign in</button>
+  <button id="btnContinue" disabled>Continue</button>
+  <p id="outcome">nothing yet</p>
+  <script>
+    window.addEventListener('message', (event) => {
+      if (event.data === 'signed-in') {
+        document.getElementById('btnContinue').disabled = false;
+        document.getElementById('outcome').textContent = 'signed in';
+      }
+    });
+    document.getElementById('btnSignIn').addEventListener('click', () => {
+      window.open('popup_login_form.html', 'login', 'width=420,height=320');
+    });
+    document.getElementById('btnContinue').addEventListener('click', () => {
+      document.getElementById('outcome').textContent = 'continued on main';
+    });
+  </script>
+</body>

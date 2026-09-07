@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A workbook downloaded with no extension</title>
+<!-- Some export endpoints hand back a file's bytes and never name it at all.
+     The platform still has to recognise a real OOXML workbook from its
+     package structure rather than from an extension that was never there.
+     The workbook bytes travel in the query string so this page stays a
+     static fixture and the binary itself is never committed — the test
+     builds it at run time with zipfile. -->
+<body style="font:15px system-ui">
+  <button id="btnDownload">Download</button>
+  <script>
+    document.getElementById('btnDownload').addEventListener('click', () => {
+      const params = new URLSearchParams(location.search);
+      const base64 = params.get('payload') || '';
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'application/octet-stream' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'workbook';  // deliberately no extension
+      document.body.appendChild(link);
+      link.click();
+    });
+  </script>
+</body>
