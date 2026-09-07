@@ -18,9 +18,14 @@
     z-index: 1; background: #eef2ff; padding: 24px; box-sizing: border-box;
   }
   #app-frame {
-    position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+    position: absolute; left: 0; top: 0; right: 0; height: 100%;
     z-index: 5; background: #ffffff; padding: 24px; box-sizing: border-box;
   }
+  /* Before sign-in the application frame is already in the DOM at full size,
+     parked one viewport below the fold (Nexacro positions its signed-in
+     frameset at top = frame height). It is neither display:none nor
+     visibility:hidden, so a plain visibility check counts it as visible. */
+  #app-frame.parked { top: 100%; }
   #notice {
     position: absolute; left: 60px; top: 40px; width: 320px; height: 180px;
     z-index: 9; background: #ffffff; border: 2px solid #333; box-sizing: border-box;
@@ -38,7 +43,7 @@
   <button id="sso" type="button">SSO</button>
 </div>
 
-<div id="app-frame" class="hidden">
+<div id="app-frame" class="parked">
   <h1>Work list</h1>
   <button id="open-report" type="button">Open report</button>
   <div id="report-panel" class="hidden">
@@ -61,6 +66,7 @@
     // The credential fields exist only in the SSO window, never in the
     // application document, so nothing can autofill them there.
     document.getElementById('login-frame').classList.add('hidden');
+    document.getElementById('app-frame').remove();
     document.getElementById('notice').remove();
     var form = document.createElement('div');
     form.id = 'sso-form';
@@ -98,8 +104,9 @@
   window.addEventListener('message', function (event) {
     if (event.data !== 'signed-in') { return; }
     // The login frame is deliberately left mounted at full size; the
-    // application frame is stacked over it, and the Notice over that.
-    document.getElementById('app-frame').classList.remove('hidden');
+    // application frame moves up from below the fold and is stacked over it,
+    // and the Notice over that.
+    document.getElementById('app-frame').classList.remove('parked');
     document.getElementById('notice').classList.remove('hidden');
     // A single-document application routes without loading a document: the
     // address gains a route marker while the page — and the session on it —

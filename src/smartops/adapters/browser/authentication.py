@@ -23,6 +23,25 @@ _NOTICE_CLICK_TIMEOUT_MS = 3000
 # the old 50-match cap could miss the only visible signed-in marker.
 _VISIBILITY_SCAN_LIMIT = 2000
 
+# Whether any of the matched elements is rendered *inside the viewport*.
+# Playwright's own visibility check only asks for a non-empty box and no
+# display:none / visibility:hidden, so an element parked one screen below the
+# fold still counts as visible. G-MES mounts its whole signed-in frameset that
+# way on the login page (top = frame height), which made the signed-in marker
+# "visible" before anyone had signed in. Returns a boolean, never page text.
+_ON_SCREEN_JS = """
+(elements) => elements.some((el) => {
+  if (!el || !el.getBoundingClientRect) return false;
+  const r = el.getBoundingClientRect();
+  if (!(r.width > 0 && r.height > 0)) return false;
+  const s = getComputedStyle(el);
+  if (s.display === 'none' || s.visibility === 'hidden') return false;
+  const vw = window.innerWidth || document.documentElement.clientWidth;
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  return r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw;
+})
+"""
+
 # Detection only: returns a boolean, never any page text.
 _NOTICE_TITLE_JS = """
 () => {
@@ -101,6 +120,26 @@ def _visible(locator: Any) -> bool:
         return False
 
 
+def _visible_on_screen(locator: Any) -> bool:
+    """Whether at least one match is visible *and* inside the viewport.
+
+    Used for the signed-in marker only. On a real locator the matched elements
+    are measured in the page; a double without ``evaluate_all`` keeps the
+    plain visibility meaning so the existing unit doubles stay valid.
+    """
+    evaluate_all = getattr(locator, "evaluate_all", None)
+    if not callable(evaluate_all):
+        return _visible(locator)
+    try:
+        if locator.count() < 1:
+            return False
+        return bool(evaluate_all(_ON_SCREEN_JS))
+    except Exception:
+        # Mid-navigation the page refuses queries; that is "not proven", not
+        # "signed in", and the caller keeps polling.
+        return False
+
+
 def _login_marker(filters: dict[str, Any]) -> str:
     return filters.get("login_selector") or filters.get("popup_trigger_selector") or ""
 
@@ -142,14 +181,35 @@ def login_on_top(page: Any, filters: dict[str, Any]) -> bool:
 
 
 def signed_in_marker(page: Any, filters: dict[str, Any]) -> bool:
-    """Whether the configured signed-in marker has at least one visible match."""
+    """Whether the configured signed-in marker has a match that is on screen.
+
+    "On screen" rather than "visible": the trace of a failed G-MES replay
+    showed 34 "visible" matches of the marker on the *login* page, all of them
+    one viewport below the fold where Nexacro parks the application frameset
+    until sign-in moves it to the top. Only a match the user could actually see
+    counts as evidence of being signed in.
+    """
     selector = filters.get("logged_in_selector")
     if not selector:
         return False
     try:
-        return _visible(page.locator(selector))
+        return _visible_on_screen(page.locator(selector))
     except Exception:
         return False
+
+
+def ambiguous_auth_state(page: Any, filters: dict[str, Any]) -> bool:
+    """Both signals at once: the login control takes clicks *and* the marker is on screen.
+
+    This is the one transitional shape that must never be resolved by guessing.
+    Reading it as signed-in used to send replay to step 1 on a login screen and
+    report "the site has changed"; reading it as signed-out would submit a
+    credential on a page that may already hold a session. It ends the run with
+    a message that names the contradiction instead.
+    """
+    if not filters.get("logged_in_selector"):
+        return False
+    return signed_in_marker(page, filters) and login_on_top(page, filters)
 
 
 def notice_open(page: Any, filters: dict[str, Any]) -> bool:
@@ -563,6 +623,13 @@ def ensure_authenticated(
         page, state = settle_notice(
             context, page, filters, timeout_ms=notice_probe_timeout_ms
         )
+    if state == TRANSITIONING and ambiguous_auth_state(page, filters):
+        return (
+            f"Could not tell whether {system} is signed in: the login control still "
+            "accepts clicks while the signed-in marker is on screen. No credentials "
+            "were sent and no step was run; check the system's login and signed-in "
+            "selectors."
+        )
     if not state_is_expired(state, page, filters):
         if state in (SIGNED_IN, NOTICE_OPEN):
             try:
@@ -672,11 +739,23 @@ def ensure_authenticated(
         )
         if auth_state == TRANSITIONING:
             auth_state = wait_for_auth_surface(page, filters)
+        if auth_state == NOTICE_OPEN:
+            # A second Notice, or one that reappeared: clear it once more and
+            # decide on what is underneath.
+            page, auth_state = settle_notice(
+                context, page, filters, timeout_ms=notice_probe_timeout_ms
+            )
         logged_in_selector = filters.get("logged_in_selector")
         if auth_state == SIGNED_OUT:
             return f"Automatic login was rejected for {system}."
-        if logged_in_selector and not signed_in_marker(page, filters):
-            return f"Automatic login was rejected for {system}."
+        if logged_in_selector and auth_state != SIGNED_IN:
+            # A marker that is merely present is not proof: the page must have
+            # settled with the marker on screen and the login control no longer
+            # taking clicks. Anything less is reported, not assumed.
+            return (
+                f"Automatic login did not reach the signed-in page for {system} "
+                f"(state: {auth_state})."
+            )
 
         if on_authenticated_page is not None:
             on_authenticated_page(page)
