@@ -94,6 +94,24 @@ def test_valid_xlsx_passes(tmp_path: Path) -> None:
     assert report.failures == []
 
 
+def test_extensionless_xlsx_is_validated_from_its_workbook_contents(tmp_path: Path) -> None:
+    path = tmp_path / "portal-export"
+    _make_xlsx(path, [["col_a", "col_b"], ["1", "2"], ["3", "4"]])
+
+    report = LocalFileValidator().validate(
+        path,
+        ValidationRules(
+            expected_extensions=(".xlsx",),
+            required_columns=("col_a", "col_b"),
+            min_rows=2,
+        ),
+    )
+
+    assert report.passed
+    assert report.row_count == 2
+    assert report.failures == []
+
+
 def test_empty_file_fails_min_size(tmp_path: Path) -> None:
     path = tmp_path / "empty.csv"
     path.write_bytes(b"")

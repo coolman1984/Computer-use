@@ -124,6 +124,18 @@ class ScheduleRequest(BaseModel):
     enabled: bool = True
 
 
+class LearningRequest(BaseModel):
+    """A confirmed lesson only; observations and guesses do not belong here."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    problem: str = Field(min_length=1, max_length=1000)
+    cause: str = Field(min_length=1, max_length=1000)
+    solution: str = Field(min_length=1, max_length=1000)
+    verification: str = Field(min_length=1, max_length=1000)
+    systemKey: str = Field(default="", max_length=120)
+
+
 def create_app(services: Services | None = None) -> FastAPI:
     def provide() -> Services:
         return services or get_services()
@@ -325,6 +337,30 @@ def create_app(services: Services | None = None) -> FastAPI:
         limit: int = Query(default=200, le=2000), svc: Services = Depends(provide)
     ) -> dict[str, Any]:
         return {"items": [e.to_dict() for e in svc.events.recent(limit=limit)]}
+
+    @app.get("/api/chrome-bridge")
+    def chrome_bridge_status(svc: Services = Depends(provide)) -> dict[str, Any]:
+        """Current safe tab structure; it exists in memory only."""
+        return svc.chrome_bridge.status()
+
+    @app.get("/api/learnings")
+    def list_learnings(
+        limit: int = Query(default=50, ge=1, le=200),
+        svc: Services = Depends(provide),
+    ) -> dict[str, Any]:
+        return {"items": svc.operator_memory.list(limit=limit)}
+
+    @app.post("/api/learnings", status_code=201)
+    def create_learning(
+        body: LearningRequest, svc: Services = Depends(provide)
+    ) -> dict[str, Any]:
+        return svc.operator_memory.append(
+            problem=body.problem,
+            cause=body.cause,
+            solution=body.solution,
+            verification=body.verification,
+            system_key=body.systemKey,
+        )
 
     # ---------- incidents and files ----------
 

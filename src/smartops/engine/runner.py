@@ -26,6 +26,20 @@ from .retry import policy_for
 INLINE_RETRY_CEILING_SECONDS = 30.0
 
 
+def _is_manual_evidence_replay(run: Run) -> bool:
+    """Whether an operator explicitly requested one evidence-building replay.
+
+    This is deliberately narrower than a general review bypass: only a manual
+    run may use it.  Process creation, approval, scheduling, API access, and
+    retry continue to require a fully reviewed plan.
+    """
+    return (
+        run.workflow_key == "process.replay"
+        and run.trigger is TriggerType.MANUAL
+        and bool((run.params or {}).get("manual_evidence_replay"))
+    )
+
+
 class WorkflowRunner:
     def __init__(
         self,
@@ -178,7 +192,7 @@ class WorkflowRunner:
         # door around review and approval.
         if definition.key == "process.replay":
             verdict = review_plan((run.params or {}).get("plan") or {})
-            if not verdict["ready"]:
+            if not verdict["ready"] and not _is_manual_evidence_replay(run):
                 run.status = RunStatus.FAILED
                 run.finished_at = self.clock.now()
                 run.error_class = ErrorClass.PERMANENT.value
@@ -221,7 +235,12 @@ class WorkflowRunner:
         self.services.events.emit(
             EventType.RUN_STARTED if first_start else EventType.RUN_RESUMED,
             run_id=run.id,
-            message=f"Starting execution of {definition.key}" if first_start else "Resuming execution",
+            message=(
+                "Starting one manual evidence replay; it cannot approve or schedule this plan"
+                if first_start and _is_manual_evidence_replay(run)
+                else f"Starting execution of {definition.key}" if first_start else "Resuming execution"
+            ),
+            payload={"manual_evidence_replay": _is_manual_evidence_replay(run)},
         )
 
         for seq, step_def in enumerate(definition.steps):

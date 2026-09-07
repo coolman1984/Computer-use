@@ -1,6 +1,8 @@
 """Focused regressions for replay page identity and ownership."""
 from __future__ import annotations
 
+import shutil
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,30 @@ from smartops.adapters.browser.replay import ReplaySession, StepFailed
 from smartops.config import BrowserSettings
 from smartops.ports.browser import ReplayRequest
 
+
+class _SavedDownload:
+    def __init__(self, source: Path, suggested_filename: str) -> None:
+        self.source = source
+        self.suggested_filename = suggested_filename
+
+    def save_as(self, target: str) -> None:
+        shutil.copyfile(self.source, target)
+
+
+def test_extensionless_excel_download_is_named_from_its_content(tmp_path: Path) -> None:
+    source = tmp_path / "portal-export"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr("xl/workbook.xml", "<workbook />")
+
+    session = ReplaySession(_IdentityContext(), artifact_dir=tmp_path)
+    session._pending_downloads.append(_SavedDownload(source, "ProductionPlan"))
+    destination = tmp_path / "downloads"
+
+    session.collect_downloads(destination)
+
+    assert [path.name for path in session.downloads] == ["ProductionPlan.xlsx"]
+
 class _IdentityPage:
     def __init__(self, url: str = "https://portal.test/entry") -> None:
         self.url = url
@@ -17,6 +43,8 @@ class _IdentityPage:
         self.handlers: dict[str, object] = {}
         self.gotos: list[str] = []
         self.locator_calls: list[str] = []
+        self.presses: list[str] = []
+        self.keyboard = _IdentityKeyboard(self)
 
     def is_closed(self) -> bool:
         return self.closed
@@ -38,6 +66,14 @@ class _IdentityPage:
         handler = self.handlers.get(event)
         if handler is not None:
             handler(value)
+
+
+class _IdentityKeyboard:
+    def __init__(self, page: _IdentityPage) -> None:
+        self._page = page
+
+    def press(self, key: str) -> None:
+        self._page.presses.append(key)
 
 
 class _IdentityContext:
@@ -63,6 +99,54 @@ class _IdentityContext:
         handler = self.handlers.get("page")
         if handler is not None:
             handler(page)
+
+
+class _DialogLocator:
+    def __init__(self, page, kind: str) -> None:
+        self.page = page
+        self.kind = kind
+
+    @property
+    def first(self):
+        return self
+
+    def count(self) -> int:
+        return 1
+
+    def nth(self, _index: int):
+        return self
+
+    def is_visible(self) -> bool:
+        return True
+
+    def text_content(self) -> str:
+        return "Selecting an org chart before adding row(s)" if self.kind == "message" else "Confirm"
+
+    def get_attribute(self, name: str) -> str:
+        if name == "id":
+            return "mainframe.workFrame.winPPM0219_0_640.Info_1.form.divBody.form.staContents:text"
+        return ""
+
+    def click(self) -> None:
+        self.page.clicked = True
+
+
+class _DialogPage(_IdentityPage):
+    def __init__(self) -> None:
+        super().__init__("http://gmes.example.local/mes4/sm/nexacro/index.html")
+        self.clicked = False
+
+    def locator(self, selector: str):
+        return _DialogLocator(self, "message" if "staContents" in selector else "button")
+
+
+def test_replay_dismisses_only_the_known_gmes_org_alert(tmp_path: Path) -> None:
+    page = _DialogPage()
+    session = ReplaySession(_IdentityContext(), artifact_dir=tmp_path)
+    session._current = page
+
+    assert session._dismiss_known_safe_interruption() is True
+    assert page.clicked is True
 
 
 def test_auth_popup_and_relay_tabs_do_not_consume_replay_page_numbers(tmp_path: Path) -> None:
@@ -109,6 +193,56 @@ def test_main_target_fails_closed_when_canonical_page_closes_after_switch(tmp_pa
     main.closed = True
     with pytest.raises(StepFailed, match="tab 'main' is not open"):
         session._scope({"seq": 2, "target": {"page": "main", "frame": ""}})
+
+
+def test_page_target_routes_keyboard_press_to_its_recorded_tab(tmp_path: Path) -> None:
+    main, report = _IdentityPage(), _IdentityPage("https://portal.test/report")
+    session = ReplaySession(_IdentityContext(), artifact_dir=tmp_path)
+    session._track(main, main=True)
+    session._track(report)
+    session._current = main
+
+    session._do_press({
+        "seq": 3,
+        "action": "press",
+        "target": {"page": "page-1", "frame": ""},
+        "inputs": {"key": "Enter"},
+    })
+
+    assert main.presses == []
+    assert report.presses == ["Enter"]
+
+
+def test_page_target_routes_navigation_to_its_recorded_tab(tmp_path: Path) -> None:
+    main, report = _IdentityPage(), _IdentityPage("https://portal.test/report")
+    session = ReplaySession(_IdentityContext(), artifact_dir=tmp_path)
+    session._track(main, main=True)
+    session._track(report)
+    session._current = main
+
+    session._do_navigate({
+        "seq": 4,
+        "action": "navigate",
+        "target": {"page": "page-1", "frame": ""},
+        "inputs": {"url": "https://portal.test/report/export"},
+    })
+
+    assert main.gotos == []
+    assert report.gotos == ["https://portal.test/report/export"]
+
+
+def test_frame_navigation_fails_instead_of_using_the_current_tab(tmp_path: Path) -> None:
+    session = ReplaySession(_IdentityContext(), artifact_dir=tmp_path)
+    main = _IdentityPage()
+    session._track(main, main=True)
+
+    with pytest.raises(StepFailed, match="cannot target a frame"):
+        session._do_navigate({
+            "seq": 5,
+            "action": "navigate",
+            "target": {"page": "main", "frame": "report-frame"},
+            "inputs": {"url": "https://portal.test/report/export"},
+        })
 
 
 def test_drop_stale_pages_does_not_close_a_preexisting_context_tab(tmp_path: Path) -> None:

@@ -114,6 +114,34 @@ _CAPTURE_SCRIPT = """
     return names.some(name => loginNames.has(name)) ? 'username' : '';
   }
 
+  // A safe, bounded snapshot of controls that are actually visible now. It
+  // deliberately contains selectors only — never element text, values, HTML,
+  // cookies, or page URLs. The compiler compares snapshots around a click to
+  // turn a newly-visible result marker into direct success evidence.
+  function observableLocators() {
+    const output = [], seen = new Set();
+    const visible = (el) => {
+      if (!el || !el.getBoundingClientRect) return false;
+      const rect = el.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0)) return false;
+      const style = getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const candidates = document.querySelectorAll(
+      '[id],[name],[data-testid],[data-test],[aria-label]'
+    );
+    for (const el of candidates) {
+      if (output.length >= 200) break;
+      if (!visible(el) || credentialField(el)) continue;
+      const locator = locatorFor(el);
+      if (!locator.value || seen.has(locator.value)) continue;
+      seen.add(locator.value);
+      output.push(locator);
+    }
+    return output;
+  }
+  window.__smartopsObservableLocators = observableLocators;
+
   const report = (payload) => {
     try { window.__smartopsReport(payload); } catch (_) { /* recording ended */ }
   };
@@ -202,6 +230,7 @@ _CAPTURE_SCRIPT = """
   const clickPayload = (el, e, w, h) => ({
     action: 'click',
     locator: locatorFor(el),
+    observedVisibleLocators: observableLocators(),
     x: e.clientX / w, y: e.clientY / h,
     ...relativePoint(el, e, w, h),
     ...describe(el),
@@ -216,8 +245,8 @@ _CAPTURE_SCRIPT = """
     clearTimeout(pressTimer);
     const w = innerWidth || 1, h = innerHeight || 1;
     // The locator is taken now, while the pressed node is still in the DOM.
-    press = { el: e.target, at: Date.now(), x: e.clientX, y: e.clientY,
-              payload: clickPayload(e.target, e, w, h) };
+    press = { el: e.target, path: e.composedPath(), at: Date.now(), x: e.clientX, y: e.clientY,
+              payload: { ...clickPayload(e.target, e, w, h), replayAction: 'pointer_click' } };
   }, true);
 
   document.addEventListener('mouseup', (e) => {
@@ -242,9 +271,11 @@ _CAPTURE_SCRIPT = """
     flushPending();
     const el = e.target;
     const w = innerWidth || 1, h = innerHeight || 1;
-    if (p && p.el !== el && el && el.contains && el.contains(p.el)) {
-      // The browser settled on a common ancestor because the pressed node was
-      // replaced; the person pressed the node, so record that.
+    if (p && p.el !== el && p.path && p.path.includes(el)) {
+      // The browser settled on an ancestor from the original event path after
+      // the pressed node was replaced.  ``el.contains(p.el)`` is no longer
+      // reliable because p.el is detached, so use the transient press-time
+      // path and keep the node locator the person actually pressed.
       report(p.payload);
       return;
     }
@@ -284,7 +315,9 @@ _CAPTURE_SCRIPT = """
   // Only keys that mean something on their own. Recording every keystroke would
   // both bury the real steps and capture whatever was being typed.
   const MEANINGFUL = new Set(['Enter', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'PageDown', 'PageUp']);
+  const MODIFIERS = new Set(['Control', 'Shift', 'Alt', 'Meta']);
   document.addEventListener('keydown', (e) => {
+    if (MODIFIERS.has(e.key)) return;
     const combo = e.ctrlKey || e.altKey || e.metaKey;
     if (!combo && !MEANINGFUL.has(e.key)) return;
     // Whatever was typed goes on the record before the key that acts on it.
@@ -295,7 +328,10 @@ _CAPTURE_SCRIPT = """
     if (e.metaKey) parts.push('Meta');
     if (e.shiftKey) parts.push('Shift');
     parts.push(e.key.length === 1 ? e.key.toUpperCase() : e.key);
-    report({ action: 'press', locator: locatorFor(e.target), key: parts.join('+'), ...describe(e.target) });
+    report({
+      action: 'press', locator: locatorFor(e.target), key: parts.join('+'),
+      observedVisibleLocators: observableLocators(), ...describe(e.target)
+    });
   }, true);
 })();
 """
@@ -758,19 +794,26 @@ class PlaywrightRecordingWorker:
         try:
             page = source["page"]
             frame = source.get("frame")
-            self._events.put(("step", (payload, page, _safe_url(page), self._frame_selector(frame, page))))
+            self._events.put((
+                "step", (payload, page, _safe_url(page), self._frame_selector(frame, page), frame)
+            ))
         except Exception:
             pass
 
     def _finish_step(self, item: tuple) -> None:
-        payload, page, page_url, frame_selector = item
+        payload, page, page_url, frame_selector, frame = item
         try:
-            action = payload.get("action") or "click"
+            action = payload.get("replayAction") or payload.get("action") or "click"
             locator = payload.get("locator") or {}
             before = getattr(self, "_last_shot", "")
             after = self._shoot(page)
             if after:
                 self._last_shot = after
+            # Events are queued before the page reacts; this second sample is
+            # taken on the worker's control loop, never in the binding callback.
+            # For a human's delayed next action, that next event's before-sample
+            # provides the same evidence during compilation.
+            payload["observedVisibleLocatorsAfter"] = self._observable_locators(frame or page)
 
             step: dict[str, Any] = {
                 "kind": action,
@@ -849,16 +892,37 @@ class PlaywrightRecordingWorker:
 
         elif action == "press":
             step["inputs"] = {"key": payload.get("key", "")}
+            self._attach_observed_locators(step, payload)
             # What a key press does is entirely page-specific, so its evidence is
             # filled in during review rather than guessed at here.
             step["success"] = {"type": "none"}
             # Enter usually submits. Repeating a submit can double-file a request.
             step["retry"] = {"max_attempts": 1, "safe_to_repeat": False}
 
-        else:  # click
+        else:  # click or explicit pointer_click
             step["inputs"] = {}
+            self._attach_observed_locators(step, payload)
             step["success"] = {"type": "none"}
             step["retry"] = {"max_attempts": 1, "safe_to_repeat": False}
+
+    def _observable_locators(self, scope: Any) -> list[dict[str, Any]]:
+        try:
+            observed = scope.evaluate(
+                "() => window.__smartopsObservableLocators ? window.__smartopsObservableLocators() : []"
+            )
+        except Exception:
+            return []
+        return _redacted_observed_locators(observed)
+
+    @staticmethod
+    def _attach_observed_locators(step: dict[str, Any], payload: dict) -> None:
+        """Keep only redacted selector facts needed to infer an observed effect."""
+        before = _redacted_observed_locators(payload.get("observedVisibleLocators"))
+        after = _redacted_observed_locators(payload.get("observedVisibleLocatorsAfter"))
+        if before:
+            step["inputs"]["_observed_visible_before"] = before
+        if after:
+            step["inputs"]["_observed_visible_after"] = after
 
     def _emit(self, step: dict[str, Any]) -> None:
         step.setdefault("target", {"page": "main", "frame": ""})
@@ -877,6 +941,27 @@ class PlaywrightRecordingWorker:
         except Exception:
             return ""
         return rel
+
+
+def _redacted_observed_locators(observed: Any) -> list[dict[str, Any]]:
+    """Validate a browser snapshot before it reaches the recording contract."""
+    if not isinstance(observed, list):
+        return []
+    safe: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in observed[:200]:
+        if not isinstance(raw, dict):
+            continue
+        value = redact_selector(str(raw.get("value") or ""))
+        if not value or value == "[redacted]" or value in seen:
+            continue
+        fallbacks = [
+            redacted for item in list(raw.get("fallbacks") or [])[:8]
+            if (redacted := redact_selector(str(item or ""))) not in {"", "[redacted]"}
+        ]
+        safe.append({"strategy": "css", "value": value, "fallbacks": fallbacks})
+        seen.add(value)
+    return safe
 
 
 def _safe_url(page: Any) -> str:

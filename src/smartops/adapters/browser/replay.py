@@ -26,6 +26,7 @@ Three things shape the design:
 from __future__ import annotations
 
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -36,6 +37,30 @@ from ...core.errors import PermanentError
 # happen. Generous: a corporate report can take a while to render, and the point
 # is to distinguish "slow" from "never".
 DEFAULT_EVIDENCE_TIMEOUT_MS = 15000
+
+# G-MES can open this informational dialog while the Production Plan screen is
+# mounting.  It is safe to dismiss only when the exact message is visible; no
+# other confirmation dialog is ever clicked by this rule.
+_GMES_ORG_ALERT = "Selecting an org chart before adding row(s)"
+_GMES_ORG_ALERT_SELECTOR = '[id$=".Info_1.form.divBody.form.staContents:text"]'
+
+
+def _extension_from_download_content(path: Path) -> str:
+    """Identify a downloaded Excel workbook when the portal omitted its suffix.
+
+    A ZIP signature alone is not enough: arbitrary ZIP attachments are common.
+    Excel workbooks always carry both their package manifest and workbook part,
+    so add ``.xlsx`` only when those facts are present after the browser has
+    saved the completed download.
+    """
+    if path.suffix:
+        return ""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+    except (OSError, zipfile.BadZipFile):
+        return ""
+    return ".xlsx" if {"[Content_Types].xml", "xl/workbook.xml"} <= names else ""
 
 
 class StepFailed(Exception):
@@ -223,6 +248,15 @@ class ReplaySession:
                     target = destination / f"{Path(name).stem}-{suffix}{Path(name).suffix}"
                     suffix += 1
                 download.save_as(str(target))
+                extension = _extension_from_download_content(target)
+                if extension:
+                    normalized = target.with_name(f"{target.name}{extension}")
+                    duplicate = 2
+                    while normalized.exists():
+                        normalized = target.with_name(f"{target.name}-{duplicate}{extension}")
+                        duplicate += 1
+                    target.replace(normalized)
+                    target = normalized
                 if target.exists() and target.stat().st_size > 0:
                     self.downloads.append(target)
             except Exception as exc:
@@ -256,6 +290,7 @@ class ReplaySession:
                 self._active_timeout_ms = int(
                     float(action.get("wait_timeout_seconds", self.timeout / 1000)) * 1000
                 )
+                self._verify_precondition(action)
                 self._dispatch(action)
                 self._verify(action)
                 self._record(seq, action, ok=True, attempt=attempt, started=started)
@@ -298,6 +333,7 @@ class ReplaySession:
         kind = action.get("action") or "click"
         handler = {
             "click": self._do_click,
+            "pointer_click": self._do_pointer_click,
             "fill": self._do_fill,
             "select": self._do_select,
             "check": self._do_check,
@@ -344,6 +380,45 @@ class ReplaySession:
         y = min(max(y_ratio, 0.0), 1.0) * float(box["height"])
         locator.click(position={"x": x, "y": y})
 
+    def _do_pointer_click(self, action: dict[str, Any]) -> None:
+        """Repeat a recorded press/release after DOM replacement on mouse-down.
+
+        This path is deliberately narrow.  It is emitted only when capture saw
+        a press whose ordinary click was swallowed or retargeted, and it always
+        resolves a unique current locator, passes Playwright's actionability
+        trial, and measures fresh geometry.  The saved plan contains no screen
+        coordinates; locator bounding boxes are main-frame viewport CSS pixels,
+        including for elements inside frames.
+        """
+        scope = self._scope(action)
+        spec = action.get("locator") or {}
+        candidates = [spec.get("value", "")] + list(spec.get("fallbacks") or [])
+        candidates = [candidate for candidate in candidates if isinstance(candidate, str) and candidate]
+        trial_timeout = min(1000, max(100, getattr(self, "_active_timeout_ms", self.timeout)))
+
+        for selector in candidates:
+            try:
+                matches = scope.locator(selector)
+                if matches.count() != 1:
+                    continue
+                locator = matches.first
+                locator.click(trial=True, timeout=trial_timeout)
+                box = locator.bounding_box()
+                if not box or box.get("width", 0) <= 0 or box.get("height", 0) <= 0:
+                    continue
+                page = self._page()
+                page.mouse.move(float(box["x"]) + float(box["width"]) / 2, float(box["y"]) + float(box["height"]) / 2)
+                page.mouse.down()
+                page.mouse.up()
+                return
+            except Exception:
+                continue
+
+        raise StepFailed(
+            action.get("seq", 0),
+            "the recorded press/release control is not uniquely actionable",
+        )
+
     def _do_fill(self, action: dict[str, Any]) -> None:
         self._locate(action).fill(self._value_for(action))
 
@@ -363,13 +438,31 @@ class ReplaySession:
         if locator is not None:
             locator.press(key)
         else:
-            self._page().keyboard.press(key)
+            # A keyboard event belongs to a Page, not a Frame.  Resolve the
+            # recorded target before using it so a press cannot silently land
+            # on whichever tab happened to be current after a popup race.
+            target = action.get("target") or {}
+            if target.get("frame"):
+                raise StepFailed(
+                    action.get("seq", 0),
+                    "a frame keyboard step needs a recorded focus locator",
+                )
+            self._scope(action).keyboard.press(key)
 
     def _do_navigate(self, action: dict[str, Any]) -> None:
         url = (action.get("inputs") or {}).get("url", "")
         if not url:
             raise StepFailed(action.get("seq", 0), "the step has no address to open")
-        self._page().goto(url, wait_until="domcontentloaded")
+        target = action.get("target") or {}
+        if target.get("frame"):
+            raise StepFailed(
+                action.get("seq", 0),
+                "a navigation step cannot target a frame",
+            )
+        # Resolve the requested page, rather than navigating the current tab.
+        # Frame navigation needs its own explicit action type; treating it as
+        # Page.goto would be an unsafe, silent change of scope.
+        self._scope(action).goto(url, wait_until="domcontentloaded")
 
     def _do_switch_page(self, action: dict[str, Any]) -> None:
         self._current = self._resolve_page((action.get("target") or {}).get("page", "main"))
@@ -389,6 +482,24 @@ class ReplaySession:
             self._page().wait_for_timeout(seconds * 1000)
 
     # ---------- proving it worked ----------
+
+    def _verify_precondition(self, action: dict[str, Any]) -> None:
+        """Reject a chained proof whose later control was already usable.
+
+        A later recorded step is meaningful evidence only when this action made
+        it possible.  ``trial=True`` uses the browser's own user-actionability
+        checks (visible, stable, enabled, and receiving pointer events) without
+        dispatching a second click.
+        """
+        success = action.get("success") or {}
+        if success.get("type") != "next_step_actionable":
+            return
+        if self._next_step_actionable(action):
+            raise StepFailed(
+                action.get("seq", 0),
+                "the next recorded control was already actionable before this click, "
+                "so it cannot prove the click worked",
+            )
 
     def _verify(self, action: dict[str, Any]) -> None:
         """Wait for the consequence this step promised. No consequence, no success."""
@@ -445,6 +556,15 @@ class ReplaySession:
             self._wait_until(lambda: self._try_page(name) is not None, seq, f"the tab '{name}' never appeared")
             return
 
+        if kind == "next_step_actionable":
+            self._wait_until(
+                lambda: self._next_step_actionable(action),
+                seq,
+                "the next recorded control never became actionable, so this click did not take effect",
+                on_wait=self._dismiss_known_safe_interruption,
+            )
+            return
+
         if kind == "selector_visible":
             selector = success.get("value", "")
             try:
@@ -499,7 +619,7 @@ class ReplaySession:
 
         raise StepFailed(seq, f"'{kind}' is not a kind of proof the platform understands")
 
-    def _wait_until(self, condition, seq: int, message: str) -> None:
+    def _wait_until(self, condition, seq: int, message: str, *, on_wait=None) -> None:
         deadline = time.time() + getattr(self, "_active_timeout_ms", self.timeout) / 1000
         while time.time() < deadline:
             try:
@@ -507,11 +627,38 @@ class ReplaySession:
                     return
             except Exception:
                 pass  # mid-navigation the page refuses queries; keep waiting
+            if on_wait is not None:
+                try:
+                    on_wait()
+                except Exception:
+                    pass  # an optional interruption must never hide the real proof result
             try:
                 self._page().wait_for_timeout(150)
             except Exception:
                 time.sleep(0.15)
         raise StepFailed(seq, message)
+
+    def _dismiss_known_safe_interruption(self) -> bool:
+        """Close only the proven, informational G-MES organisation alert."""
+        page = self._page()
+        messages = page.locator(_GMES_ORG_ALERT_SELECTOR)
+        for index in range(min(messages.count(), 20)):
+            message = messages.nth(index)
+            if not message.is_visible():
+                continue
+            text = " ".join((message.text_content() or "").split())
+            if text != _GMES_ORG_ALERT:
+                continue
+            message_id = message.get_attribute("id") or ""
+            prefix, marker, _ = message_id.partition(".Info_1.form.")
+            if not marker:
+                continue
+            button = page.locator(f'[id="{prefix}.Info_1.form.btnOk:icontext"]')
+            if button.count() != 1 or not button.first.is_visible():
+                continue
+            button.first.click()
+            return True
+        return False
 
     def _settle(self) -> None:
         try:
@@ -524,6 +671,40 @@ class ReplaySession:
             return self._locate(action).input_value()
         except Exception:
             return ""
+
+    def _next_step_actionable(self, action: dict[str, Any]) -> bool:
+        """Whether the chained-proof target could receive a real user click now."""
+        success = action.get("success") or {}
+        target = success.get("target")
+        locator = success.get("locator")
+        if not isinstance(target, dict) or not isinstance(locator, dict):
+            return False
+        candidates = [locator.get("value", "")] + list(locator.get("fallbacks") or [])
+        candidates = [candidate for candidate in candidates if isinstance(candidate, str) and candidate]
+        if not candidates:
+            return False
+
+        proof_action = {
+            "seq": action.get("seq", 0),
+            "target": target,
+            "locator": locator,
+        }
+        try:
+            scope = self._scope(proof_action)
+        except StepFailed:
+            return False
+
+        # Keep an individual trial short.  The outer evidence wait supplies the
+        # full configured timeout, while a short trial lets us observe a menu
+        # transition promptly rather than blocking one long actionability wait.
+        trial_timeout = min(500, max(100, getattr(self, "_active_timeout_ms", self.timeout)))
+        for selector in candidates:
+            try:
+                scope.locator(selector).first.click(trial=True, timeout=trial_timeout)
+                return True
+            except Exception:
+                continue
+        return False
 
     # ---------- finding things ----------
 

@@ -20,6 +20,17 @@
   </section>
 
   <section class="panel">
+    <h2>Chrome connection <span id="chrome-dot" class="live-dot"></span></h2>
+    <p id="chrome-summary" class="muted">Checking the local tab bridge…</p>
+    <div id="chrome-tab" hidden>
+      <p><strong id="chrome-title"></strong></p>
+      <p id="chrome-url" class="muted"></p>
+      <p id="chrome-structure" class="muted"></p>
+    </div>
+    <p id="chrome-help" class="muted hint">Load <code>chrome-extension/smartops-tab-bridge</code> in Chrome, then click its toolbar icon on the tab to share.</p>
+  </section>
+
+  <section class="panel">
     <h2>The whole journey</h2>
     <p class="muted">Eleven steps, in order. Each one needs the one before it, so the platform will not let you skip ahead — that is what stops a half-finished automation from running overnight.</p>
     <ol class="journey" id="journey-steps">
@@ -74,6 +85,6 @@
 </main>
 
 <script src="static/app.js"></script>
-<script src="static/overview.js"></script>
+<script src="static/overview.js?v=2"></script>
 </body>
 </html>

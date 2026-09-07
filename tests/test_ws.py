@@ -69,3 +69,36 @@ def test_ws_unsubscribes_on_disconnect(services) -> None:
         ws.receive_json()
 
     assert len(services.bus._subscribers) == 0
+
+
+def test_chrome_bridge_keeps_only_safe_structure_in_memory(services) -> None:
+    client = _client(services)
+    origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+    with client.websocket_connect("/ws/chrome-bridge", headers={"origin": origin}) as ws:
+        ws.send_json({
+            "type": "snapshot",
+            "snapshot": {
+                "tabId": 12,
+                "url": "https://example.test/report?secret=hidden#fragment",
+                "title": "Daily report",
+                "frames": [{
+                    "frameId": 0,
+                    "url": "https://example.test/frame?token=nope",
+                    "elements": [
+                        {"tag": "button", "text": "Download", "value": "must-not-pass"},
+                        {"tag": "div", "id": "nexacro.download", "text": "Export"},
+                        {"tag": "input", "type": "password", "value": "secret"},
+                    ],
+                }],
+            },
+        })
+        assert ws.receive_json()["type"] == "ack"
+        status = services.chrome_bridge.status()
+
+    assert status["snapshot"]["url"] == "https://example.test/report"
+    assert status["snapshot"]["frames"][0]["url"] == "https://example.test/frame"
+    assert status["snapshot"]["elementCount"] == 2
+    assert status["snapshot"]["frames"][0]["elements"][0]["text"] == "Download"
+    assert "value" not in status["snapshot"]["frames"][0]["elements"][0]
+    assert status["snapshot"]["frames"][0]["elements"][1]["text"] == "Export"
+    assert services.chrome_bridge.status()["isConnected"] is False

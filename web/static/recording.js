@@ -215,15 +215,51 @@ function renderPromote(review, processes) {
 
   const name = el("input", { maxlength: "200", placeholder: "Name for this automation", value: current?.name || "" }, []);
   const reportKey = el("input", { maxlength: "120", placeholder: "Short name for the report (optional)" }, []);
+  const expectedExtensions = el("input", {
+    id: "validation-expected-extensions",
+    placeholder: ".xlsx",
+    "aria-label": "Expected file type",
+  }, []);
+  const requiredColumns = el("input", {
+    id: "validation-required-columns",
+    placeholder: "customer, amount",
+    "aria-label": "Required columns",
+  }, []);
+  const minimumRows = el("input", {
+    id: "validation-min-rows",
+    type: "number",
+    min: "1",
+    step: "1",
+    placeholder: "2",
+    "aria-label": "Minimum data rows",
+  }, []);
+  const validation = el("fieldset", { class: "stack-form" }, [
+    el("legend", {}, ["File acceptance check"]),
+    el("p", { class: "muted" }, [
+      "Tell SmartOps what a correct report looks like. These checks run before a test can pass or the automation can be approved.",
+    ]),
+    el("label", {}, ["Expected file type (optional)", expectedExtensions]),
+    el("label", {}, ["Required columns, separated by commas (optional)", requiredColumns]),
+    el("label", {}, ["Minimum data rows (optional)", minimumRows]),
+  ]);
   const create = el("button", { type: "button" }, ["Create the automation"]);
   create.addEventListener("click", async () => {
     create.disabled = true;
     clearError(errorBox);
     try {
+      const splitList = (value) => value.split(/[,;\n]/).map(item => item.trim()).filter(Boolean);
+      const validationRules = {};
+      const extensions = splitList(expectedExtensions.value);
+      const columns = splitList(requiredColumns.value);
+      const parsedRows = Number(minimumRows.value);
+      if (extensions.length) validationRules.expected_extensions = extensions;
+      if (columns.length) validationRules.required_columns = columns;
+      if (Number.isInteger(parsedRows) && parsedRows > 0) validationRules.min_rows = parsedRows;
       const process = await postJSON("/api/processes", {
         recording_id: id,
         name: name.value,
         report_key: reportKey.value,
+        validation_rules: validationRules,
       });
       paintShell();
       location.href = `process.html?id=${encodeURIComponent(process.id)}`;
@@ -233,6 +269,7 @@ function renderPromote(review, processes) {
     }
   });
   box.appendChild(el("div", { class: "toolbar" }, [name, reportKey, create]));
+  box.appendChild(validation);
 }
 
 function renderCoach(coach) {

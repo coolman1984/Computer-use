@@ -15,6 +15,7 @@ from .adapters.history.archiver import HistoryArchiver
 from .adapters.notify.local import CompositeNotifier, LocalLogNotifier, WebhookNotifier
 from .adapters.validation.local import LocalFileValidator
 from .checks import ConnectionCheckStore
+from .chrome_bridge import ChromeBridge
 from .config import AgentSettings, Settings, ensure_directories, load_settings
 from .credentials import CredentialStore, default_credential_store
 from .core.clock import Clock, SystemClock
@@ -24,6 +25,7 @@ from .engine.runner import WorkflowRunner
 from .events.bus import EventBus
 from .events.log import EventLog
 from .scheduler import Scheduler
+from .operator_memory import OperatorMemory
 from .storage.db import Database
 from .storage.repositories import (
     AgentRunRepository,
@@ -82,6 +84,8 @@ class Services:
 
         self.bus = EventBus()
         self.events = EventLog(EventRepository(self.db, self.clock), self.bus, self.clock)
+        self.chrome_bridge = ChromeBridge(self.clock)
+        self.operator_memory = OperatorMemory(self.settings.storage.logs_dir, self.clock)
 
         self.step_registry = StepRegistry()
         self.workflows = WorkflowRegistry()

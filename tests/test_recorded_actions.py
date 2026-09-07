@@ -28,6 +28,7 @@ import pytest
 pytest.importorskip("playwright.sync_api")
 
 from smartops.domain.enums import RecordingStatus, RunStatus
+from smartops.domain.models import RecordingStep
 from smartops.recordings.converter import build_plan, review_plan
 from tests.recorded_site import LocalSite
 
@@ -94,6 +95,31 @@ def recorded(services, site):
 # ---------- capture: what the recorder notices ----------
 
 
+def test_modifier_key_noise_is_not_compiled_into_a_plan() -> None:
+    steps = [
+        RecordingStep(
+            recording_id="rec_test", seq=1, kind="press", action="press",
+            selector="#app", inputs={"key": "Control+Control"},
+        ),
+        RecordingStep(
+            recording_id="rec_test", seq=2, kind="click", action="click",
+            selector="#download", target_text_redacted="Download",
+        ),
+        RecordingStep(
+            recording_id="rec_test", seq=3, kind="download", action="download",
+            inputs={"file_name": "report.xlsx"},
+        ),
+    ]
+
+    plan = build_plan(
+        recording_id="rec_test", system_key="samsung_gmes",
+        report_key="daily", steps=steps, start_url="https://example.test/report",
+    )
+
+    assert [action["action"] for action in plan["actions"]] == ["click"]
+    assert plan["actions"][0]["success"] == {"type": "download_started"}
+
+
 def _capture(services, site, script, *, seconds: float = 6.0):
     """Run the real recorder against the site while `script` drives the browser.
 
@@ -156,6 +182,91 @@ def test_a_click_the_browser_swallows_is_still_recorded(recorded, site) -> None:
     clicks = [s for s in steps if s["action"] == "click"]
     assert len(clicks) == 1, f"expected exactly one recorded click, got {len(clicks)}"
     assert "org-vd-box" in clicks[0]["locator"]["value"], clicks[0]["locator"]
+
+
+def test_a_retargeted_click_keeps_the_removed_control_locator(recorded, site) -> None:
+    """A click retargeted to a surviving ancestor still belongs to the pressed node.
+
+    The original Nexacro-like node is detached during ``mousedown``.  By the
+    time the browser reports ``click`` on ``#org-tree``, containment against
+    the detached node is false even though that ancestor was in the original
+    event path.  The recorder must keep the pre-replacement locator, exactly
+    once, rather than turning the business action into an ambiguous tree click.
+    """
+    def retarget_to_tree(page) -> None:
+        page.evaluate(
+            """
+            () => {
+              const pressed = document.querySelector('#org-vd-box');
+              pressed.dispatchEvent(new MouseEvent('mousedown', {
+                bubbles: true, button: 0, clientX: 10, clientY: 10,
+              }));
+              const tree = document.querySelector('#org-tree');
+              tree.dispatchEvent(new MouseEvent('mouseup', {
+                bubbles: true, button: 0, clientX: 10, clientY: 10,
+              }));
+              tree.dispatchEvent(new MouseEvent('click', {
+                bubbles: true, button: 0, clientX: 10, clientY: 10,
+              }));
+            }
+            """
+        )
+        page.wait_for_timeout(600)
+
+    steps = _capture(recorded, site, retarget_to_tree)
+
+    clicks = [step for step in steps if step["action"] == "click"]
+    assert len(clicks) == 1
+    assert "org-vd-box" in clicks[0]["locator"]["value"], clicks[0]["locator"]
+
+
+def test_a_mousedown_selection_replays_before_inquiry_from_a_fresh_browser(recorded, site) -> None:
+    """The recorded VD gesture must establish its state before Inquiry runs.
+
+    This is the complete local analogue of the G-MES failure: the organisation
+    node redraws on mouse-down, so replay needs an explicit fresh-geometry
+    gesture rather than a generic locator click.  Inquiry exposes whether that
+    state was actually established.
+    """
+    def select_vd_then_inquire(page) -> None:
+        box = page.locator("#org-vd-box").bounding_box()
+        assert box
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.down()
+        page.wait_for_timeout(50)
+        page.mouse.up()
+        page.wait_for_timeout(600)
+        page.click("#inquiry")
+        page.wait_for_selector("#inquiry-result", state="visible")
+        page.click("#download-summary")
+        page.wait_for_timeout(300)
+
+    steps = _capture(recorded, site, select_vd_then_inquire, seconds=8.0)
+    pointer_steps = [step for step in steps if step["action"] == "pointer_click"]
+    assert len(pointer_steps) == 1
+    assert "org-vd-box" in pointer_steps[0]["locator"]["value"]
+
+    record = recorded.recordings.list(limit=1)[0]
+    plan = build_plan(
+        recording_id=record.id,
+        system_key="portal",
+        report_key="daily_sales",
+        steps=recorded.recordings.steps(record.id),
+        start_url=f"{site.base_url}/report.html",
+    )
+    assert review_plan(plan)["ready"]
+    assert plan["actions"][0]["success"] == {
+        "type": "selector_visible", "value": '[id="org-vd-selected"]'
+    }
+
+    record.status = RecordingStatus.COMPLETED
+    recorded.recordings.save(record)
+    recorded.recording_manager.draft(record.id, "daily_sales")
+    process = recorded.process_manager.create_from_recording(record.id)
+    _, run = recorded.process_manager.test(process.id)
+
+    assert run.status is RunStatus.SUCCEEDED, run.error_message
+    assert all(step["ok"] for step in run.state.get("step_results") or [])
 
 
 def test_a_recorded_click_reaches_the_live_monitor_before_stop(recorded, site, tmp_path) -> None:
@@ -421,6 +532,45 @@ def test_replaying_waits_for_an_element_that_arrives_late(recorded, site) -> Non
     assert result.ok, result.message
 
 
+def test_replaying_chained_proof_requires_the_next_control_to_become_actionable(recorded, site) -> None:
+    """A menu click is proved only when its initially-hidden submenu can be clicked.
+
+    This is the full browser contract for the compiler's ``next_step_actionable``
+    proof: it is not enough that the next selector exists somewhere in the DOM.
+    The control has to become a user-actionable target after this click.
+    """
+    result = _replay(recorded, site, [
+        _action(1, "click", locator={"strategy": "css", "value": "#open-report-tools"},
+                success={
+                    "type": "next_step_actionable",
+                    "target": {"page": "main", "frame": ""},
+                    "locator": {"strategy": "css", "value": "#daily-report-action"},
+                }),
+        _action(2, "click", locator={"strategy": "css", "value": "#daily-report-action"},
+                success={"type": "selector_visible", "value": "#daily-report-selected"}),
+        _action(3, "click", locator={"strategy": "css", "value": "#download-summary"},
+                success={"type": "download_started"},
+                retry={"max_attempts": 1, "safe_to_repeat": False}),
+    ], expects=1)
+
+    assert result.ok, result.message
+
+
+def test_replaying_chained_proof_rejects_a_next_control_that_was_already_actionable(recorded, site) -> None:
+    """A visible next control cannot be borrowed as fake evidence for a click."""
+    result = _replay(recorded, site, [
+        _action(1, "click", locator={"strategy": "css", "value": "#prepare"},
+                success={
+                    "type": "next_step_actionable",
+                    "target": {"page": "main", "frame": ""},
+                    "locator": {"strategy": "css", "value": "#download-summary"},
+                }),
+    ], expects=0)
+
+    assert result.ok is False
+    assert "already actionable" in result.message
+
+
 def test_replaying_follows_a_new_tab_and_comes_back(recorded, site) -> None:
     result = _replay(recorded, site, [
         _action(1, "click", locator={"strategy": "css", "value": "#open-details"},
@@ -548,6 +698,17 @@ def test_acceptance_the_full_task_records_and_replays_from_a_cold_session(record
     )
     verdict = review_plan(plan)
     assert verdict["ready"], verdict["problems"]
+    proofs = {action["locator"].get("value"): action["success"] for action in plan["actions"]}
+    assert proofs['[id="filter"]'] == {
+        "type": "selector_visible", "value": '[id="filter-applied"]'
+    }
+    assert proofs['[id="confirm-total"]'] == {
+        "type": "selector_visible", "value": '[id="total-confirmed"]'
+    }
+    assert proofs['[id="prepare"]'] == {
+        "type": "selector_visible", "value": '[id="ready"]'
+    }
+    assert proofs['[id="open-details"]'] == {"type": "new_page"}
     assert plan["expected_download_count"] == 2
 
     # --- and runs to completion in a fresh browser, through the normal engine ---

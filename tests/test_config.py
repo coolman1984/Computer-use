@@ -40,6 +40,37 @@ def test_env_overrides_win_over_yaml(tmp_path: Path, monkeypatch) -> None:
     assert settings.storage.systems_dir == Path("env/systems")
 
 
+def test_load_settings_reads_required_policy_extension_ids(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.yaml"
+    extension_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    config_path.write_text(
+        "browser:\n"
+        "  enable_extensions: true\n"
+        "  required_extension_ids:\n"
+        f"    - {extension_id}\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.browser.required_extension_ids == (extension_id,)
+
+
+def test_legacy_extension_path_migrates_to_doctor_required_id(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.yaml"
+    extension_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    config_path.write_text(
+        "browser:\n"
+        "  extension_paths:\n"
+        f"    - C:/extensions/{extension_id}\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.browser.required_extension_ids == (extension_id,)
+
+
 def test_ensure_directories_creates_sessions_dir(tmp_path: Path) -> None:
     storage = StorageSettings(
         sqlite_path=tmp_path / "db" / "smartops.db",

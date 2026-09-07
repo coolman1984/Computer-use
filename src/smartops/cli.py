@@ -83,7 +83,10 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
         print()
         extension = extension_provisioning_status(settings.browser)
-        print(f"SSO extension: {extension.status} — {extension.path or '(no persistent profile configured)'}")
+        print(
+            f"SSO extension: {extension.status} — {extension.detail} "
+            f"({extension.path or 'no persistent profile configured'})"
+        )
         concurrency_warning = concurrency_warning_message(settings.browser)
         if concurrency_warning:
             print(f"WARNING: {concurrency_warning}")

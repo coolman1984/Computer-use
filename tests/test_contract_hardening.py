@@ -549,6 +549,38 @@ def test_queued_legacy_replay_cannot_bypass_review_when_started(services) -> Non
     assert "proof" in (completed.error_message or "").lower()
 
 
+def test_explicit_manual_evidence_replay_can_validate_an_unproven_plan(services) -> None:
+    """One operator-started trial may turn captured evidence into a real result.
+
+    It is not an approval: the normal process and scheduler gates still refuse
+    the same unproven plan.  This narrow path exists so a user can prove a
+    newly-recorded business sequence with its final downloaded file instead of
+    inventing a success selector for every intermediate portal click.
+    """
+    _system(services)
+    services.browser = OneFileBrowser()
+    run = services.runner.create_run("process.replay", params={
+        "system": "erp", "report": "daily", "manual_evidence_replay": True,
+        "plan": {
+            "start_url": "https://erp.example.local/report", "expects_download": True,
+            "expected_download_count": 1,
+            "actions": [{
+                "seq": 1, "action": "click", "locator": {"value": "#export"},
+                "success": {"type": "none"},
+                "retry": {"max_attempts": 1, "safe_to_repeat": False},
+            }],
+        },
+        "rules": {"expected_extensions": [".csv"], "min_rows": 1},
+    })
+
+    completed = services.runner.drive(run.id)
+
+    assert completed.status is RunStatus.SUCCEEDED, completed.error_message
+    artifacts = services.files.list(run_id=run.id)
+    assert len(artifacts) == 1
+    assert artifacts[0].validation_status.value == "passed"
+
+
 def test_two_simultaneous_run_requests_create_only_one_process_run(services) -> None:
     """The manual button and scheduler must not each launch the same process."""
     from concurrent.futures import ThreadPoolExecutor

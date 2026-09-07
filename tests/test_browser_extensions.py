@@ -4,13 +4,9 @@ from smartops.adapters.browser.session import open_browser_context
 from smartops.config import BrowserSettings
 
 
-def test_persistent_chrome_loads_a_required_extension_from_its_stable_root(
+def test_persistent_chrome_keeps_policy_extensions_enabled_without_side_loading(
     tmp_path: Path,
 ) -> None:
-    extension_root = tmp_path / "extensions" / "example-extension-id"
-    installed_version = extension_root / "1.2.3_0"
-    installed_version.mkdir(parents=True)
-    (installed_version / "manifest.json").write_text("{}", encoding="utf-8")
     captured: dict = {}
 
     class Chromium:
@@ -25,10 +21,10 @@ def test_persistent_chrome_loads_a_required_extension_from_its_stable_root(
         user_data_dir=str(tmp_path / "automation-profile"),
         profile_directory="Profile 19",
         enable_extensions=True,
-        extension_paths=(str(extension_root),),
+        required_extension_ids=("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",),
     )
 
     open_browser_context(Playwright(), settings)
 
-    assert f"--load-extension={installed_version}" in captured["args"]
+    assert not any(arg.startswith("--load-extension=") for arg in captured["args"])
     assert captured["ignore_default_args"] == ["--disable-extensions"]

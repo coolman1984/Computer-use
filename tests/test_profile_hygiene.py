@@ -238,3 +238,25 @@ def test_extension_status_uses_the_configured_profile_directory(tmp_path: Path) 
 
     assert status.status == "PRESENT"
     assert "Profile 19" in status.path
+
+
+def test_extension_status_requires_the_configured_policy_extension(tmp_path: Path) -> None:
+    profile_root = tmp_path / "automation-profile"
+    extensions_dir = profile_root / "Profile 19" / "Extensions"
+    (extensions_dir / "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").mkdir(parents=True)
+    required = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    settings = BrowserSettings(
+        user_data_dir=str(profile_root),
+        profile_directory="Profile 19",
+        enable_extensions=True,
+        required_extension_ids=(required,),
+    )
+
+    missing = extension_provisioning_status(settings)
+    assert missing.status == "MISSING"
+    assert "corporate IT" in missing.detail
+
+    (extensions_dir / required).mkdir()
+    present = extension_provisioning_status(settings)
+    assert present.status == "PRESENT"
+    assert "required extension" in present.detail

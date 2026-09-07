@@ -72,10 +72,27 @@ def extension_provisioning_status(settings: BrowserSettings) -> ExtensionStatus:
             path=str(extensions_dir),
             detail="The Extensions folder exists but has no extension installed.",
         )
+    installed_ids = {child.name.lower() for child in installed}
+    required_ids = {extension_id.lower() for extension_id in settings.required_extension_ids}
+    missing_ids = required_ids - installed_ids
+    if missing_ids:
+        return ExtensionStatus(
+            status="MISSING",
+            path=str(extensions_dir),
+            detail=(
+                "The required policy-managed SSO extension is not installed in "
+                "the automation profile. Ask corporate IT to provision it through "
+                "Chrome enterprise policy."
+            ),
+        )
     return ExtensionStatus(
         status="PRESENT",
         path=str(extensions_dir),
-        detail=f"{len(installed)} extension folder(s) found.",
+        detail=(
+            f"All {len(required_ids)} required extension(s) are present."
+            if required_ids
+            else f"{len(installed)} extension folder(s) found."
+        ),
     )
 
 

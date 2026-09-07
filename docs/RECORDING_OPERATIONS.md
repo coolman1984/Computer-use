@@ -16,6 +16,55 @@ policy. Safe fields may be corrected there. A position-only or unproven step is
 blocked and must be re-recorded unless a real selector and observable proof can
 be supplied. An unsafe step can never be made repeatable in review.
 
+## Lightweight click proof
+
+Ordinary navigation does not require a person to author proof for every click.
+When compiling a recording, SmartOps first uses a detected download, a new tab,
+or a stable route change as evidence. It also uses a stable, redacted DOM marker
+that the recorder observed becoming visible around the interaction. Otherwise,
+a low-risk click may be proved
+by the next recorded DOM control only when replay first confirms that control is
+not user-actionable, performs the click, then confirms the control has become
+visible, enabled, and able to receive a real pointer event. A control that was
+already actionable is rejected as false evidence. Recorded clicks are retained
+by default: a click before fill, select, or check can initialize a custom
+business control, so it is removed only through an explicitly reviewed,
+equivalence-backed plan change.
+
+For the narrow case where an application redraws a control on mouse-down and
+swallows or retargets the normal click, SmartOps records an explicit
+`pointer_click` step. Replay resolves one current DOM locator, performs an
+actionability trial, measures a fresh browser-viewport bounding box, then sends
+one press/release. It never reuses saved screen coordinates, and an uncertain
+gesture is not retried automatically.
+
+## Manual evidence replay
+
+When a human has just captured a complete report flow but the portal does not
+expose a trustworthy proof after every intermediate click, an operator may run
+one evidence-building replay:
+
+```powershell
+python scripts\Run-ManualEvidenceReplay.py <recording-id>
+```
+
+It reuses the normal headed Chrome profile, replay engine, per-run output
+folder, file registration, validator, and history archive. It is explicitly a
+manual run: it cannot approve the recording, turn on a schedule, or be retried
+automatically. Approval and scheduling still require the ordinary reviewed-plan
+gate.
+
+The portal's download name is untrusted. SmartOps saves the finished bytes,
+checks an extension-less ZIP package for the OOXML workbook manifest and
+`xl/workbook.xml`, and then names that real workbook `.xlsx`. Validation uses
+the same package facts and reads the workbook's first sheet for its row count
+and configured columns; a filename alone never makes a download valid.
+
+Clicks labelled submit, save, delete, approve, send, confirm, post, export, or
+download are business-impact actions. They do not receive chained proof. They
+need a direct observable consequence such as a download, new page, route change,
+or an explicitly reviewed result before the automation can be approved.
+
 Long Nexacro selectors are stored intact. If several controls are drawn inside
 one large browser element, the click point is stored relative to that element
 and scales with its current size. It is not an absolute desktop coordinate.

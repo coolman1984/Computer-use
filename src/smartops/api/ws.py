@@ -8,10 +8,13 @@ useless listener leaks.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Callable
+from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from ..chrome_bridge import valid_extension_origin
 from ..domain.models import Event
 from ..services import Services
 
@@ -49,5 +52,57 @@ def create_ws_router(get_services: Callable[[], Services]) -> APIRouter:
             pass
         finally:
             unsubscribe()
+
+    @router.websocket("/ws/chrome-bridge")
+    async def chrome_bridge(websocket: WebSocket) -> None:
+        """Accept safe structure from the one tab explicitly shared in Chrome.
+
+        This endpoint is intentionally extension-only.  It does not perform
+        browser actions and rejects oversized or unknown messages before they
+        reach the core.
+        """
+        origin = websocket.headers.get("origin", "")
+        if not valid_extension_origin(origin):
+            await websocket.close(code=1008, reason="Chrome extension origin required")
+            return
+        await websocket.accept()
+        connection_id = uuid4().hex
+        extension_id = origin.removeprefix("chrome-extension://")
+        svc = get_services()
+        svc.chrome_bridge.connect(connection_id, extension_id)
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                if len(raw) > 512_000:
+                    await websocket.close(code=1009, reason="Snapshot is too large")
+                    return
+                try:
+                    message = json.loads(raw)
+                except json.JSONDecodeError:
+                    await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                    continue
+                if not isinstance(message, dict):
+                    await websocket.send_json({"type": "error", "message": "Object required"})
+                    continue
+                message_type = message.get("type")
+                try:
+                    if message_type in {"hello", "heartbeat"}:
+                        svc.chrome_bridge.heartbeat(connection_id)
+                    elif message_type == "snapshot":
+                        svc.chrome_bridge.update(connection_id, message.get("snapshot"))
+                    elif message_type == "unshare":
+                        svc.chrome_bridge.unshare(connection_id)
+                    elif message_type == "error":
+                        svc.chrome_bridge.fail(connection_id, message.get("message"))
+                    else:
+                        raise ValueError("Unknown message type")
+                except ValueError as exc:
+                    await websocket.send_json({"type": "error", "message": str(exc)})
+                    continue
+                await websocket.send_json({"type": "ack", "messageType": message_type})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            svc.chrome_bridge.disconnect(connection_id)
 
     return router

@@ -239,11 +239,13 @@ def test_the_whole_journey_end_to_end(page, services) -> None:
     page.fill("#name", "Sales ERP")
     page.select_option("#auth-mode", "session")
     page.fill("#login-url", "https://erp.example.local/login")
+    page.locator("#auth-fields .advanced-settings > summary").click()
     page.fill("#logged-in-selector", "#user-menu")
     page.fill(".r-key", "daily_sales")
     page.fill(".r-title", "Daily sales")
     page.fill(".r-url", "https://erp.example.local/reports/daily")
-    page.fill(".r-download", "#export")
+    # The normal path teaches the download through a recording; the direct
+    # selector is an optional advanced fast path and is intentionally omitted.
     page.click("#system-form button[type=submit]")
     page.wait_for_selector("#systems-body td:has-text('Sales ERP')")
     assert services.systems.get("erp").name == "Sales ERP"
@@ -270,6 +272,7 @@ def test_the_whole_journey_end_to_end(page, services) -> None:
     page.wait_for_selector(".notice-box:has-text('can be repeated')")
     # The review is operational, not just prose: safely reorder real selectors
     # and persist the edit before creating the automation.
+    page.get_by_text("Advanced step repair", exact=True).click()
     first_action = page.locator(".review-action").first
     first_action.locator(".edit-locators").fill("#reports\n[data-testid=reports]")
     first_action.locator("button:has-text('Save and re-check this step')").click()

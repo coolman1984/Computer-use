@@ -97,6 +97,38 @@ async function loadDashboard() {
   }
 }
 
+async function loadChromeBridge() {
+  const dot = document.getElementById("chrome-dot");
+  const summary = document.getElementById("chrome-summary");
+  const tab = document.getElementById("chrome-tab");
+  const help = document.getElementById("chrome-help");
+  try {
+    const bridge = await getJSON("/api/chrome-bridge");
+    dot.classList.toggle("on", bridge.isConnected);
+    help.hidden = bridge.isConnected;
+    if (!bridge.isConnected) {
+      summary.textContent = "Extension not connected.";
+      tab.hidden = true;
+      return;
+    }
+    if (!bridge.isSharing || !bridge.snapshot) {
+      summary.textContent = "Extension connected. Click its toolbar icon on the Chrome tab you want to share.";
+      tab.hidden = true;
+      return;
+    }
+    summary.textContent = bridge.error ? `Connected with a capture issue: ${bridge.error}` : "Reading safe structure from the shared tab.";
+    tab.hidden = false;
+    document.getElementById("chrome-title").textContent = bridge.snapshot.title || "Untitled tab";
+    document.getElementById("chrome-url").textContent = bridge.snapshot.url || "URL unavailable";
+    document.getElementById("chrome-structure").textContent =
+      `${bridge.snapshot.frames.length} frame(s), ${bridge.snapshot.elementCount} visible control(s). Last update: ${formatDate(bridge.lastSeenAt)}.`;
+  } catch (_) {
+    dot.classList.remove("on");
+    summary.textContent = "Chrome bridge unavailable.";
+    tab.hidden = true;
+  }
+}
+
 /* A workflow key means nothing to the person reading this page; the system and
    report it worked on do. */
 function describeRun(run) {
@@ -168,6 +200,8 @@ async function loadRecentEvents() {
 loadJourney();
 loadDashboard();
 loadRecentEvents();
+loadChromeBridge();
+setInterval(loadChromeBridge, 2000);
 
 const socket = connectEvents(null, (evt) => {
   document.getElementById("live-dot").classList.add("on");

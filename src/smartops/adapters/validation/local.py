@@ -26,11 +26,6 @@ _COL_LETTERS_RE = re.compile(r"[A-Z]+")
 # page declares itself in its first few hundred bytes.
 _SNIFF_BYTES = 4096
 _HTML_MARKERS = (b"<!doctype html", b"<html", b"<head", b"<body", b"<!DOCTYPE HTML")
-# Magic numbers for formats that are archives or documents underneath. Used to
-# tell a real .xlsx from an HTML page wearing that extension.
-_ZIP_MAGIC = b"PK\x03\x04"
-
-
 def _looks_like_a_web_page(head: bytes) -> bool:
     """True when the bytes are an HTML document rather than data.
 
@@ -45,6 +40,18 @@ def _looks_like_a_web_page(head: bytes) -> bool:
 def _head_bytes(path: Path) -> bytes:
     with path.open("rb") as handle:
         return handle.read(_SNIFF_BYTES)
+
+
+def _is_xlsx_workbook(path: Path) -> bool:
+    """Identify an OOXML workbook from its package, not its filename."""
+    if not zipfile.is_zipfile(path):
+        return False
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+    except (OSError, zipfile.BadZipFile):
+        return False
+    return {"[Content_Types].xml", "xl/workbook.xml"} <= names
 
 
 def _decode(head: bytes) -> str:
@@ -165,6 +172,8 @@ class LocalFileValidator:
 
         head = _head_bytes(path)
         suffix = path.suffix.lower()
+        is_xlsx = _is_xlsx_workbook(path)
+        effective_suffix = ".xlsx" if is_xlsx else suffix
 
         # Identify the file by what is inside it, before trusting its name.
         is_web_page = _looks_like_a_web_page(head)
@@ -173,14 +182,14 @@ class LocalFileValidator:
                 "The download returned a web page, not a report — this usually means the "
                 "sign-in expired or the site showed an error instead of the file"
             )
-        if suffix == ".xlsx" and not head.startswith(_ZIP_MAGIC):
+        if suffix == ".xlsx" and not is_xlsx:
             failures.append("The file is named as an Excel file but is not one")
         if rules.expected_extensions:
             allowed = {
                 ext.lower() if ext.startswith(".") else f".{ext.lower()}"
                 for ext in rules.expected_extensions
             }
-            if suffix not in allowed:
+            if effective_suffix not in allowed:
                 failures.append(f"Unexpected extension: {suffix or '(no extension)'}")
 
         sha256 = _sha256_of(path)
@@ -197,7 +206,7 @@ class LocalFileValidator:
                 header, row_count = _read_csv_header_and_count(path)
             except (OSError, UnicodeDecodeError) as exc:
                 failures.append(f"Could not open the file as CSV: {exc}")
-        elif suffix == ".xlsx":
+        elif is_xlsx:
             try:
                 header, row_count = _read_xlsx_header_and_count(path)
             except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError) as exc:

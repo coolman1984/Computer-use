@@ -16,8 +16,9 @@ so a plan can be reviewed, diffed, and tested without launching anything.
 
 from __future__ import annotations
 
+import re
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from ..domain.models import RecordingStep
 
@@ -29,6 +30,19 @@ _LAYER_CONFIDENCE = {"dom": "high", "visual": "low", "manual": "none"}
 
 # Actions that do not act on an element and so need no locator.
 _NO_ELEMENT = {"switch_page", "switch_frame", "navigate", "wait_for", "download"}
+_NEXT_ACTIONABLE_ACTIONS = {"click", "fill", "select", "check"}
+_OBSERVED_BEFORE = "_observed_visible_before"
+_OBSERVED_AFTER = "_observed_visible_after"
+_MODIFIER_KEYS = {"Control", "Shift", "Alt", "Meta"}
+
+# These words identify a click which may submit, change, or publish business
+# data.  The compiler is deliberately conservative: a false positive leaves a
+# step for review; a false negative could make an irreversible action look
+# successful without evidence.
+_BUSINESS_IMPACT = re.compile(
+    r"submit|save|delete|approve|send|confirm|post|export|download",
+    re.IGNORECASE,
+)
 
 
 def _layer_for(step: RecordingStep) -> str:
@@ -91,7 +105,18 @@ def build_plan(
             if actions and (actions[-1].get("success") or {}).get("type", "none") == "none":
                 actions[-1]["success"] = {"type": "download_started"}
             continue
+        if action_kind == "press":
+            key = str((step.inputs or {}).get("key") or "")
+            if key.split("+")[-1] in _MODIFIER_KEYS:
+                # A modifier key being pressed is not a user action to replay.
+                # Older recorder builds emitted Control+Control and
+                # Control+Shift+Shift while a shortcut was being formed.
+                continue
         actions.append(_action_from(step, seq=len(actions) + 1))
+
+    _infer_observed_selector_proofs(actions)
+    _infer_click_proofs(actions)
+    _strip_observation_metadata(actions)
 
     # Where execution can safely pick up again. Only a step that has proved
     # itself can be a checkpoint: resuming after a step whose outcome was never
@@ -112,6 +137,173 @@ def build_plan(
         "download_names": [d.inputs.get("file_name", "") for d in downloads if d.inputs],
         "download_hint": downloads[0].download_ref if downloads else "",
     }
+
+
+def _infer_click_proofs(actions: list[dict[str, Any]]) -> None:
+    """Use recorded, deterministic effects to prove ordinary navigation clicks.
+
+    A next-step proof is only emitted for a DOM target in the same page/frame.
+    Replay verifies that target was unavailable before the click and actionable
+    afterwards, so merely having a later step cannot turn a dead click into a
+    success.  Business-impact actions never receive this inferred proof.
+    """
+    for index, action in enumerate(actions[:-1]):
+        following = actions[index + 1]
+        if not _is_low_risk_unproven_click(action):
+            continue
+
+        if _opens_recorded_page(action, following):
+            action["success"] = {"type": "new_page"}
+            continue
+
+        destination = _new_url_for_same_scope(action, following)
+        if destination:
+            action["success"] = {"type": "url_changed", "value": destination}
+            continue
+
+        if _can_be_next_step_proof(action, following):
+            action["success"] = {
+                "type": "next_step_actionable",
+                "target": dict(following.get("target") or {"page": "main", "frame": ""}),
+                "locator": dict(following.get("locator") or {}),
+            }
+
+
+def _infer_observed_selector_proofs(actions: list[dict[str, Any]]) -> None:
+    """Prefer a result the recording actually observed over chained evidence.
+
+    The recorder snapshots only visible, stable locators before an interaction
+    and on its settled path. A selector that was absent before and visible after
+    is direct proof for clicks and key presses, including business-impact
+    actions. It is stronger than assuming a later step depended on the action.
+    """
+    for index, action in enumerate(actions):
+        if (action.get("action") or action.get("kind")) not in {"click", "pointer_click", "press"}:
+            continue
+        if _proof_type(action.get("success")) != "none":
+            continue
+        before = _observed_locators(action, _OBSERVED_BEFORE)
+        following = actions[index + 1] if index + 1 < len(actions) else None
+        selector = ""
+        if following is not None and _same_scope(action.get("target"), following.get("target")):
+            # The next human action starts after the preceding interaction has
+            # settled, so its pre-state is the most precise time boundary. It
+            # cannot accidentally include effects from later unrelated steps.
+            selector = _new_observed_selector(
+                before, _observed_locators(following, _OBSERVED_BEFORE)
+            )
+        elif not _opens_recorded_page(action, following or {}):
+            # There is no later sample in this page/frame (for example, a click
+            # inside a frame followed by work in the parent). Then an immediate
+            # post-action snapshot is the best available direct observation.
+            selector = _new_observed_selector(
+                before, _observed_locators(action, _OBSERVED_AFTER)
+            )
+        if selector:
+            action["success"] = {"type": "selector_visible", "value": selector}
+
+
+def _observed_locators(action: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    values = (action.get("inputs") or {}).get(key)
+    if not isinstance(values, list):
+        return []
+    return [item for item in values if isinstance(item, dict) and item.get("value")]
+
+
+def _new_observed_selector(
+    before: list[dict[str, Any]], after: list[dict[str, Any]]
+) -> str:
+    known = {
+        str(selector)
+        for locator in before
+        for selector in [locator.get("value", ""), *(locator.get("fallbacks") or [])]
+        if selector
+    }
+    for locator in after:
+        selector = str(locator.get("value") or "")
+        if selector and selector not in known and selector != "[redacted]":
+            return selector
+    return ""
+
+
+def _strip_observation_metadata(actions: list[dict[str, Any]]) -> None:
+    """Internal compiler evidence never becomes a replay input or review value."""
+    for action in actions:
+        inputs = action.get("inputs") or {}
+        inputs.pop(_OBSERVED_BEFORE, None)
+        inputs.pop(_OBSERVED_AFTER, None)
+
+
+def _is_low_risk_unproven_click(action: dict[str, Any]) -> bool:
+    if (action.get("action") or action.get("kind")) != "click":
+        return False
+    if _proof_type(action.get("success")) != "none":
+        return False
+    label = " ".join(
+        str(action.get(name) or "") for name in ("label", "selector")
+    )
+    locator = action.get("locator") or {}
+    label = f"{label} {locator.get('value') or ''}"
+    return not _BUSINESS_IMPACT.search(label)
+
+
+def _opens_recorded_page(action: dict[str, Any], following: dict[str, Any]) -> bool:
+    target = following.get("target") or {}
+    return (
+        (following.get("action") or following.get("kind")) == "switch_page"
+        and str(target.get("page") or "").startswith("page-")
+    )
+
+
+def _new_url_for_same_scope(action: dict[str, Any], following: dict[str, Any]) -> str:
+    if not _same_scope(action.get("target"), following.get("target")):
+        return ""
+    before = str(action.get("url") or "")
+    after = str(following.get("url") or "")
+    if not before or not after or before == after:
+        return ""
+    parsed = urlsplit(after)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    # Query values can be redacted in recordings, so replay must prove the
+    # stable route rather than compare a stored, possibly redacted query.
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+
+def _can_be_next_step_proof(action: dict[str, Any], following: dict[str, Any]) -> bool:
+    if not _same_scope(action.get("target"), following.get("target")):
+        return False
+    if (following.get("action") or following.get("kind")) not in _NEXT_ACTIONABLE_ACTIONS:
+        return False
+    locator = following.get("locator") or {}
+    return (
+        bool(locator.get("value") and locator.get("value") != "[redacted]")
+        and not _locator_was_observed_before(action, locator)
+    )
+
+
+def _locator_was_observed_before(action: dict[str, Any], locator: dict[str, Any]) -> bool:
+    wanted = {locator.get("value", ""), *(locator.get("fallbacks") or [])}
+    wanted.discard("")
+    return any(
+        wanted.intersection(
+            {item.get("value", ""), *(item.get("fallbacks") or [])}
+        )
+        for item in _observed_locators(action, _OBSERVED_BEFORE)
+    )
+
+
+def _same_scope(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+    left = left or {}
+    right = right or {}
+    return (
+        (left.get("page") or "main") == (right.get("page") or "main")
+        and (left.get("frame") or "") == (right.get("frame") or "")
+    )
+
+
+def _proof_type(success: dict[str, Any] | None) -> str:
+    return str((success or {}).get("type") or "none")
 
 
 def _action_from(step: RecordingStep, *, seq: int) -> dict[str, Any]:
@@ -250,6 +442,8 @@ def _describe_action(action: dict[str, Any]) -> str:
         body = f"{'Tick' if inputs.get('checked', True) else 'Untick'} {label}"
     elif kind == "press":
         body = f"Press {inputs.get('key', 'Enter')}"
+    elif kind == "pointer_click":
+        body = f"Press and release {label}"
     elif kind == "switch_page":
         body = "Move to the tab the task opened"
     elif kind == "switch_frame":
@@ -289,6 +483,7 @@ def _describe_proof(action: dict[str, Any]) -> str:
         "url_changed": ", and check the page moved",
         "new_page": ", and check a new tab opened",
         "page_available": "",
+        "next_step_actionable": ", then check the next recorded control becomes available",
         "download_started": ", and check a file starts downloading",
         "network_response": ", and check the report service responds successfully",
         "none": "",

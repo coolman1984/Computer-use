@@ -25,6 +25,25 @@ def test_root_exposes_registry(client) -> None:
     assert "core.check_storage" in body["steps"]
 
 
+def test_confirmed_learning_updates_private_history_and_memory(client, services) -> None:
+    response = client.post("/api/learnings", json={
+        "systemKey": "samsung_gmes",
+        "problem": "Replay stopped before download.",
+        "cause": "The next-step click was not captured.",
+        "solution": "Capture the visible next-step control.",
+        "verification": "Focused replay reached the download action.",
+    })
+
+    assert response.status_code == 201
+    listing = client.get("/api/learnings?limit=1").json()["items"]
+    assert listing[0]["cause"] == "The next-step click was not captured."
+    summary = (services.settings.storage.logs_dir / "operator-memory.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Confirmed cause" in summary
+    assert "The next-step click was not captured." in summary
+
+
 def test_create_and_inspect_run(client) -> None:
     created = client.post("/api/runs", json={"workflow": "platform.selfcheck"})
     assert created.status_code == 201

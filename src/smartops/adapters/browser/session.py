@@ -195,25 +195,6 @@ def concurrency_warning_message(settings: BrowserSettings) -> str:
     return ""
 
 
-def _resolve_extension_dir(configured: str) -> Path:
-    """Resolve a version folder, or the newest version below a stable ID root."""
-    root = Path(configured).expanduser()
-    if (root / "manifest.json").is_file():
-        return root.resolve()
-    if root.is_dir():
-        candidates = [
-            child
-            for child in root.iterdir()
-            if child.is_dir() and (child / "manifest.json").is_file()
-        ]
-        if candidates:
-            return max(
-                candidates,
-                key=lambda child: (child.stat().st_mtime_ns, child.name),
-            ).resolve()
-    raise ConfigurationError(f"Configured Chrome extension was not found: {root}")
-
-
 def open_browser_context(
     playwright: Any,
     settings: BrowserSettings,
@@ -264,16 +245,13 @@ def open_browser_context(
         args: list[str] = ["--hide-crash-restore-bubble"]
         if settings.profile_directory.strip():
             args.append(f"--profile-directory={settings.profile_directory.strip()}")
-        if settings.enable_extensions and settings.extension_paths:
-            extension_dirs = [
-                str(_resolve_extension_dir(path)) for path in settings.extension_paths
-            ]
-            args.append(f"--load-extension={','.join(extension_dirs)}")
         if args:
             persistent["args"] = args
         if settings.enable_extensions:
             # Keep all other Playwright defaults; only remove the switch that
-            # suppresses Chrome's enterprise-managed extensions.
+            # suppresses enterprise-managed extensions. Do not pass
+            # --load-extension: branded Chrome removed it in Chrome 137.
+            # Source: https://developer.chrome.com/blog/extension-news-june-2025
             persistent["ignore_default_args"] = ["--disable-extensions"]
         try:
             context = playwright.chromium.launch_persistent_context(

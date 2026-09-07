@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -69,9 +70,14 @@ class BrowserSettings:
     # Playwright normally starts Chrome with extensions disabled.  Corporate
     # SSO profiles need policy-installed extensions, so this is opt-in.
     enable_extensions: bool = False
-    # Existing unpacked extension folders to load into the dedicated profile.
-    # Each entry may be either a version folder containing manifest.json or a
-    # stable extension-id folder whose newest installed version is selected.
+    # Extension IDs that enterprise policy must install in the dedicated
+    # automation profile.  These are checked by ``smartops doctor`` before a
+    # corporate replay is allowed to proceed.
+    required_extension_ids: tuple[str, ...] = ()
+    # Deprecated compatibility input.  Branded Chrome removed command-line
+    # extension loading in Chrome 137, so these paths are never launched.  A
+    # legacy path containing an extension ID is used only to migrate the
+    # doctor's required-ID check.
     extension_paths: tuple[str, ...] = ()
     # Recording is headed by definition: a person has to see the window they are
     # working in. This exists so the capture path can be exercised automatically
@@ -130,6 +136,28 @@ def _section(raw: dict[str, Any], key: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+_CHROME_EXTENSION_ID = re.compile(r"[a-p]{32}", re.IGNORECASE)
+
+
+def _legacy_extension_ids(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Recover extension IDs from older ``extension_paths`` configuration.
+
+    The old field named a version folder or a stable extension-ID root.  It is
+    no longer an instruction to side-load anything; recognizing the ID keeps
+    an existing private configuration useful to the doctor check during the
+    policy-only migration.
+    """
+    found: list[str] = []
+    for path in paths:
+        for part in reversed(Path(path).parts):
+            if _CHROME_EXTENSION_ID.fullmatch(part):
+                normalized = part.lower()
+                if normalized not in found:
+                    found.append(normalized)
+                break
+    return tuple(found)
+
+
 def _resolve_config_path(path: Path | str | None) -> Path | None:
     if path is not None:
         return Path(path)
@@ -184,6 +212,16 @@ def load_settings(path: Path | str | None = None) -> Settings:
         recordings_backup_dir=Path(os.getenv("SMARTOPS_RECORDINGS_BACKUP_DIR", storage_raw.get("recordings_backup_dir", "data/recording-backups"))),
         recordings_retention_days=int(storage_raw.get("recordings_retention_days", 0)),
     )
+    legacy_extension_paths = tuple(
+        os.path.expandvars(str(value))
+        for value in (browser_raw.get("extension_paths") or [])
+    )
+    required_extension_ids = tuple(
+        str(value).strip().lower()
+        for value in (browser_raw.get("required_extension_ids") or [])
+        if str(value).strip()
+    ) or _legacy_extension_ids(legacy_extension_paths)
+
     browser = BrowserSettings(
         engine=browser_raw.get("engine", "playwright"),
         headless=bool(browser_raw.get("headless", True)),
@@ -210,10 +248,8 @@ def load_settings(path: Path | str | None = None) -> Settings:
             )
             == "1"
         ),
-        extension_paths=tuple(
-            os.path.expandvars(str(value))
-            for value in (browser_raw.get("extension_paths") or [])
-        ),
+        required_extension_ids=required_extension_ids,
+        extension_paths=legacy_extension_paths,
         record_headless=(
             os.getenv("SMARTOPS_RECORD_HEADLESS", "1" if browser_raw.get("record_headless") else "")
             == "1"

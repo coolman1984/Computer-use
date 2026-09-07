@@ -735,12 +735,15 @@ def ensure_authenticated(
             timeout_ms=int(filters.get("notice_timeout_ms") or 30000),
         )
 
+        login_success_timeout_ms = int(
+            filters.get("login_success_timeout_ms") or 60000
+        )
         stage = "following the signed-in G-MES tab"
         page = find_application_page(
             context,
             notice_page or page,
             filters,
-            timeout_ms=int(filters.get("login_success_timeout_ms") or 60000),
+            timeout_ms=login_success_timeout_ms,
         )
 
         stage = "verifying the signed-in page"
@@ -751,7 +754,12 @@ def ensure_authenticated(
             context, page, filters, timeout_ms=notice_probe_timeout_ms
         )
         if auth_state == TRANSITIONING:
-            auth_state = wait_for_auth_surface(page, filters)
+            # G-MES can spend well over ten seconds on its blank Nexacro shell
+            # after the SSO/Notice handoff. Reuse the system's existing login
+            # budget here instead of closing a legitimate slow recorder window.
+            auth_state = wait_for_auth_surface(
+                page, filters, timeout_ms=login_success_timeout_ms
+            )
         if auth_state == NOTICE_OPEN:
             # A second Notice, or one that reappeared: clear it once more and
             # decide on what is underneath.

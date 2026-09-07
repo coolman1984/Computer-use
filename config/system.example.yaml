@@ -35,8 +35,9 @@ browser:
   user_data_dir: ""
   profile_directory: ""
   enable_extensions: false
-  # Optional existing extension version folders, or stable extension-id roots.
-  extension_paths: []
+  # IDs of corporate extensions force-installed through Chrome policy.
+  # SmartOps never side-loads extensions into branded Chrome.
+  required_extension_ids: []
 
 agents:
   codex:
