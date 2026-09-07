@@ -47,6 +47,21 @@ from .vision import PageVision, observe_page
 # than a polled global: a poll samples once a tick and silently drops repeats of
 # the same action within it, while a binding fires once per real event, in order.
 #
+# Every listener below is bound to `window`, not `document`. A window opened
+# with `window.open()` can run this whole script exactly once, against a
+# transient `about:blank` document, and never again once the real page has
+# navigated in: the window survives that navigation, its document does not.
+# A listener attached to `document` at that moment is attached to a document
+# nobody will ever act in again, and the popup's own sign-in, typed field, and
+# confirm button are recorded as if none of it happened. `window` is the outer
+# node in the capturing chain regardless of which document currently lives
+# under it — capture always runs window -> document -> ... -> target — so a
+# window-level listener sees the same events, slightly earlier, and keeps
+# working across that swap. `document` itself is still read from inside every
+# handler (`document.querySelectorAll`, `document.styleSheets`, and the lazy
+# `ensureObserving()` below): a lookup made at event time resolves whichever
+# document is actually live then, which is the document that matters.
+#
 # Selectors are attribute selectors — `[id="…"]` via JSON.stringify — rather than
 # CSS's `#id` shorthand, which breaks on any id containing a dot or colon
 # (routine in Nexacro-style frameworks, e.g. "mainframe.vFrameSet1.form.grid").
@@ -54,6 +69,15 @@ from .vision import PageVision, observe_page
 # points replay at the wrong element entirely.
 _CAPTURE_SCRIPT = """
 (() => {
+  // A window that keeps running (see the note above) must not run this whole
+  // script a second time: every listener below would be installed twice on
+  // the same persistent window, and every action from then on would be
+  // reported twice. A window this has never run on has no flag yet, so the
+  // one install a new page — popup or not — actually needs is never the one
+  // this guard skips.
+  if (window.__smartopsCaptureInstalled) return;
+  window.__smartopsCaptureInstalled = true;
+
   const q = (v) => JSON.stringify(v);
 
   // The element the person actually touched. Inside a web component the browser
@@ -275,7 +299,7 @@ _CAPTURE_SCRIPT = """
     text: (el && (el.innerText || el.value || '') || '').slice(0, 80),
   });
 
-  document.addEventListener('input', (e) => {
+  window.addEventListener('input', (e) => {
     const el = realTarget(e);
     if (!el || !el.tagName) return;
     const tag = el.tagName.toLowerCase();
@@ -288,7 +312,7 @@ _CAPTURE_SCRIPT = """
     rememberFill(el);
   }, true);
 
-  document.addEventListener('blur', () => flushPending(), true);
+  window.addEventListener('blur', () => flushPending(), true);
 
   // Some component libraries act on mousedown and re-render the pressed node
   // before the mouse button comes back up. Nexacro's organisation tree does
@@ -310,24 +334,42 @@ _CAPTURE_SCRIPT = """
   //
   // The observer only stamps a time on mutated nodes; it never reads their
   // content, and it does nothing at all on a page that is not changing.
+  //
+  // It has to be armed lazily rather than once, up front: a document read at
+  // the top of this script, before the guard above even ran once for this
+  // window, can be the same transient `about:blank` document that makes the
+  // rest of this file worth reading. Observing it would watch something
+  // nobody can ever act in. So the live `document` is re-checked — a plain
+  // reference comparison, cheap enough to repeat on every hover — right
+  // before anything that needs `appearedAt`, and the observer is re-armed
+  // only when that document has actually changed underneath it.
   const appearedAt = new WeakMap();
-  try {
-    new MutationObserver((records) => {
-      const now = Date.now();
-      for (const record of records) {
-        if (record.type === 'childList') {
-          for (const node of record.addedNodes) {
-            if (node && node.nodeType === 1) appearedAt.set(node, now);
+  let observedDocument = null;
+  function ensureObserving() {
+    if (observedDocument === document) return;
+    observedDocument = document;
+    try {
+      new MutationObserver((records) => {
+        const now = Date.now();
+        for (const record of records) {
+          if (record.type === 'childList') {
+            for (const node of record.addedNodes) {
+              if (node && node.nodeType === 1) appearedAt.set(node, now);
+            }
+          } else if (record.target && record.target.nodeType === 1) {
+            appearedAt.set(record.target, now);
           }
-        } else if (record.target && record.target.nodeType === 1) {
-          appearedAt.set(record.target, now);
         }
-      }
-    }).observe(document, {
-      subtree: true, childList: true, attributes: true,
-      attributeFilter: ['style', 'class', 'hidden', 'aria-hidden', 'aria-expanded'],
-    });
-  } catch (_) { /* a document that refuses observation simply loses this hint */ }
+      }).observe(document, {
+        subtree: true, childList: true, attributes: true,
+        attributeFilter: ['style', 'class', 'hidden', 'aria-hidden', 'aria-expanded'],
+      });
+    } catch (_) { /* a document that refuses observation simply loses this hint */ }
+  }
+  // The ordinary case — this script running once, against the document it
+  // will always act in — should not have to wait for a hover to start seeing
+  // reveals, so it is armed once here too.
+  ensureObserving();
 
   // A menu can open two ways, and only one of them touches the DOM. A script
   // that toggles a class is caught by the observer above; a stylesheet rule
@@ -372,7 +414,12 @@ _CAPTURE_SCRIPT = """
   // trigger is two or three resting places back by the time it is clicked.
   const hoverTrail = [];
   const REVEAL_WINDOW_MS = 3000;
-  document.addEventListener('mouseover', (e) => {
+  window.addEventListener('mouseover', (e) => {
+    // Rearmed here, not only once at the top: this is the event that most
+    // reliably runs before the click a reveal is evidence for, so it is the
+    // last safe place to notice the live document changed underneath a stale
+    // observer before that click needs what the observer would have seen.
+    ensureObserving();
     const el = realTarget(e);
     if (!el || !el.tagName) return;
     const last = hoverTrail[hoverTrail.length - 1];
@@ -425,13 +472,13 @@ _CAPTURE_SCRIPT = """
   // column or dropped a row. The browser's own drag events say plainly when a
   // drag was a drag, so the two ends are recorded together as one step.
   let dragSource = null;
-  document.addEventListener('dragstart', (e) => {
+  window.addEventListener('dragstart', (e) => {
     const el = realTarget(e);
     if (!el || !el.tagName) return;
     dragSource = { el: el, locator: locatorFor(el), at: Date.now(), ...describe(el) };
   }, true);
 
-  document.addEventListener('drop', (e) => {
+  window.addEventListener('drop', (e) => {
     const target = realTarget(e);
     const source = dragSource;
     dragSource = null;
@@ -451,7 +498,7 @@ _CAPTURE_SCRIPT = """
   // A right-click opens something a left-click never will. Recorded as its own
   // action rather than dropped, so a task that needs one is repeatable and a
   // plan that cannot repeat one says so instead of clicking the wrong way.
-  document.addEventListener('contextmenu', (e) => {
+  window.addEventListener('contextmenu', (e) => {
     const el = realTarget(e);
     if (!el || !el.tagName) return;
     flushPending();
@@ -472,7 +519,7 @@ _CAPTURE_SCRIPT = """
   const PRESS_MATCH_PX = 8;
   const CLICK_GRACE_MS = 250;
 
-  document.addEventListener('mousedown', (e) => {
+  window.addEventListener('mousedown', (e) => {
     const pressed = realTarget(e);
     if (e.button !== 0 || !pressed || !pressed.tagName) return;
     clearTimeout(pressTimer);
@@ -482,7 +529,7 @@ _CAPTURE_SCRIPT = """
               payload: { ...clickPayload(pressed, e, w, h), replayAction: 'pointer_click' } };
   }, true);
 
-  document.addEventListener('mouseup', (e) => {
+  window.addEventListener('mouseup', (e) => {
     if (!press || e.button !== 0) return;
     const p = press;
     const moved = Math.abs(e.clientX - p.x) > PRESS_MATCH_PX ||
@@ -497,13 +544,17 @@ _CAPTURE_SCRIPT = """
     }, CLICK_GRACE_MS);
   }, true);
 
-  document.addEventListener('click', (e) => {
+  window.addEventListener('click', (e) => {
     clearTimeout(pressTimer);
     const p = press;
     press = null;
     flushPending();
     const el = realTarget(e);
     const w = innerWidth || 1, h = innerHeight || 1;
+    // A page that never fires mouseover before this click — a keyboard-only
+    // activation, say — still deserves its best current reveal evidence
+    // rather than whatever a stale observer happened to collect.
+    ensureObserving();
     reportRevealingHover(el);
     if (p && p.el !== el && p.path && p.path.includes(el)) {
       // The browser settled on an ancestor from the original event path after
@@ -519,7 +570,7 @@ _CAPTURE_SCRIPT = """
   // "change" rather than "input": it fires once, when the person has finished,
   // instead of once per keystroke. A per-keystroke log would record a hundred
   // steps for one typed reference and leak the value character by character.
-  document.addEventListener('change', (e) => {
+  window.addEventListener('change', (e) => {
     const el = realTarget(e);
     if (!el || !el.tagName) return;
     const tag = el.tagName.toLowerCase();
@@ -550,7 +601,7 @@ _CAPTURE_SCRIPT = """
   // both bury the real steps and capture whatever was being typed.
   const MEANINGFUL = new Set(['Enter', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'PageDown', 'PageUp']);
   const MODIFIERS = new Set(['Control', 'Shift', 'Alt', 'Meta']);
-  document.addEventListener('keydown', (e) => {
+  window.addEventListener('keydown', (e) => {
     if (MODIFIERS.has(e.key)) return;
     const combo = e.ctrlKey || e.altKey || e.metaKey;
     if (!combo && !MEANINGFUL.has(e.key)) return;
@@ -644,6 +695,11 @@ class PlaywrightRecordingWorker:
         # page a person would be clicking in, rather than a second browser.
         self.primary_page: Any = None
         self._pages: list[Any] = []
+        # Every tab's name, kept past the tab's own life — see _page_name for why
+        # a popup that closes itself would otherwise take its steps' identity
+        # with it. Keyed by the page object, which also keeps it alive long
+        # enough that nothing else can be mistaken for it.
+        self._page_names: dict[Any, str] = {}
         self._cdp_sessions: list[Any] = []
         self._download_count = 0
         # Events arrive from inside Playwright's own dispatch — a page binding
@@ -685,14 +741,28 @@ class PlaywrightRecordingWorker:
 
         "main" is the tab the task started in. Everything else is numbered in the
         order it opened, which is how replay can follow a popup and come back.
+
+        The name is remembered the first time it is worked out, because a tab's
+        identity has to outlive the tab. A corporate sign-in popup closes itself
+        the moment it succeeds, and the steps performed inside it are still
+        queued when it goes: by the time they are written down the page is no
+        longer in the open list, and everything the person did in that window
+        would be filed against "latest" — a name that means whichever tab
+        happens to be frontmost during replay, which is not where any of it
+        happened.
         """
         if page is self.primary_page:
             return "main"
+        remembered = self._page_names.get(page)
+        if remembered:
+            return remembered
         try:
             index = self._pages.index(page)
         except ValueError:
             return "latest"
-        return f"page-{index}"
+        name = f"page-{index}"
+        self._page_names[page] = name
+        return name
 
     @staticmethod
     def _frame_selector(frame: Any, page: Any) -> str:

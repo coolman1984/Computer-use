@@ -112,9 +112,27 @@ cannot represent must fail loudly, never disappear.** Two of these tests exist
 only to prove the failure — a plan missing its hover, and a drag with no
 destination, both of which now stop rather than click somewhere arbitrary.
 
-### Phase 4 — One timeline instead of five subsystems
+### Phase 3c — Anything done in a popup window · **done, and it was a hole**
 
-Today each sense keeps its own notes: steps in the database, frames on disk,
+A corporate sign-in opens in a popup. Everything the person did in it — the
+username they typed, the button they pressed — was recorded as if none of it
+had happened. The recording showed a tab opening, then closing, and nothing in
+between.
+
+The cause was not the browser refusing to report events. A popup opened by
+`window.open()` runs the capture script once, on the transient `about:blank`
+the window starts with, and never again once the real page navigates in. The
+window survives that swap; its document does not. Every listener was therefore
+attached to a document nobody would ever act in again. Listeners now attach to
+the window, which outlives the swap and sees the same events one step earlier
+in the capture phase; the mutation observer that watches for revealed menus is
+re-armed against whichever document is live; and a tab's *name* is now
+remembered past the tab's own life, because a popup that closes itself was
+taking the identity of its own steps with it.
+
+### Phase 4 — One timeline instead of five subsystems · **done**
+
+Until now each sense keeps its own notes: steps in the database, frames on disk,
 network in a summary file, tabs in the worker's memory. An assistant asked "what
 happened after the last click" has to reassemble that from four places, and a
 step's proof is chosen from whichever fragment happened to be at hand.
@@ -154,7 +172,7 @@ Correlate the export the application began, the browser's download, and the
 validator's verdict on the bytes. The validation half already exists and works;
 this connects it to its cause.
 
-### Phase 7 — Give the assistant real instruments
+### Phase 7 — Give the assistant real instruments · **done**
 
 The current Recording Coach receives no page, no timeline, no state — it offers
 generic advice at the start and the interface then calls it "watching". It is
@@ -169,7 +187,7 @@ cheap. `/api/recordings/{id}/live` is the first of these and already works.
 explains. It does not click. You have the hands; it has the memory and the
 arithmetic.
 
-### Phase 8 — Say which steps are weak, while they can still be redone
+### Phase 8 — Say which steps are weak, while they can still be redone · **done**
 
 Score each step on how well it was identified, how observable its effect was,
 and how safely it can be repeated. Say so during the recording — *"that step is

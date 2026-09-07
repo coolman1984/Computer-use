@@ -137,35 +137,46 @@ def test_a_late_filling_grid_is_proved_by_the_rows_not_by_the_click(recorded, si
 # ---------- a sign-in that happens in a popup which then closes itself ----------
 
 
-def test_a_self_closing_popup_sign_in_leaves_the_main_tab_identity_intact(recorded, site) -> None:
-    """The step after the popup closes must still target the tab it started in.
+def _steps_matching(steps, *, action_in, page, locator_contains):
+    matches = []
+    for step in steps:
+        if step["action"] not in action_in:
+            continue
+        if step["target"]["page"] != page:
+            continue
+        candidates = [step["locator"].get("value", ""), *step["locator"].get("fallbacks", [])]
+        if any(locator_contains in candidate for candidate in candidates):
+            matches.append(step)
+    return matches
 
-    NOTE on scope, from investigating a first version of this test that also
-    asserted on the fill recorded *inside* the popup: this headless Chromium
-    build (141.0.7390.37) never delivers a document-level capturing listener
-    — click, mousedown, input, or keydown, tried individually — for a page
-    opened with ``window.open()``, popup-styled or not. A window-level
-    listener on that same page fires normally, and the popup's own inline
-    handlers fire normally (its postMessage handshake below completes and
-    ``#btnContinue`` really does become enabled); it is specifically
-    ``document.addEventListener(..., true)`` that never sees anything there.
-    `_CAPTURE_SCRIPT` in worker.py binds every one of its listeners to
-    `document`, so nothing performed inside a `window.open()` popup is
-    captured at all in this environment — confirmed with eight independent,
-    shrinking repros outside the recorder before concluding it is not this
-    test's fixture or timing. That is a real gap, not a test artifact, and
-    worker.py is outside this task's file list, so it is reported here
-    rather than patched. What is tested below is exactly what the task asks
-    for regardless of that gap: the popup's own tab identity is tracked
-    while it is open, and the step performed after it closes still runs
-    against the tab the task actually started in.
+
+def test_a_self_closing_popup_sign_in_captures_what_happened_inside_it(recorded, site) -> None:
+    """The popup's own steps must be recorded, in order, on the popup's own tab —
+    and the tab the task started in must still be itself once the popup is gone.
+
+    A first version of this test found the popup's typing and clicking simply
+    missing, and initially concluded ``document``-level listeners do not fire
+    at all in a `window.open()` popup in this headless Chromium build. The
+    real cause, found on review, is narrower and worse: `context.add_init_script`
+    runs `_CAPTURE_SCRIPT` exactly once for such a popup, against the transient
+    `about:blank` document Chrome creates before the real page navigates in.
+    The *window* survives that navigation; the document it closed over does
+    not. Every listener bound to `document` was therefore bound to a document
+    nobody could ever act in again, while a `window`-level listener — the
+    outermost node in the capturing chain regardless of which document
+    currently lives under it — kept receiving the popup's real events the
+    whole time. `_CAPTURE_SCRIPT` now binds every listener to `window`
+    instead, with a document read lazily (at event time) wherever one is
+    still needed, and a same-window reinstall guard so a window that runs the
+    script more than once — however that happens — cannot end up reporting
+    every action twice.
     """
     def sign_in_through_a_popup(page) -> None:
         with page.context.expect_page() as popup_info:
             page.click('#btnSignIn')
         popup = popup_info.value
         popup.wait_for_load_state()
-        popup.fill('#operatorNote', 'shift-42')
+        popup.fill('#ssoUsername', 'shift-42')
         popup.click('#btnConfirmSignIn')
         page.wait_for_selector('#btnContinue:not([disabled])')
         page.click('#btnContinue')
@@ -178,25 +189,39 @@ def test_a_self_closing_popup_sign_in_leaves_the_main_tab_identity_intact(record
     popup_name = switch["target"]["page"]
     assert popup_name.startswith("page-"), popup_name
 
-    continue_click = next(
-        (
-            step for step in steps
-            if step["action"] in {"click", "pointer_click"}
-            and "btnContinue" in " ".join(
-                [step["locator"].get("value", ""), *step["locator"].get("fallbacks", [])]
-            )
-        ),
-        None,
+    # A click on the main page, before the popup ever opened. If a window
+    # could somehow end up running the capture script twice, this is where a
+    # duplicate report would show up first — asserted here so a regression in
+    # the reinstall guard fails loudly rather than only being "one extra
+    # step" buried later in the list.
+    signin_clicks = _steps_matching(
+        steps, action_in={"click", "pointer_click"}, page="main", locator_contains="btnSignIn"
     )
-    assert continue_click is not None, f"the step after the popup closed was lost: {_actions(steps)}"
-    assert continue_click["target"]["page"] == "main", (
-        "the step after the popup closed itself must still run against the tab the task "
-        f"started in, not {continue_click['target']['page']!r}"
-    )
+    assert len(signin_clicks) == 1, f"the main page's own click was reported {len(signin_clicks)} times: {steps}"
 
-    assert switch["seq"] < continue_click["seq"], (
-        "the popup must be tracked as its own tab before the main tab is acted on again"
+    # The typing and the confirm click actually performed *inside* the popup —
+    # the exact evidence the original bug made vanish — attributed to the
+    # popup's own tab identity, each exactly once.
+    typed = _steps_matching(steps, action_in={"fill"}, page=popup_name, locator_contains="ssoUsername")
+    assert len(typed) == 1, f"typing inside the popup was lost or duplicated: {_actions(steps)}"
+    assert typed[0]["inputs"]["value"] == "shift-42"
+
+    confirmed = _steps_matching(
+        steps, action_in={"click", "pointer_click"}, page=popup_name, locator_contains="btnConfirmSignIn"
     )
+    assert len(confirmed) == 1, f"the confirm click inside the popup was lost or duplicated: {_actions(steps)}"
+
+    # In order: the popup is tracked, then it is typed into, then confirmed.
+    assert switch["seq"] < typed[0]["seq"] < confirmed[0]["seq"]
+
+    # The step after the popup closes itself must still run against the tab
+    # the task actually started in — not "latest", and not the tab that just
+    # vanished — exactly once.
+    continued = _steps_matching(
+        steps, action_in={"click", "pointer_click"}, page="main", locator_contains="btnContinue"
+    )
+    assert len(continued) == 1, f"the step after the popup closed was lost or duplicated: {_actions(steps)}"
+    assert confirmed[0]["seq"] < continued[0]["seq"]
 
 
 # ---------- a download that is really a login page named report.xlsx ----------

@@ -4,7 +4,7 @@
 <!-- The popup half of popup_login.html: it confirms, tells its opener, and
      closes itself, the way a real SSO handshake window does. -->
 <body style="font:15px system-ui">
-  <input id="operatorNote" placeholder="Operator note">
+  <input id="ssoUsername" placeholder="Operator username">
   <button id="btnConfirmSignIn">Confirm sign-in</button>
   <script>
     document.getElementById('btnConfirmSignIn').addEventListener('click', () => {
