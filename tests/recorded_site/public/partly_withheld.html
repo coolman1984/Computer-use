@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Report screen with a covered panel</title>
+<!-- The awkward case: the window is fine, one region of it is not. A frame
+     like this compresses normally and passes every size-based check, so only
+     a per-region measurement notices that half the screen says nothing. -->
+<style>
+  html, body { margin: 0; height: 100%; background: #ffffff; font: 16px system-ui; }
+  .toolbar { height: 12%; background: linear-gradient(90deg,#123,#598,#cd4,#821); }
+  .content { height: 88%; background: #808080; }
+</style>
+<body>
+  <div class="toolbar">
+    <button id="btnSearch">Search</button>
+    <button id="btnDownload">Download</button>
+  </div>
+  <div class="content"></div>
+</body>

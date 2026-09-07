@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Drawn report screen</title>
+<!-- A Nexacro-style screen: everything the operator sees is painted onto one
+     canvas, so a DOM snapshot of it is almost empty. -->
+<body style="margin:0">
+  <canvas id="mainframe.form.canvas" width="900" height="600"></canvas>
+  <script>
+    const context = document.getElementById('mainframe.form.canvas').getContext('2d');
+    context.fillStyle = '#eef2f7'; context.fillRect(0, 0, 900, 600);
+    for (let row = 0; row < 12; row++) {
+      context.fillStyle = row % 2 ? '#dde6f0' : '#ffffff';
+      context.fillRect(20, 40 + row * 40, 860, 36);
+      context.fillStyle = '#123456';
+      context.fillText('Line ' + row, 32, 62 + row * 40);
+    }
+  </script>
+</body>

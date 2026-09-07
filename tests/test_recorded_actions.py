@@ -179,9 +179,16 @@ def test_a_click_the_browser_swallows_is_still_recorded(recorded, site) -> None:
     steps = _capture(recorded, site, tick_vd)
 
     assert state["org"] == "Org VD", "the fixture control did not toggle on the press"
-    clicks = [s for s in steps if s["action"] == "click"]
-    assert len(clicks) == 1, f"expected exactly one recorded click, got {len(clicks)}"
-    assert "org-vd-box" in clicks[0]["locator"]["value"], clicks[0]["locator"]
+    assert state["click_events"] == 0, "the fixture must swallow the click for this to mean anything"
+    # A gesture the browser never reported as a click is recorded as
+    # ``pointer_click``: replay has to reproduce the physical press on fresh
+    # geometry rather than call the locator's click, which is the whole reason
+    # this case was losing the step. Anything filed as a plain ``click`` here
+    # would replay through the path that already failed against G-MES.
+    gestures = [s for s in steps if s["action"] == "pointer_click"]
+    assert len(gestures) == 1, f"expected exactly one recorded gesture, got {len(gestures)}"
+    assert "org-vd-box" in gestures[0]["locator"]["value"], gestures[0]["locator"]
+    assert not [s for s in steps if s["action"] == "click"], "the gesture must not be filed twice"
 
 
 def test_a_retargeted_click_keeps_the_removed_control_locator(recorded, site) -> None:
@@ -215,9 +222,12 @@ def test_a_retargeted_click_keeps_the_removed_control_locator(recorded, site) ->
 
     steps = _capture(recorded, site, retarget_to_tree)
 
-    clicks = [step for step in steps if step["action"] == "click"]
-    assert len(clicks) == 1
-    assert "org-vd-box" in clicks[0]["locator"]["value"], clicks[0]["locator"]
+    # As above, the press is what replay must reproduce, so it stays a
+    # ``pointer_click`` even though the browser did deliver a click event here.
+    gestures = [step for step in steps if step["action"] == "pointer_click"]
+    assert len(gestures) == 1
+    assert "org-vd-box" in gestures[0]["locator"]["value"], gestures[0]["locator"]
+    assert not [step for step in steps if step["action"] == "click"]
 
 
 def test_a_mousedown_selection_replays_before_inquiry_from_a_fresh_browser(recorded, site) -> None:

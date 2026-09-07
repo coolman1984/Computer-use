@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sign in and search</title>
+<style>body { font: 16px system-ui; background: #fff; }</style>
+<body>
+  <h1>Daily report</h1>
+  <label>User <input id="userNameInput" name="username" value="operator"></label>
+  <label>Secret <input id="passwordInput" type="password" name="password" value="never-reported"></label>
+  <label>Reference <input id="reference" name="reference" value="A-1024"></label>
+  <label>Site
+    <select id="site"><option value="vd">VD</option><option value="da">DA</option></select>
+  </label>
+  <label><input id="agree" type="checkbox" checked> Agree</label>
+  <button id="btnRun" disabled>Run</button>
+  <a id="lnkHelp" href="/details.html">Help</a>
+  <div role="dialog" id="notice">Notice: the report is ready.</div>
+</body>

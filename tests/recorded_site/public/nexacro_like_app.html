@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Report application</title>
+<!-- A stand-in for a Nexacro screen, shaped the way the probe has to read a
+     real one: an application object reached through getApplication(), frames
+     holding forms, forms holding named components, and a grid bound to a
+     dataset whose row count is the proof that a query ran. The markup is
+     deliberately hostile — generated ids, no accessible names — so a probe
+     that scores this page well can only have done so through the object
+     model. -->
+<body style="margin:0;font:14px system-ui">
+  <div id="ext-gen-4417"><button id="ext-gen-4418"></button></div>
+  <div id="ext-gen-9910"><button id="ext-gen-9911"></button></div>
+  <script>
+    function Dataset(id, rows, columns) {
+      this.id = id; this._rows = rows; this._columns = columns;
+      this.getRowCount = () => this._rows;
+      this.getColCount = () => this._columns;
+    }
+    function Component(id, type, text, dataset) {
+      this.id = id; this._type_name = type; this.text = text;
+      this.visible = true; this.enable = true;
+      if (dataset) this.getBindDataset = () => dataset;
+    }
+    const results = new Dataset('dsResult', 0, 19);
+    const form = {
+      id: 'ReportForm',
+      components: [
+        new Component('btnInquiry', 'Button', 'Inquiry'),
+        new Component('cboPlant', 'Combo', ''),
+        new Component('calFrom', 'Calendar', ''),
+        new Component('grdResult', 'Grid', '', results),
+        new Component('btnExcel', 'Button', 'Excel'),
+      ],
+    };
+    form.components.length = 5;
+    const application = { mainframe: { frames: [{ form }] } };
+    window.nexacro = {
+      version: '17.1.2.500',
+      _runtimetype: 'web',
+      getApplication: () => application,
+      ExcelExportObject: function () {},
+      FileDownload: function () {},
+    };
+    // What "Inquiry ran" looks like to the probe: the dataset fills.
+    window.__runInquiry = () => { results._rows = 758; };
+  </script>
+</body>

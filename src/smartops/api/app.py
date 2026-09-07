@@ -844,6 +844,53 @@ def create_app(services: Services | None = None) -> FastAPI:
     def restore_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
         return _recording_control("restore", recording_id, svc)
 
+    @app.get("/api/recordings/{recording_id}/live")
+    def recording_live(
+        recording_id: str, capture: bool = True, svc: Services = Depends(provide)
+    ) -> dict[str, Any]:
+        """What is on screen in the recording browser right now.
+
+        Read-only. It exists so an assistant watching a recording can see the
+        page as the person works through it — the open tabs, the controls that
+        are actually available, whether this screen is drawn rather than built,
+        and a fresh frame — instead of reconstructing all of that afterwards
+        from the finished step list.
+        """
+        worker = svc.recording_manager.workers.get(recording_id)
+        if worker is None:
+            raise HTTPException(status_code=409, detail="This recording is not running")
+        return worker.look(capture=capture)
+
+    @app.get("/api/recordings/{recording_id}/vision")
+    def recording_vision(
+        recording_id: str, svc: Services = Depends(provide)
+    ) -> dict[str, Any]:
+        """Why the screenshots of this recording look the way they do.
+
+        Answers the one question a grey screenshot cannot: is the page empty, is
+        this machine withholding the browser's picture, or is there a route that
+        still sees it.
+        """
+        worker = svc.recording_manager.workers.get(recording_id)
+        if worker is None:
+            raise HTTPException(status_code=409, detail="This recording is not running")
+        return worker.diagnose_vision()
+
+    @app.get("/api/recordings/{recording_id}/capabilities")
+    def recording_capabilities(
+        recording_id: str, svc: Services = Depends(provide)
+    ) -> dict[str, Any]:
+        """How the screen currently open in the recorder can be automated.
+
+        Read-only. It reports what each sensor can see on that screen and which
+        identity and which proof to build steps on, so a recording is spent on a
+        screen that can actually carry one.
+        """
+        worker = svc.recording_manager.workers.get(recording_id)
+        if worker is None:
+            raise HTTPException(status_code=409, detail="This recording is not running")
+        return worker.capabilities()
+
     # ---------- stage 5: review ----------
 
     @app.post("/api/recordings/{recording_id}/draft")

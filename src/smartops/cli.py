@@ -44,6 +44,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "serve", help="Run SmartOps: the web app, the background worker, and the scheduler"
     )
+    probe = sub.add_parser(
+        "probe",
+        help="Ask a screen how it can be automated, before spending a recording on it",
+    )
+    probe.add_argument("system", help="System key as written in its definition")
+    probe.add_argument(
+        "--url",
+        default="",
+        help="The exact screen to probe. Defaults to the system's first report URL.",
+    )
+    probe.add_argument(
+        "--wait",
+        type=int,
+        default=0,
+        help="Seconds to wait before probing, so you can navigate to the working screen first.",
+    )
+    probe.add_argument("--json", action="store_true", help="Print the full report as JSON")
+
     sub.add_parser("recordings-backup", help="Private backup of SQLite and the recordings")
     sub.add_parser("recordings-recover", help="Settle interrupted recordings after a restart")
     sub.add_parser("recordings-purge", help="Permanently delete expired recordings per explicit retention")
@@ -218,6 +236,89 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         services.close()
 
 
+def _cmd_probe(args: argparse.Namespace) -> int:
+    """Open one screen in the configured browser and report what can automate it.
+
+    Nothing is clicked, typed, downloaded or saved. This exists because every
+    failed attempt so far started by recording a screen and finding out
+    afterwards that nothing on it could be identified or checked. Run it with
+    the real screen open and it answers that first.
+    """
+    import json
+    import time
+
+    from .adapters.browser.session import open_browser_context
+    from .recordings.probe import probe_page
+    from .recordings.vision import PageVision
+    from .sessions import session_path
+
+    services = _build_services()
+    try:
+        system = services.systems.get(args.system)
+        url = args.url or next((report.url for report in system.reports if report.url), "")
+        if not url:
+            print(f"System {args.system} has no report URL; pass --url with the screen to probe.")
+            return 1
+
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as playwright:
+            session = open_browser_context(
+                playwright,
+                services.settings.browser,
+                # Headed: the point is to probe the screen the operator is
+                # looking at, on the profile the automation would really use.
+                headless=False,
+                accept_downloads=False,
+                storage_state_path=session_path(
+                    services.settings.storage.sessions_dir, system.key
+                ),
+            )
+            try:
+                page = session.context.pages[0] if session.context.pages else session.context.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                if args.wait:
+                    print(
+                        f"Navigate to the screen you want probed. Probing in {args.wait} seconds…"
+                    )
+                    time.sleep(args.wait)
+                report = probe_page(page, PageVision(services.settings.storage.logs_dir))
+            finally:
+                session.close()
+
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+
+        print(f"Screen: {report['title'] or '(no title)'}")
+        print(f"Address: {report['url']}")
+        print()
+        for sensor in report["sensors"]:
+            print(f"  {sensor['sensor']:<14} {sensor['status']:<8} {sensor['detail']}")
+        print()
+        print("  Identify steps by:")
+        for item in report["identity_ladder"]:
+            mark = "available" if item["available"] else "not available"
+            print(f"    - {item['strategy']:<24} {mark:<14} ({item['buys']})")
+        print()
+        print("  Prove a step worked by:")
+        for item in report["evidence_ladder"]:
+            mark = "available" if item["available"] else "not available"
+            print(
+                f"    - {item['proof']:<20} {mark:<14} {item['applies_to']:<30} ({item['buys']})"
+            )
+        print()
+        print(report["verdict"])
+        # A screen with no usable identity cannot carry a recording, and saying
+        # so through the exit code lets this be used as a gate rather than read.
+        return 0 if report["recommended_identity"] else 2
+    except SmartOpsError as exc:
+        print(f"Error: {exc.message}")
+        return 1
+    finally:
+        services.close()
+
+
 def _cmd_work(args: argparse.Namespace) -> int:
     from .worker import Worker
 
@@ -289,6 +390,7 @@ _HANDLERS = {
     "systems": _cmd_systems,
     "login": _cmd_login,
     "collect": _cmd_collect,
+    "probe": _cmd_probe,
     "work": _cmd_work,
     "serve": _cmd_serve,
     "recordings-backup": _cmd_recordings_backup,

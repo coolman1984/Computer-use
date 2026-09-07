@@ -36,6 +36,8 @@ from ..adapters.browser.session import open_browser_context
 from ..config import BrowserSettings
 from ..credentials import CredentialStore
 from .redaction import redact_selector, redact_text, redact_url, safe_network_summary
+from .probe import probe_page
+from .vision import PageVision, observe_page
 
 # Runs inside every recorded page and every frame. It listens in the CAPTURING
 # phase (the `true` third argument) so it sees the event before the page's own
@@ -383,6 +385,10 @@ class PlaywrightRecordingWorker:
             record_headless=headless,
         )
         self.on_step, self.on_heartbeat, self.on_finished = on_step, on_heartbeat, on_finished
+        # Frames are taken through this rather than through page.screenshot so a
+        # picture that comes back blank is noticed and re-taken by a route that
+        # does not read the window's surface. See recordings/vision.py.
+        self.vision = PageVision(artifact_dir)
         self._stop, self._paused = threading.Event(), threading.Event()
         self._thread: threading.Thread | None = None
         self._shot_seq = 0  # screenshot counter, unique within one recording
@@ -400,6 +406,11 @@ class PlaywrightRecordingWorker:
         # event) and every protocol call — screenshots, titles, saving a
         # download — happens on the worker's own loop below.
         self._events: queue.Queue = queue.Queue()
+        # Questions from outside the browser thread — "what is on screen right
+        # now?" — answered on the loop below for the same reason events are
+        # drained there: only this thread may touch Playwright objects. The
+        # asker waits on its own event rather than polling.
+        self._requests: queue.Queue = queue.Queue()
 
     def start(self) -> None:
         self._thread = threading.Thread(
@@ -504,7 +515,7 @@ class PlaywrightRecordingWorker:
 
         self._track_page(first)
         self._install_capture_on_loaded_page(first)
-        self._last_shot = self._shoot(first)
+        self._last_shot = self._shoot(first, deep=True)
 
         if self.on_ready is not None:
             self.on_ready(first)
@@ -518,6 +529,7 @@ class PlaywrightRecordingWorker:
             # drain below persists it outside Playwright's dispatch stack.
             self._pump_browser_events()
             self._drain(limit=50)
+            self._serve_requests()
             self.on_heartbeat()
         # A value typed into the last field and never followed by another action
         # is still part of the task; ask every page to commit what it is holding.
@@ -664,6 +676,111 @@ class PlaywrightRecordingWorker:
             except Exception:
                 pass  # one lost step must not end the recording
 
+    # ---------- answering "what is on screen now?" ----------
+
+    def look(self, *, capture: bool = True, timeout: float = 6.0) -> dict[str, Any]:
+        """Describe the tab the person is working in, from any thread.
+
+        This is what lets an assistant follow a recording as it happens instead
+        of reading it afterwards. It is strictly read-only: it reports the page
+        and takes a picture of it, and can do nothing else to the browser.
+        """
+        if not self.alive():
+            return {"available": False, "reason": "the recorder is not running"}
+        answered = threading.Event()
+        box: dict[str, Any] = {}
+        self._requests.put((bool(capture), box, answered))
+        if not answered.wait(timeout):
+            return {
+                "available": False,
+                "reason": "the recording browser did not answer in time; it is usually "
+                "busy loading a page",
+            }
+        return box.get("result") or {"available": False, "reason": "no answer"}
+
+    def _serve_requests(self) -> None:
+        """Answer queued questions here, where Playwright calls are legal."""
+        while True:
+            try:
+                capture, box, answered = self._requests.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                if capture in ("diagnose", "probe"):
+                    page = self._active_page()
+                    if page is None:
+                        box["result"] = {
+                            "available": False,
+                            "reason": "the recording has no open tab",
+                        }
+                    elif capture == "diagnose":
+                        box["result"] = {"available": True, **self.vision.diagnose(page)}
+                    else:
+                        box["result"] = {"available": True, **probe_page(page, self.vision)}
+                else:
+                    box["result"] = self._describe_now(bool(capture))
+            except Exception as exc:
+                box["result"] = {
+                    "available": False,
+                    "reason": f"{type(exc).__name__}: {exc}"[:200],
+                }
+            finally:
+                answered.set()
+
+    def _active_page(self) -> Any | None:
+        """The tab in front of the person: the newest one still open."""
+        for page in reversed(list(self._pages)):
+            try:
+                if not page.is_closed():
+                    return page
+            except Exception:
+                continue
+        return None
+
+    def _describe_now(self, capture: bool) -> dict[str, Any]:
+        page = self._active_page()
+        if page is None:
+            return {"available": False, "reason": "the recording has no open tab"}
+        frame = self.vision.capture(page) if capture else None
+        return {
+            "available": True,
+            "recording_id": self.recording_id,
+            "paused": self._paused.is_set(),
+            "page": self._page_name(page),
+            "pages": [
+                {"name": self._page_name(item), "url": redact_url(_safe_url(item))}
+                for item in list(self._pages)
+            ],
+            "observation": observe_page(page).to_dict(),
+            "frame": frame.to_dict() if frame else None,
+            "evidence": self.vision.summary(),
+            "downloads": self._download_count,
+        }
+
+    def diagnose_vision(self, timeout: float = 20.0) -> dict[str, Any]:
+        """Run the full capture diagnosis against the live recording tab."""
+        return self._ask("diagnose", timeout)
+
+    def capabilities(self, timeout: float = 30.0) -> dict[str, Any]:
+        """Ask the live recording tab how it can be automated at all.
+
+        Read-only. Worth running on the real screen *before* recording it: it
+        reports which sensors this application exposes, so a recording is only
+        made once there is something that can identify a step and something
+        that can prove it worked.
+        """
+        return self._ask("probe", timeout)
+
+    def _ask(self, kind: str, timeout: float) -> dict[str, Any]:
+        if not self.alive():
+            return {"available": False, "reason": "the recorder is not running"}
+        answered = threading.Event()
+        box: dict[str, Any] = {}
+        self._requests.put((kind, box, answered))
+        if not answered.wait(timeout):
+            return {"available": False, "reason": "the recording browser did not answer in time"}
+        return box.get("result") or {"available": False, "reason": "no answer"}
+
     def _preserve(self, context: Any) -> None:
         """Save what we captured even if the session ended badly."""
         try:
@@ -681,6 +798,17 @@ class PlaywrightRecordingWorker:
         try:
             context.tracing.stop(path=str(self.artifact_dir / "trace" / "trace.zip"))
         except Exception:
+            pass
+        # What the evidence in this recording is actually worth. Written here so
+        # it exists even for a recording that ended badly — a session that could
+        # not be seen at all is exactly the one somebody needs to be told about.
+        try:
+            (self.artifact_dir / "screenshots").mkdir(parents=True, exist_ok=True)
+            (self.artifact_dir / "screenshots" / "vision-summary.json").write_text(
+                json.dumps(self.vision.summary(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
             pass
 
     # ---------- page and download tracking ----------
@@ -932,15 +1060,17 @@ class PlaywrightRecordingWorker:
         step.setdefault("retry", {"max_attempts": 1, "safe_to_repeat": False})
         self.on_step(step)
 
-    def _shoot(self, page: Any) -> str:
-        """Best-effort screenshot; "" (never None) on failure, so callers treat it uniformly."""
-        self._shot_seq += 1
-        rel = f"screenshots/{self._shot_seq:06d}.png"
-        try:
-            page.screenshot(path=str(self.artifact_dir / rel), timeout=5000)
-        except Exception:
-            return ""
-        return rel
+    def _shoot(self, page: Any, *, deep: bool = False) -> str:
+        """Best-effort screenshot; "" (never None) on failure, so callers treat it uniformly.
+
+        The frame is measured on the way out. A blank one is still saved — a
+        screen that showed nothing is a fact worth keeping — but it is written
+        down as blank, so review shows "no picture available" instead of a grey
+        square that looks like evidence.
+        """
+        capture = self.vision.capture(page, deep=deep)
+        self._shot_seq = self.vision.frames_taken
+        return capture.relative_path
 
 
 def _redacted_observed_locators(observed: Any) -> list[dict[str, Any]]:
