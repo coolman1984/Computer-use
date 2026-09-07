@@ -3,7 +3,14 @@
 **Project:** SmartOps / G-MES pilot  
 **Date:** 2026-09-06  
 **Broken stage:** Record manually ✅ → **Replay automatically ❌** → Validate → Approve → Schedule  
-**Status of this document:** Diagnosis complete from retained evidence and source review. No code changed yet. Nothing in this file contains credentials, cookies, corporate hostnames, or user names.
+**Status of this document:** Diagnosis complete from retained evidence and source review. Steps 2–3 are present on the current branch; Step 4 replay page adoption is implemented in the isolated repair branch and remains subject to the focused test and headed-browser gates below. Nothing in this file contains credentials, cookies, corporate hostnames, or user names.
+
+**Isolated repair validation (2026-09-07):** The focused command
+`python3 -m pytest -q tests/test_replay_page_identity.py tests/test_replay_page_adoption.py tests/test_contract_hardening.py tests/test_popup_login.py tests/test_auth_classifier.py`
+completed with **46 passed, 2 skipped**. The identity regression uses a fake download
+payload to prove page adoption and file capture; it is not Excel validation and does
+not replace headed-browser testing, which is blocked in this environment because
+Chromium is unavailable.
 
 ---
 

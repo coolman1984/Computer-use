@@ -66,6 +66,21 @@ class ReplaySession:
         self.download_errors: list[str] = []
         self.step_results: list[dict[str, Any]] = []
         self._pages: list[Any] = []
+        # Context pages that existed before this replay belong to the caller.
+        # Stale-page cleanup may close only pages created and tracked by this
+        # session; keeping this inventory also protects an operator's open tab.
+        self._initial_context_pages: list[Any] = list(
+            getattr(context, "pages", None) or []
+        )
+        # Replay identities are assigned once and remain stable after closure.
+        self._page_names: dict[int, str] = {}
+        self._page_by_name: dict[str, Any] = {}
+        self._main_page: Any = None
+        self._next_page_number = 1
+        # Authentication can create popup/relay tabs before replay starts. Keep
+        # them in _pages for history, but exclude them from replay targets.
+        self._replay_pages: list[Any] = []
+        self._replay_started = False
         self._current: Any = None
         self._pending_downloads: list[Any] = []
         self._downloads_before = 0
@@ -81,28 +96,46 @@ class ReplaySession:
         self.context.on("page", self._track)
         self.context.on("response", self._on_response)
         page = self.context.new_page()
-        self._track(page)
+        self._track(page, main=True)
         self._current = page
         page.goto(start_url, wait_until="domcontentloaded")
         return page
 
+    def _track(self, page: Any, *, main: bool = False) -> None:
+        """Track a page once and assign a stable replay identity."""
+        if any(existing is page for existing in self._pages):
+            return
+        self._pages.append(page)
+        if main or self._main_page is None:
+            name = "main"
+            self._main_page = page
+        else:
+            name = f"page-{self._next_page_number}"
+            self._next_page_number += 1
+        self._page_names[id(page)] = name
+        self._page_by_name[name] = page
+        # Download capture is part of the replay contract; propagate an event
+        # binding failure instead of silently reporting a missing file later.
+        page.on("download", self._on_download)
+        if self._replay_started:
+            self._replay_pages.append(page)
+
     def adopt(self, page: Any) -> None:
         """Continue on the page sign-in settled on, not the one we opened.
 
-        Signing in does not always hand the session back on the same tab: a
-        popup can replace its opener, and a portal can open the application in
-        a second tab and abandon the first. The authentication layer classifies
-        the pages and says which one is signed in; that page is the only one
-        carrying the session, so it becomes the current page here.
-
-        It is also moved to the front of the page list, because a recorded step
-        that says it happened on the "main" tab resolves to the first live page
-        — which would otherwise be the tab we opened and the site abandoned.
+        Authentication can leave popup and relay pages in the context. They are
+        retained in _pages for history, while this verified page becomes the
+        sole ``main`` target and the first post-auth page will be ``page-1``.
         """
         if page is None or _closed(page):
             return  # a closed page carries nothing; keep what we have
         self._track(page)
-        self._pages = [page] + [tracked for tracked in self._pages if tracked is not page]
+        self._main_page = page
+        self._replay_started = True
+        self._replay_pages = [page]
+        self._next_page_number = 1
+        self._page_names[id(page)] = "main"
+        self._page_by_name = {"main": page}
         self._current = page
 
     def current_page(self) -> Any:
@@ -128,13 +161,17 @@ class ReplaySession:
             keeper_host = urlsplit(keeper.url or "").netloc
         except Exception:
             return []
+        # Only pages observed by this session's page listener are candidates.
+        # A context may already contain an operator tab, and an untracked page
+        # is outside this replay's ownership boundary.
         candidates: list[Any] = list(self._pages)
-        for page in list(getattr(self.context, "pages", None) or []):
-            if page not in candidates:
-                candidates.append(page)
         closed: list[str] = []
         for page in candidates:
             if page is keeper or _closed(page):
+                continue
+            # Existing context tabs are not owned by this replay, even when
+            # they happen to share the portal host.
+            if any(existing is page for existing in self._initial_context_pages):
                 continue
             try:
                 url = page.url or ""
@@ -148,14 +185,9 @@ class ReplaySession:
             except Exception:
                 continue  # a tab we cannot close is not a reason to stop
             closed.append(url or "about:blank")
-        if closed:
-            self._pages = [tracked for tracked in self._pages if not _closed(tracked)]
+        # Keep closed entries in _pages so page identities and event history do
+        # not get renumbered after cleanup.
         return closed
-
-    def _track(self, page: Any) -> None:
-        if page not in self._pages:
-            self._pages.append(page)
-            page.on("download", self._on_download)
 
     def _on_download(self, download: Any) -> None:
         # Saving here would re-enter Playwright during the click that caused the
@@ -498,23 +530,37 @@ class ReplaySession:
     def _page(self) -> Any:
         if self._current is None:
             raise PermanentError("The replay has no open page")
+        if _closed(self._current):
+            raise PermanentError("The replay's current page is closed")
         return self._current
 
+    def _ensure_page_identities(self) -> None:
+        """Backfill identities for compatibility with focused test doubles."""
+        for page in list(self._pages):
+            if id(page) in self._page_names:
+                continue
+            if self._main_page is None:
+                name = "main"
+                self._main_page = page
+            else:
+                name = f"page-{self._next_page_number}"
+                self._next_page_number += 1
+            self._page_names[id(page)] = name
+            self._page_by_name[name] = page
+
     def _try_page(self, name: str) -> Any | None:
-        live = [p for p in self._pages if not _closed(p)]
-        if not live:
+        self._ensure_page_identities()
+        wanted = name or "main"
+        if wanted == "page-0":
+            wanted = "main"
+        if wanted == "latest":
+            candidates = self._replay_pages if self._replay_started else self._pages
+            live = [p for p in candidates if not _closed(p)]
+            return live[-1] if live else None
+        page = self._page_by_name.get(wanted)
+        if page is None or _closed(page):
             return None
-        if name in ("", "main"):
-            return live[0]
-        if name == "latest":
-            return live[-1]
-        if name.startswith("page-"):
-            try:
-                index = int(name.split("-", 1)[1])
-            except ValueError:
-                return None
-            return live[index] if 0 <= index < len(live) else None
-        return None
+        return page
 
     def _resolve_page(self, name: str) -> Any:
         page = self._try_page(name)
@@ -529,10 +575,10 @@ class ReplaySession:
         # A step naming a tab acts there without needing an explicit switch.
         page = self._try_page(wanted_page)
         if page is None:
-            if wanted_page not in ("", "main"):
-                raise StepFailed(action.get("seq", 0), f"the tab '{wanted_page}' is not open")
-            page = self._page()
-        if page is not self._current and wanted_page not in ("", "main"):
+            raise StepFailed(
+                action.get("seq", 0), f"the tab '{wanted_page}' is not open"
+            )
+        if page is not self._current:
             self._current = page
         frame_ref = target.get("frame") or ""
         frame = self._frame_for(page, frame_ref)
@@ -695,3 +741,4 @@ def _closed(page: Any) -> bool:
         return page.is_closed()
     except Exception:
         return True
+
