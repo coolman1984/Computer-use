@@ -38,7 +38,20 @@ _ON_SCREEN_JS = """
   if (s.display === 'none' || s.visibility === 'hidden') return false;
   const vw = window.innerWidth || document.documentElement.clientWidth;
   const vh = window.innerHeight || document.documentElement.clientHeight;
-  return r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw;
+  // At least one whole pixel of the element must lie inside the viewport. A
+  // box that starts a fraction of a pixel above the fold (the G-MES top-frame
+  // logo sits at 899.99px in a 900px window) is not on screen.
+  const visibleW = Math.min(r.right, vw) - Math.max(r.left, 0);
+  const visibleH = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+  if (visibleW < 1 || visibleH < 1) return false;
+  // And the element must actually be what is rendered there: a hit test at
+  // the centre of its visible part has to land on it or on one of its own
+  // children. This rules out boxes clipped by a zero-size ancestor and boxes
+  // painted over by another frame, which no user could see either.
+  const cx = Math.max(r.left, 0) + visibleW / 2;
+  const cy = Math.max(r.top, 0) + visibleH / 2;
+  const hit = document.elementFromPoint(cx, cy);
+  return !!hit && (hit === el || el.contains(hit));
 })
 """
 
