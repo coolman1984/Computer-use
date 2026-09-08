@@ -1,0 +1,1565 @@
+generated_by: scripts/project_eye.py — do not edit by hand, run it again
+module_count: 82
+domains:
+  assistant:
+    modules:
+    - adapters/agents/cli_runner
+    - adapters/agents/commands
+    lines: 196
+  automation:
+    modules:
+    - engine/contracts
+    - engine/registry
+    - engine/retry
+    - engine/runner
+    - processes/manager
+    - workflows/builtin
+    - workflows/profiles
+    lines: 2030
+  browser:
+    modules:
+    - adapters/browser/authentication
+    - adapters/browser/playwright_engine
+    - adapters/browser/replay
+    - adapters/browser/session
+    lines: 2796
+  composition:
+    modules:
+    - __main__
+    - cli
+    - guidance
+    - main
+    - scheduler
+    - services
+    - worker
+    lines: 1101
+  contract:
+    modules:
+    - domain/enums
+    - domain/models
+    - ports/agents
+    - ports/browser
+    - ports/notify
+    - ports/validation
+    lines: 863
+  foundation:
+    modules:
+    - core/clock
+    - core/errors
+    - core/ids
+    - events/bus
+    - events/log
+    lines: 271
+  operations:
+    modules:
+    - __init__
+    - adapters
+    - adapters/agents
+    - adapters/browser
+    - adapters/history
+    - adapters/incidents
+    - adapters/notify
+    - adapters/validation
+    - api
+    - checks
+    - chrome_bridge
+    - core
+    - domain
+    - engine
+    - events
+    - journey
+    - login
+    - operator_memory
+    - ports
+    - processes
+    - recordings
+    - recovery
+    - storage
+    - workflows
+    lines: 1477
+  persistence:
+    modules:
+    - storage/db
+    - storage/repositories
+    lines: 1075
+  recording:
+    modules:
+    - recordings/artifacts
+    - recordings/coach
+    - recordings/confidence
+    - recordings/converter
+    - recordings/elements
+    - recordings/instruments
+    - recordings/manager
+    - recordings/probe
+    - recordings/recovery
+    - recordings/redaction
+    - recordings/timeline
+    - recordings/vision
+    - recordings/worker
+    lines: 5658
+  results:
+    modules:
+    - adapters/history/archiver
+    - adapters/incidents/pack
+    - adapters/notify/latency
+    - adapters/notify/local
+    lines: 423
+  shared:
+    modules:
+    - config
+    - credential_prompt
+    - credentials
+    - sessions
+    - storage/paths
+    lines: 1006
+  validation:
+    modules:
+    - adapters/validation/local
+    lines: 252
+  web:
+    modules:
+    - api/app
+    - api/ws
+    lines: 1372
+nodes:
+- id: __init__
+  type: module
+  domain: operations
+  path: src/smartops/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: __main__
+  type: module
+  domain: composition
+  path: src/smartops/__main__.py
+  lines: 10
+  depended_on_by: 0
+- id: adapters
+  type: module
+  domain: operations
+  path: src/smartops/adapters/__init__.py
+  lines: 0
+  depended_on_by: 0
+- id: adapters/agents
+  type: module
+  domain: operations
+  path: src/smartops/adapters/agents/__init__.py
+  lines: 0
+  depended_on_by: 0
+- id: adapters/agents/cli_runner
+  type: module
+  domain: assistant
+  path: src/smartops/adapters/agents/cli_runner.py
+  lines: 155
+  depended_on_by: 1
+- id: adapters/agents/commands
+  type: module
+  domain: assistant
+  path: src/smartops/adapters/agents/commands.py
+  lines: 41
+  depended_on_by: 1
+- id: adapters/browser
+  type: module
+  domain: operations
+  path: src/smartops/adapters/browser/__init__.py
+  lines: 0
+  depended_on_by: 0
+- id: adapters/browser/authentication
+  type: module
+  domain: browser
+  path: src/smartops/adapters/browser/authentication.py
+  lines: 809
+  depended_on_by: 2
+- id: adapters/browser/playwright_engine
+  type: module
+  domain: browser
+  path: src/smartops/adapters/browser/playwright_engine.py
+  lines: 536
+  depended_on_by: 1
+- id: adapters/browser/replay
+  type: module
+  domain: browser
+  path: src/smartops/adapters/browser/replay.py
+  lines: 1178
+  depended_on_by: 1
+- id: adapters/browser/session
+  type: module
+  domain: browser
+  path: src/smartops/adapters/browser/session.py
+  lines: 273
+  depended_on_by: 4
+- id: adapters/history
+  type: module
+  domain: operations
+  path: src/smartops/adapters/history/__init__.py
+  lines: 0
+  depended_on_by: 0
+- id: adapters/history/archiver
+  type: module
+  domain: results
+  path: src/smartops/adapters/history/archiver.py
+  lines: 171
+  depended_on_by: 1
+- id: adapters/incidents
+  type: module
+  domain: operations
+  path: src/smartops/adapters/incidents/__init__.py
+  lines: 0
+  depended_on_by: 0
+- id: adapters/incidents/pack
+  type: module
+  domain: results
+  path: src/smartops/adapters/incidents/pack.py
+  lines: 118
+  depended_on_by: 0
+- id: adapters/notify
+  type: module
+  domain: operations
+  path: src/smartops/adapters/notify/__init__.py
+  lines: 0
+  depended_on_by: 0
+- id: adapters/notify/latency
+  type: module
+  domain: results
+  path: src/smartops/adapters/notify/latency.py
+  lines: 25
+  depended_on_by: 1
+- id: adapters/notify/local
+  type: module
+  domain: results
+  path: src/smartops/adapters/notify/local.py
+  lines: 109
+  depended_on_by: 2
+- id: adapters/validation
+  type: module
+  domain: operations
+  path: src/smartops/adapters/validation/__init__.py
+  lines: 0
+  depended_on_by: 0
+- id: adapters/validation/local
+  type: module
+  domain: validation
+  path: src/smartops/adapters/validation/local.py
+  lines: 252
+  depended_on_by: 1
+- id: api
+  type: module
+  domain: operations
+  path: src/smartops/api/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: api/app
+  type: module
+  domain: web
+  path: src/smartops/api/app.py
+  lines: 1264
+  depended_on_by: 2
+- id: api/ws
+  type: module
+  domain: web
+  path: src/smartops/api/ws.py
+  lines: 108
+  depended_on_by: 1
+- id: checks
+  type: module
+  domain: operations
+  path: src/smartops/checks.py
+  lines: 361
+  depended_on_by: 3
+- id: chrome_bridge
+  type: module
+  domain: operations
+  path: src/smartops/chrome_bridge.py
+  lines: 193
+  depended_on_by: 2
+- id: cli
+  type: module
+  domain: composition
+  path: src/smartops/cli.py
+  lines: 428
+  depended_on_by: 1
+- id: config
+  type: module
+  domain: shared
+  path: src/smartops/config.py
+  lines: 310
+  depended_on_by: 8
+- id: core
+  type: module
+  domain: operations
+  path: src/smartops/core/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: core/clock
+  type: module
+  domain: foundation
+  path: src/smartops/core/clock.py
+  lines: 46
+  depended_on_by: 12
+- id: core/errors
+  type: module
+  domain: foundation
+  path: src/smartops/core/errors.py
+  lines: 112
+  depended_on_by: 20
+- id: core/ids
+  type: module
+  domain: foundation
+  path: src/smartops/core/ids.py
+  lines: 23
+  depended_on_by: 6
+- id: credential_prompt
+  type: module
+  domain: shared
+  path: src/smartops/credential_prompt.py
+  lines: 291
+  depended_on_by: 1
+- id: credentials
+  type: module
+  domain: shared
+  path: src/smartops/credentials.py
+  lines: 157
+  depended_on_by: 5
+- id: domain
+  type: module
+  domain: operations
+  path: src/smartops/domain/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: domain/enums
+  type: module
+  domain: contract
+  path: src/smartops/domain/enums.py
+  lines: 196
+  depended_on_by: 24
+- id: domain/models
+  type: module
+  domain: contract
+  path: src/smartops/domain/models.py
+  lines: 432
+  depended_on_by: 15
+- id: engine
+  type: module
+  domain: operations
+  path: src/smartops/engine/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: engine/contracts
+  type: module
+  domain: automation
+  path: src/smartops/engine/contracts.py
+  lines: 60
+  depended_on_by: 3
+- id: engine/registry
+  type: module
+  domain: automation
+  path: src/smartops/engine/registry.py
+  lines: 49
+  depended_on_by: 1
+- id: engine/retry
+  type: module
+  domain: automation
+  path: src/smartops/engine/retry.py
+  lines: 48
+  depended_on_by: 1
+- id: engine/runner
+  type: module
+  domain: automation
+  path: src/smartops/engine/runner.py
+  lines: 489
+  depended_on_by: 1
+- id: events
+  type: module
+  domain: operations
+  path: src/smartops/events/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: events/bus
+  type: module
+  domain: foundation
+  path: src/smartops/events/bus.py
+  lines: 36
+  depended_on_by: 2
+- id: events/log
+  type: module
+  domain: foundation
+  path: src/smartops/events/log.py
+  lines: 54
+  depended_on_by: 1
+- id: guidance
+  type: module
+  domain: composition
+  path: src/smartops/guidance.py
+  lines: 118
+  depended_on_by: 1
+- id: journey
+  type: module
+  domain: operations
+  path: src/smartops/journey.py
+  lines: 429
+  depended_on_by: 1
+- id: login
+  type: module
+  domain: operations
+  path: src/smartops/login.py
+  lines: 256
+  depended_on_by: 1
+- id: main
+  type: module
+  domain: composition
+  path: src/smartops/main.py
+  lines: 7
+  depended_on_by: 0
+- id: operator_memory
+  type: module
+  domain: operations
+  path: src/smartops/operator_memory.py
+  lines: 94
+  depended_on_by: 1
+- id: ports
+  type: module
+  domain: operations
+  path: src/smartops/ports/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: ports/agents
+  type: module
+  domain: contract
+  path: src/smartops/ports/agents.py
+  lines: 54
+  depended_on_by: 3
+- id: ports/browser
+  type: module
+  domain: contract
+  path: src/smartops/ports/browser.py
+  lines: 119
+  depended_on_by: 2
+- id: ports/notify
+  type: module
+  domain: contract
+  path: src/smartops/ports/notify.py
+  lines: 22
+  depended_on_by: 2
+- id: ports/validation
+  type: module
+  domain: contract
+  path: src/smartops/ports/validation.py
+  lines: 40
+  depended_on_by: 2
+- id: processes
+  type: module
+  domain: operations
+  path: src/smartops/processes/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: processes/manager
+  type: module
+  domain: automation
+  path: src/smartops/processes/manager.py
+  lines: 367
+  depended_on_by: 1
+- id: recordings
+  type: module
+  domain: operations
+  path: src/smartops/recordings/__init__.py
+  lines: 1
+  depended_on_by: 1
+- id: recordings/artifacts
+  type: module
+  domain: recording
+  path: src/smartops/recordings/artifacts.py
+  lines: 21
+  depended_on_by: 1
+- id: recordings/coach
+  type: module
+  domain: recording
+  path: src/smartops/recordings/coach.py
+  lines: 233
+  depended_on_by: 1
+- id: recordings/confidence
+  type: module
+  domain: recording
+  path: src/smartops/recordings/confidence.py
+  lines: 231
+  depended_on_by: 2
+- id: recordings/converter
+  type: module
+  domain: recording
+  path: src/smartops/recordings/converter.py
+  lines: 588
+  depended_on_by: 5
+- id: recordings/elements
+  type: module
+  domain: recording
+  path: src/smartops/recordings/elements.py
+  lines: 290
+  depended_on_by: 4
+- id: recordings/instruments
+  type: module
+  domain: recording
+  path: src/smartops/recordings/instruments.py
+  lines: 69
+  depended_on_by: 0
+- id: recordings/manager
+  type: module
+  domain: recording
+  path: src/smartops/recordings/manager.py
+  lines: 552
+  depended_on_by: 1
+- id: recordings/probe
+  type: module
+  domain: recording
+  path: src/smartops/recordings/probe.py
+  lines: 576
+  depended_on_by: 2
+- id: recordings/recovery
+  type: module
+  domain: recording
+  path: src/smartops/recordings/recovery.py
+  lines: 79
+  depended_on_by: 1
+- id: recordings/redaction
+  type: module
+  domain: recording
+  path: src/smartops/recordings/redaction.py
+  lines: 48
+  depended_on_by: 3
+- id: recordings/timeline
+  type: module
+  domain: recording
+  path: src/smartops/recordings/timeline.py
+  lines: 321
+  depended_on_by: 1
+- id: recordings/vision
+  type: module
+  domain: recording
+  path: src/smartops/recordings/vision.py
+  lines: 757
+  depended_on_by: 3
+- id: recordings/worker
+  type: module
+  domain: recording
+  path: src/smartops/recordings/worker.py
+  lines: 1893
+  depended_on_by: 1
+- id: recovery
+  type: module
+  domain: operations
+  path: src/smartops/recovery.py
+  lines: 133
+  depended_on_by: 1
+- id: scheduler
+  type: module
+  domain: composition
+  path: src/smartops/scheduler.py
+  lines: 154
+  depended_on_by: 1
+- id: services
+  type: module
+  domain: composition
+  path: src/smartops/services.py
+  lines: 204
+  depended_on_by: 3
+- id: sessions
+  type: module
+  domain: shared
+  path: src/smartops/sessions.py
+  lines: 191
+  depended_on_by: 7
+- id: storage
+  type: module
+  domain: operations
+  path: src/smartops/storage/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: storage/db
+  type: module
+  domain: persistence
+  path: src/smartops/storage/db.py
+  lines: 303
+  depended_on_by: 2
+- id: storage/paths
+  type: module
+  domain: shared
+  path: src/smartops/storage/paths.py
+  lines: 57
+  depended_on_by: 6
+- id: storage/repositories
+  type: module
+  domain: persistence
+  path: src/smartops/storage/repositories.py
+  lines: 772
+  depended_on_by: 2
+- id: worker
+  type: module
+  domain: composition
+  path: src/smartops/worker.py
+  lines: 180
+  depended_on_by: 2
+- id: workflows
+  type: module
+  domain: operations
+  path: src/smartops/workflows/__init__.py
+  lines: 1
+  depended_on_by: 0
+- id: workflows/builtin
+  type: module
+  domain: automation
+  path: src/smartops/workflows/builtin.py
+  lines: 498
+  depended_on_by: 1
+- id: workflows/profiles
+  type: module
+  domain: automation
+  path: src/smartops/workflows/profiles.py
+  lines: 519
+  depended_on_by: 5
+edges:
+- from: __main__
+  to: cli
+  relation: imports
+- from: adapters/agents/cli_runner
+  to: core/clock
+  relation: imports
+- from: adapters/agents/cli_runner
+  to: core/errors
+  relation: imports
+- from: adapters/agents/cli_runner
+  to: domain/enums
+  relation: imports
+- from: adapters/agents/cli_runner
+  to: ports/agents
+  relation: imports
+- from: adapters/agents/commands
+  to: ports/agents
+  relation: imports
+- from: adapters/browser/authentication
+  to: credentials
+  relation: imports
+- from: adapters/browser/playwright_engine
+  to: adapters/browser/authentication
+  relation: imports
+- from: adapters/browser/playwright_engine
+  to: adapters/browser/replay
+  relation: imports
+- from: adapters/browser/playwright_engine
+  to: adapters/browser/session
+  relation: imports
+- from: adapters/browser/playwright_engine
+  to: config
+  relation: imports
+- from: adapters/browser/playwright_engine
+  to: credentials
+  relation: imports
+- from: adapters/browser/playwright_engine
+  to: domain/enums
+  relation: imports
+- from: adapters/browser/playwright_engine
+  to: ports/browser
+  relation: imports
+- from: adapters/browser/playwright_engine
+  to: storage/paths
+  relation: imports
+- from: adapters/browser/replay
+  to: core/errors
+  relation: imports
+- from: adapters/browser/session
+  to: config
+  relation: imports
+- from: adapters/browser/session
+  to: core/errors
+  relation: imports
+- from: adapters/history/archiver
+  to: domain/models
+  relation: imports
+- from: adapters/history/archiver
+  to: storage/paths
+  relation: imports
+- from: adapters/incidents/pack
+  to: core/clock
+  relation: imports
+- from: adapters/incidents/pack
+  to: core/errors
+  relation: imports
+- from: adapters/incidents/pack
+  to: domain/enums
+  relation: imports
+- from: adapters/notify/latency
+  to: domain/enums
+  relation: imports
+- from: adapters/notify/local
+  to: core/clock
+  relation: imports
+- from: adapters/notify/local
+  to: ports/notify
+  relation: imports
+- from: adapters/validation/local
+  to: ports/validation
+  relation: imports
+- from: api/app
+  to: adapters/notify/local
+  relation: imports
+- from: api/app
+  to: api/ws
+  relation: imports
+- from: api/app
+  to: checks
+  relation: imports
+- from: api/app
+  to: config
+  relation: imports
+- from: api/app
+  to: core/errors
+  relation: imports
+- from: api/app
+  to: domain/enums
+  relation: imports
+- from: api/app
+  to: guidance
+  relation: imports
+- from: api/app
+  to: journey
+  relation: imports
+- from: api/app
+  to: recordings/artifacts
+  relation: imports
+- from: api/app
+  to: recordings/converter
+  relation: imports
+- from: api/app
+  to: recordings/elements
+  relation: imports
+- from: api/app
+  to: services
+  relation: imports
+- from: api/app
+  to: sessions
+  relation: imports
+- from: api/app
+  to: worker
+  relation: imports
+- from: api/ws
+  to: chrome_bridge
+  relation: imports
+- from: api/ws
+  to: domain/models
+  relation: imports
+- from: api/ws
+  to: services
+  relation: imports
+- from: checks
+  to: config
+  relation: imports
+- from: checks
+  to: sessions
+  relation: imports
+- from: checks
+  to: storage/paths
+  relation: imports
+- from: checks
+  to: workflows/profiles
+  relation: imports
+- from: chrome_bridge
+  to: core/clock
+  relation: imports
+- from: cli
+  to: adapters/browser/session
+  relation: imports
+- from: cli
+  to: api/app
+  relation: imports
+- from: cli
+  to: checks
+  relation: imports
+- from: cli
+  to: core/errors
+  relation: imports
+- from: cli
+  to: recordings/probe
+  relation: imports
+- from: cli
+  to: recordings/vision
+  relation: imports
+- from: cli
+  to: services
+  relation: imports
+- from: cli
+  to: sessions
+  relation: imports
+- from: cli
+  to: worker
+  relation: imports
+- from: credential_prompt
+  to: credentials
+  relation: imports
+- from: credential_prompt
+  to: domain/enums
+  relation: imports
+- from: domain/models
+  to: core/clock
+  relation: imports
+- from: domain/models
+  to: domain/enums
+  relation: imports
+- from: engine/contracts
+  to: core/errors
+  relation: imports
+- from: engine/registry
+  to: core/errors
+  relation: imports
+- from: engine/registry
+  to: domain/models
+  relation: imports
+- from: engine/registry
+  to: engine/contracts
+  relation: imports
+- from: engine/retry
+  to: core/errors
+  relation: imports
+- from: engine/runner
+  to: core/clock
+  relation: imports
+- from: engine/runner
+  to: core/errors
+  relation: imports
+- from: engine/runner
+  to: core/ids
+  relation: imports
+- from: engine/runner
+  to: domain/enums
+  relation: imports
+- from: engine/runner
+  to: domain/models
+  relation: imports
+- from: engine/runner
+  to: engine/contracts
+  relation: imports
+- from: engine/runner
+  to: engine/retry
+  relation: imports
+- from: engine/runner
+  to: recordings/converter
+  relation: imports
+- from: events/bus
+  to: domain/models
+  relation: imports
+- from: events/log
+  to: core/clock
+  relation: imports
+- from: events/log
+  to: core/ids
+  relation: imports
+- from: events/log
+  to: domain/enums
+  relation: imports
+- from: events/log
+  to: domain/models
+  relation: imports
+- from: events/log
+  to: events/bus
+  relation: imports
+- from: events/log
+  to: storage/repositories
+  relation: imports
+- from: journey
+  to: core/errors
+  relation: imports
+- from: journey
+  to: domain/enums
+  relation: imports
+- from: journey
+  to: sessions
+  relation: imports
+- from: login
+  to: config
+  relation: imports
+- from: login
+  to: core/errors
+  relation: imports
+- from: login
+  to: domain/enums
+  relation: imports
+- from: login
+  to: sessions
+  relation: imports
+- from: main
+  to: api/app
+  relation: imports
+- from: operator_memory
+  to: core/clock
+  relation: imports
+- from: operator_memory
+  to: core/ids
+  relation: imports
+- from: ports/agents
+  to: domain/enums
+  relation: imports
+- from: ports/browser
+  to: domain/enums
+  relation: imports
+- from: ports/notify
+  to: domain/enums
+  relation: imports
+- from: processes/manager
+  to: core/errors
+  relation: imports
+- from: processes/manager
+  to: domain/enums
+  relation: imports
+- from: processes/manager
+  to: domain/models
+  relation: imports
+- from: processes/manager
+  to: recordings/converter
+  relation: imports
+- from: processes/manager
+  to: workflows/profiles
+  relation: imports
+- from: recordings/coach
+  to: core/ids
+  relation: imports
+- from: recordings/coach
+  to: domain/enums
+  relation: imports
+- from: recordings/coach
+  to: domain/models
+  relation: imports
+- from: recordings/coach
+  to: ports/agents
+  relation: imports
+- from: recordings/coach
+  to: recordings
+  relation: imports
+- from: recordings/confidence
+  to: domain/enums
+  relation: imports
+- from: recordings/converter
+  to: domain/enums
+  relation: imports
+- from: recordings/converter
+  to: domain/models
+  relation: imports
+- from: recordings/converter
+  to: recordings/confidence
+  relation: imports
+- from: recordings/instruments
+  to: domain/models
+  relation: imports
+- from: recordings/manager
+  to: core/errors
+  relation: imports
+- from: recordings/manager
+  to: domain/enums
+  relation: imports
+- from: recordings/manager
+  to: domain/models
+  relation: imports
+- from: recordings/manager
+  to: recordings/converter
+  relation: imports
+- from: recordings/manager
+  to: recordings/elements
+  relation: imports
+- from: recordings/manager
+  to: recordings/worker
+  relation: imports
+- from: recordings/manager
+  to: sessions
+  relation: imports
+- from: recordings/manager
+  to: storage/paths
+  relation: imports
+- from: recordings/probe
+  to: recordings/redaction
+  relation: imports
+- from: recordings/probe
+  to: recordings/vision
+  relation: imports
+- from: recordings/recovery
+  to: core/errors
+  relation: imports
+- from: recordings/recovery
+  to: domain/enums
+  relation: imports
+- from: recordings/vision
+  to: recordings/redaction
+  relation: imports
+- from: recordings/worker
+  to: adapters/browser/authentication
+  relation: imports
+- from: recordings/worker
+  to: adapters/browser/session
+  relation: imports
+- from: recordings/worker
+  to: config
+  relation: imports
+- from: recordings/worker
+  to: credentials
+  relation: imports
+- from: recordings/worker
+  to: recordings/confidence
+  relation: imports
+- from: recordings/worker
+  to: recordings/elements
+  relation: imports
+- from: recordings/worker
+  to: recordings/probe
+  relation: imports
+- from: recordings/worker
+  to: recordings/redaction
+  relation: imports
+- from: recordings/worker
+  to: recordings/timeline
+  relation: imports
+- from: recordings/worker
+  to: recordings/vision
+  relation: imports
+- from: recovery
+  to: domain/enums
+  relation: imports
+- from: recovery
+  to: domain/models
+  relation: imports
+- from: scheduler
+  to: core/clock
+  relation: imports
+- from: scheduler
+  to: core/errors
+  relation: imports
+- from: scheduler
+  to: domain/enums
+  relation: imports
+- from: scheduler
+  to: domain/models
+  relation: imports
+- from: scheduler
+  to: recordings/converter
+  relation: imports
+- from: scheduler
+  to: workflows/profiles
+  relation: imports
+- from: services
+  to: adapters/agents/cli_runner
+  relation: imports
+- from: services
+  to: adapters/agents/commands
+  relation: imports
+- from: services
+  to: adapters/browser/playwright_engine
+  relation: imports
+- from: services
+  to: adapters/history/archiver
+  relation: imports
+- from: services
+  to: adapters/notify/local
+  relation: imports
+- from: services
+  to: adapters/validation/local
+  relation: imports
+- from: services
+  to: checks
+  relation: imports
+- from: services
+  to: chrome_bridge
+  relation: imports
+- from: services
+  to: config
+  relation: imports
+- from: services
+  to: core/clock
+  relation: imports
+- from: services
+  to: core/errors
+  relation: imports
+- from: services
+  to: credential_prompt
+  relation: imports
+- from: services
+  to: credentials
+  relation: imports
+- from: services
+  to: engine/registry
+  relation: imports
+- from: services
+  to: engine/runner
+  relation: imports
+- from: services
+  to: events/bus
+  relation: imports
+- from: services
+  to: events/log
+  relation: imports
+- from: services
+  to: login
+  relation: imports
+- from: services
+  to: operator_memory
+  relation: imports
+- from: services
+  to: processes/manager
+  relation: imports
+- from: services
+  to: recordings/coach
+  relation: imports
+- from: services
+  to: recordings/manager
+  relation: imports
+- from: services
+  to: recordings/recovery
+  relation: imports
+- from: services
+  to: recovery
+  relation: imports
+- from: services
+  to: scheduler
+  relation: imports
+- from: services
+  to: storage/db
+  relation: imports
+- from: services
+  to: storage/repositories
+  relation: imports
+- from: services
+  to: workflows/builtin
+  relation: imports
+- from: services
+  to: workflows/profiles
+  relation: imports
+- from: sessions
+  to: adapters/browser/session
+  relation: imports
+- from: sessions
+  to: config
+  relation: imports
+- from: sessions
+  to: core/clock
+  relation: imports
+- from: sessions
+  to: core/errors
+  relation: imports
+- from: sessions
+  to: storage/paths
+  relation: imports
+- from: storage/repositories
+  to: core/clock
+  relation: imports
+- from: storage/repositories
+  to: core/ids
+  relation: imports
+- from: storage/repositories
+  to: domain/enums
+  relation: imports
+- from: storage/repositories
+  to: domain/models
+  relation: imports
+- from: storage/repositories
+  to: storage/db
+  relation: imports
+- from: workflows/builtin
+  to: adapters/notify/latency
+  relation: imports
+- from: workflows/builtin
+  to: core/errors
+  relation: imports
+- from: workflows/builtin
+  to: core/ids
+  relation: imports
+- from: workflows/builtin
+  to: domain/enums
+  relation: imports
+- from: workflows/builtin
+  to: domain/models
+  relation: imports
+- from: workflows/builtin
+  to: engine/contracts
+  relation: imports
+- from: workflows/builtin
+  to: ports/browser
+  relation: imports
+- from: workflows/builtin
+  to: ports/notify
+  relation: imports
+- from: workflows/builtin
+  to: ports/validation
+  relation: imports
+- from: workflows/builtin
+  to: recordings/elements
+  relation: imports
+- from: workflows/builtin
+  to: sessions
+  relation: imports
+- from: workflows/builtin
+  to: storage/paths
+  relation: imports
+- from: workflows/builtin
+  to: workflows/profiles
+  relation: imports
+- from: workflows/profiles
+  to: core/errors
+  relation: imports
+domain_edges:
+- from: assistant
+  to: contract
+  relation: depends_on
+  through:
+  - adapters/agents/cli_runner -> domain/enums
+  - adapters/agents/cli_runner -> ports/agents
+  - adapters/agents/commands -> ports/agents
+- from: assistant
+  to: foundation
+  relation: depends_on
+  through:
+  - adapters/agents/cli_runner -> core/clock
+  - adapters/agents/cli_runner -> core/errors
+- from: automation
+  to: contract
+  relation: depends_on
+  through:
+  - engine/registry -> domain/models
+  - engine/runner -> domain/enums
+  - engine/runner -> domain/models
+- from: automation
+  to: foundation
+  relation: depends_on
+  through:
+  - engine/contracts -> core/errors
+  - engine/registry -> core/errors
+  - engine/retry -> core/errors
+- from: automation
+  to: recording
+  relation: depends_on
+  through:
+  - engine/runner -> recordings/converter
+  - processes/manager -> recordings/converter
+  - workflows/builtin -> recordings/elements
+- from: automation
+  to: results
+  relation: depends_on
+  through:
+  - workflows/builtin -> adapters/notify/latency
+- from: automation
+  to: shared
+  relation: depends_on
+  through:
+  - workflows/builtin -> sessions
+  - workflows/builtin -> storage/paths
+- from: browser
+  to: contract
+  relation: depends_on
+  through:
+  - adapters/browser/playwright_engine -> domain/enums
+  - adapters/browser/playwright_engine -> ports/browser
+- from: browser
+  to: foundation
+  relation: depends_on
+  through:
+  - adapters/browser/replay -> core/errors
+  - adapters/browser/session -> core/errors
+- from: browser
+  to: shared
+  relation: depends_on
+  through:
+  - adapters/browser/authentication -> credentials
+  - adapters/browser/playwright_engine -> config
+  - adapters/browser/playwright_engine -> credentials
+- from: composition
+  to: assistant
+  relation: depends_on
+  through:
+  - services -> adapters/agents/cli_runner
+  - services -> adapters/agents/commands
+- from: composition
+  to: automation
+  relation: depends_on
+  through:
+  - scheduler -> workflows/profiles
+  - services -> engine/registry
+  - services -> engine/runner
+- from: composition
+  to: browser
+  relation: depends_on
+  through:
+  - cli -> adapters/browser/session
+  - services -> adapters/browser/playwright_engine
+- from: composition
+  to: contract
+  relation: depends_on
+  through:
+  - scheduler -> domain/enums
+  - scheduler -> domain/models
+- from: composition
+  to: foundation
+  relation: depends_on
+  through:
+  - cli -> core/errors
+  - scheduler -> core/clock
+  - scheduler -> core/errors
+- from: composition
+  to: operations
+  relation: depends_on
+  through:
+  - cli -> checks
+  - services -> checks
+  - services -> chrome_bridge
+- from: composition
+  to: persistence
+  relation: depends_on
+  through:
+  - services -> storage/db
+  - services -> storage/repositories
+- from: composition
+  to: recording
+  relation: depends_on
+  through:
+  - cli -> recordings/probe
+  - cli -> recordings/vision
+  - scheduler -> recordings/converter
+- from: composition
+  to: results
+  relation: depends_on
+  through:
+  - services -> adapters/history/archiver
+  - services -> adapters/notify/local
+- from: composition
+  to: shared
+  relation: depends_on
+  through:
+  - cli -> sessions
+  - services -> config
+  - services -> credential_prompt
+- from: composition
+  to: validation
+  relation: depends_on
+  through:
+  - services -> adapters/validation/local
+- from: composition
+  to: web
+  relation: depends_on
+  through:
+  - cli -> api/app
+  - main -> api/app
+- from: contract
+  to: foundation
+  relation: depends_on
+  through:
+  - domain/models -> core/clock
+- from: foundation
+  to: contract
+  relation: depends_on
+  through:
+  - events/bus -> domain/models
+  - events/log -> domain/enums
+  - events/log -> domain/models
+- from: foundation
+  to: persistence
+  relation: depends_on
+  through:
+  - events/log -> storage/repositories
+- from: operations
+  to: automation
+  relation: depends_on
+  through:
+  - checks -> workflows/profiles
+- from: operations
+  to: contract
+  relation: depends_on
+  through:
+  - journey -> domain/enums
+  - login -> domain/enums
+  - recovery -> domain/enums
+- from: operations
+  to: foundation
+  relation: depends_on
+  through:
+  - chrome_bridge -> core/clock
+  - journey -> core/errors
+  - login -> core/errors
+- from: operations
+  to: shared
+  relation: depends_on
+  through:
+  - checks -> config
+  - checks -> sessions
+  - checks -> storage/paths
+- from: persistence
+  to: contract
+  relation: depends_on
+  through:
+  - storage/repositories -> domain/enums
+  - storage/repositories -> domain/models
+- from: persistence
+  to: foundation
+  relation: depends_on
+  through:
+  - storage/repositories -> core/clock
+  - storage/repositories -> core/ids
+- from: recording
+  to: browser
+  relation: depends_on
+  through:
+  - recordings/worker -> adapters/browser/authentication
+  - recordings/worker -> adapters/browser/session
+- from: recording
+  to: contract
+  relation: depends_on
+  through:
+  - recordings/coach -> domain/enums
+  - recordings/coach -> domain/models
+  - recordings/coach -> ports/agents
+- from: recording
+  to: foundation
+  relation: depends_on
+  through:
+  - recordings/coach -> core/ids
+  - recordings/manager -> core/errors
+  - recordings/recovery -> core/errors
+- from: recording
+  to: operations
+  relation: depends_on
+  through:
+  - recordings/coach -> recordings
+- from: recording
+  to: shared
+  relation: depends_on
+  through:
+  - recordings/manager -> sessions
+  - recordings/manager -> storage/paths
+  - recordings/worker -> config
+- from: results
+  to: contract
+  relation: depends_on
+  through:
+  - adapters/history/archiver -> domain/models
+  - adapters/incidents/pack -> domain/enums
+  - adapters/notify/latency -> domain/enums
+- from: results
+  to: foundation
+  relation: depends_on
+  through:
+  - adapters/incidents/pack -> core/clock
+  - adapters/incidents/pack -> core/errors
+  - adapters/notify/local -> core/clock
+- from: results
+  to: shared
+  relation: depends_on
+  through:
+  - adapters/history/archiver -> storage/paths
+- from: shared
+  to: browser
+  relation: depends_on
+  through:
+  - sessions -> adapters/browser/session
+- from: shared
+  to: contract
+  relation: depends_on
+  through:
+  - credential_prompt -> domain/enums
+- from: shared
+  to: foundation
+  relation: depends_on
+  through:
+  - sessions -> core/clock
+  - sessions -> core/errors
+- from: validation
+  to: contract
+  relation: depends_on
+  through:
+  - adapters/validation/local -> ports/validation
+- from: web
+  to: composition
+  relation: depends_on
+  through:
+  - api/app -> guidance
+  - api/app -> services
+  - api/app -> worker
+- from: web
+  to: contract
+  relation: depends_on
+  through:
+  - api/app -> domain/enums
+  - api/ws -> domain/models
+- from: web
+  to: foundation
+  relation: depends_on
+  through:
+  - api/app -> core/errors
+- from: web
+  to: operations
+  relation: depends_on
+  through:
+  - api/app -> checks
+  - api/app -> journey
+  - api/ws -> chrome_bridge
+- from: web
+  to: recording
+  relation: depends_on
+  through:
+  - api/app -> recordings/artifacts
+  - api/app -> recordings/converter
+  - api/app -> recordings/elements
+- from: web
+  to: results
+  relation: depends_on
+  through:
+  - api/app -> adapters/notify/local
+- from: web
+  to: shared
+  relation: depends_on
+  through:
+  - api/app -> config
+  - api/app -> sessions
+cycles: []
+two_way_domains:
+- between:
+  - browser
+  - shared
+  note: each depends on the other
+- between:
+  - contract
+  - foundation
+  note: each depends on the other
+- between:
+  - foundation
+  - persistence
+  note: each depends on the other
+entrypoints:
+- id: __main__
+  purpose: python -m smartops
+- id: cli
+  purpose: the operator's terminal commands, and the one that serves the app
+- id: credential_prompt
+  purpose: the separate window that asks for a password
+- id: main
+  purpose: the web application, as a server would import it
+- id: scheduler
+  purpose: the clock that starts scheduled runs
+- id: services
+  purpose: the object graph everything else is reached through
+- id: worker
+  purpose: the background worker that executes runs
+most_depended_on:
+- id: domain/enums
+  depended_on_by: 24
+- id: core/errors
+  depended_on_by: 20
+- id: domain/models
+  depended_on_by: 15
+- id: core/clock
+  depended_on_by: 12
+- id: config
+  depended_on_by: 8
+- id: sessions
+  depended_on_by: 7
+- id: storage/paths
+  depended_on_by: 6
+- id: core/ids
+  depended_on_by: 6
+- id: credentials
+  depended_on_by: 5
+- id: recordings/converter
+  depended_on_by: 5
+- id: workflows/profiles
+  depended_on_by: 5
+- id: adapters/browser/session
+  depended_on_by: 4

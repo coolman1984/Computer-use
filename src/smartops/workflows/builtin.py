@@ -249,6 +249,25 @@ def replay_recording(ctx: StepContext) -> StepResult:
     )
 
 
+def _element_repository(services: Any, system: str) -> Any:
+    """This system's shared description of its controls, or None if it has none.
+
+    Loaded here rather than inside the browser adapter: this step already knows
+    about both the recorder that writes the description and the executor that
+    reads it, so it is the one place that can join them without making either
+    depend on the other. That two-way dependency between the recorder and the
+    executor is exactly what the project graph caught, and moving one line here
+    is what removed it.
+    """
+    try:
+        from ..recordings.elements import ElementRepository
+
+        path = services.recording_manager.system_elements_path(system)
+        return ElementRepository(path).load() if path.exists() else None
+    except Exception:
+        return None  # a missing description costs a shortcut, never the run
+
+
 def _auth_filters(services: Any, system_key: str) -> dict[str, Any]:
     """Authentication filters for a system, or an empty dict when it needs no sign-in.
 

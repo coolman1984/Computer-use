@@ -154,7 +154,7 @@ _CAPTURE_SCRIPT = """
     try {
       const rect = el.getBoundingClientRect();
       if (!rect.width) return found;
-      const clean = (v) => (v || '').replace(/\s+/g, ' ').trim();
+      const clean = (v) => (v || '').replace(/\\s+/g, ' ').trim();
       const usable = (v) => (v && v.length <= 40 && /[a-z\u0600-\u06FF]/i.test(v)) ? v : '';
       const middleY = rect.top + rect.height / 2;
       const middleX = rect.left + rect.width / 2;
@@ -179,7 +179,7 @@ _CAPTURE_SCRIPT = """
   }
 
   function anchorTextFor(el) {
-    const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
+    const clean = (value) => (value || '').replace(/\\s+/g, ' ').trim();
     const usable = (value) => {
       // Long prose is a paragraph, not a label; a bare number is a value that
       // will be different tomorrow.
@@ -200,7 +200,7 @@ _CAPTURE_SCRIPT = """
       }
       const describedBy = el.getAttribute && el.getAttribute('aria-labelledby');
       if (describedBy) {
-        const named = document.getElementById(describedBy.split(/\s+/)[0]);
+        const named = document.getElementById(describedBy.split(/\\s+/)[0]);
         if (named) { const text = usable(clean(named.textContent)); if (text) return text; }
       }
       // Nothing formal ties a label to this field, which is the ordinary case

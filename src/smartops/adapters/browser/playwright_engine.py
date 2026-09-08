@@ -346,19 +346,6 @@ class PlaywrightBrowserAdapter:
         except Exception as exc:
             return self._replay_failure(request, f"Unexpected failure while repeating the recording: {exc}", started)
 
-    @staticmethod
-    def _element_repository(request: ReplayRequest) -> Any:
-        """This system's element repository, or None when it has none yet."""
-        path = getattr(request, "elements_path", None)
-        if not path:
-            return None
-        try:
-            from ...recordings.elements import ElementRepository
-
-            return ElementRepository(Path(path)).load()
-        except Exception:
-            return None  # an unreadable repository costs a shortcut, not the run
-
     def _as_extraction_request(self, request: ReplayRequest) -> ExtractionRequest:
         """Adapt a replay request to the shape the shared auth/evidence helpers expect."""
         return ExtractionRequest(
@@ -385,10 +372,10 @@ class PlaywrightBrowserAdapter:
             credential_store=self._credential_store,
             evidence_timeout_ms=int(min(request.timeout_seconds, 60) * 1000),
         )
-        # The shared description of this system's controls, if one has been
-        # built for it. Consulted ahead of each step's own locators so a repair
+        # The shared description of this system's controls, when the caller
+        # supplied one. Consulted ahead of each step's own locators so a repair
         # made once in review reaches every step that names that control.
-        session.elements = self._element_repository(request)
+        session.elements = request.elements
         # Decided from the plan, before anything can open a dialog: a run only
         # agrees to a browser dialog that the recording it repeats agreed to.
         session.expects_dialogs = any(

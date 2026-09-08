@@ -389,7 +389,11 @@ def test_a_repair_in_the_shared_repository_reaches_a_plan_nobody_edited(
                                 inputs={"_element": element.reference})],
         },
         session_state_path=session_path(services.settings.storage.sessions_dir, "portal"),
-        elements_path=path,
+        # The description is handed over already loaded. The browser adapter is
+        # not allowed to fetch one itself: doing so made the executor depend on
+        # the recorder that produced it, which is the two-way dependency the
+        # project graph caught. See .project-eye/rules.yaml, ARCH-002.
+        elements=ElementRepository(path).load(),
     ))
 
     _all_ran(result)

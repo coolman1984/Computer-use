@@ -1,0 +1,61 @@
+# What this project's parts are allowed to depend on.
+#
+# Intent, not observation: the graph beside this file is derived from the code
+# and says what the imports *are*, while this says what they are *allowed to be*.
+# Where the two disagree, the disagreement is the finding — see PROJECT_EYE.md,
+# section 8. Never edit this file to make a violation disappear.
+#
+# Enforced by tests/test_architecture_rules.py, which fails the suite on a
+# forbidden import. A rule nobody enforces is a comment.
+
+rules:
+
+  - id: ARCH-001
+    from: web
+    forbidden_to: [persistence]
+    why: >
+      The web layer must not reach the database directly. It asks a manager,
+      which owns the decision and the transaction; a route that writes rows is
+      business logic hiding in a controller, and nothing else can reuse it.
+
+  - id: ARCH-002
+    from: browser
+    forbidden_to: [recording, web, automation, persistence]
+    why: >
+      The browser adapter performs a plan. It must not know who produced that
+      plan, who is watching, or where anything is stored — it once loaded the
+      element repository itself, which made the executor depend on the recorder
+      and gave the two domains a mutual dependency. The caller passes what the
+      run needs; the adapter takes it.
+
+  - id: ARCH-003
+    from: contract
+    forbidden_to: [recording, browser, automation, web, persistence, results, assistant]
+    why: >
+      domain/ and ports/ are the shared vocabulary — the step contract, the
+      proof types, the action types. Everything depends on them, so they may
+      depend on almost nothing, or every part of the project becomes reachable
+      from every other.
+
+  - id: ARCH-004
+    from: validation
+    forbidden_to: [recording, browser, web, automation]
+    why: >
+      Deciding whether a file is really the report is a judgement about bytes.
+      It must not depend on how the file was obtained, or a bad file could pass
+      because the run that produced it looked healthy.
+
+  - id: ARCH-005
+    from: recording
+    forbidden_to: [web, automation]
+    why: >
+      Capture must not depend on what is built from it. The recorder produces
+      steps; the compiler and the review screen consume them. A recorder that
+      knew about plans would start shaping capture around them.
+
+  - id: ARCH-006
+    from: results
+    forbidden_to: [recording, browser, web]
+    why: >
+      Archiving, alerting and incident packing act on a finished run. They must
+      not reach back into the machinery that produced it.

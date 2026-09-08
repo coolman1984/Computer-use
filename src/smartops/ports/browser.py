@@ -64,11 +64,16 @@ class ReplayRequest:
     run_id: str = ""
     session_state_path: Path | None = None
     evidence_dir: Path | None = None
-    # Where this system's shared element repository lives, when it has one.
-    # Absent means every step is found by the locators frozen into its own plan,
+    # This system's shared description of its controls, already loaded, when
+    # the caller has one. Passed in rather than looked up here on purpose: the
+    # browser adapter performs a plan, and how a description of controls is
+    # stored and found is not its business — letting it fetch one would make
+    # the executor depend on the recorder that produced it.
+    #
+    # None means every step is found by the locators frozen into its own plan,
     # which is how replay worked before the repository existed and is still the
-    # fallback whenever the file is missing or unreadable.
-    elements_path: Path | None = None
+    # fallback whenever a system has no description yet.
+    elements: Any = None
 
 
 @dataclass
