@@ -87,6 +87,68 @@ def test_recording_plan_prefers_a_selector_then_a_relative_click(services) -> No
     assert plan["review"]["ready"] is False
 
 
+def test_recording_plan_accepts_a_unique_anchor_when_the_control_has_no_direct_selector(services) -> None:
+    _ready_system(services)
+    record = services.recording_manager.create("anchored draft", "local")
+    from smartops.domain.models import RecordingStep
+
+    services.recordings.save_step(RecordingStep(
+        record.id,
+        1,
+        "click",
+        locator={
+            "strategy": "css",
+            "value": "",
+            "fallbacks": [],
+            "anchor": {
+                "container": "[data-testid=report-filters]",
+                "target": "button[type=submit]",
+            },
+        },
+    ))
+    services.recordings.save_step(RecordingStep(record.id, 2, "download", download_ref="download-1"))
+    record.status = RecordingStatus.COMPLETED
+    services.recordings.save(record)
+
+    plan = services.recording_manager.draft(record.id).automation_draft
+    assert plan["actions"][0]["layer"] == "dom"
+    assert plan["actions"][0]["locator"]["anchor"]["container"] == "[data-testid=report-filters]"
+
+
+def test_reviewing_direct_selectors_keeps_anchor_graph_and_semantic_fallback(services) -> None:
+    _ready_system(services)
+    record = services.recording_manager.create("editable anchor graph", "local")
+    from smartops.domain.models import RecordingStep
+
+    services.recordings.save_step(RecordingStep(
+        record.id,
+        1,
+        "click",
+        locator={
+            "value": "#old-query",
+            "anchor": {"container": "#filters", "target": "button"},
+            "anchors": [{"container": "#report", "target": "button[type=submit]"}],
+            "semantic": {"tag": "button", "role": "button", "type": "button"},
+        },
+    ))
+    services.recordings.save_step(RecordingStep(record.id, 2, "download", download_ref="download-1"))
+    record.status = RecordingStatus.COMPLETED
+    services.recordings.save(record)
+    services.recording_manager.draft(record.id)
+
+    updated, action = services.recording_manager.update_draft_action(
+        record.id, 1, {"locator_candidates": ["#reviewed-query"]}
+    )
+
+    locator = action["locator"]
+    assert locator["value"] == "#reviewed-query"
+    assert locator["anchor"]["container"] == "#filters"
+    assert locator["anchors"][0]["container"] == "#report"
+    assert locator["semantic"]["role"] == "button"
+    object_ref = action["object_ref"]
+    assert updated.automation_draft["object_repository"]["objects"][object_ref]["locator"] == locator
+
+
 def test_recording_cannot_be_marked_complete_without_a_download(services) -> None:
     _ready_system(services)
     manager = services.recording_manager
@@ -106,3 +168,36 @@ def test_recording_cannot_be_marked_complete_without_a_download(services) -> Non
     settled = manager.stop_incomplete(record.id)
     assert settled.status is RecordingStatus.INTERRUPTED
     assert "without a detected download" in (settled.error_message or "")
+
+
+def test_paused_recording_can_undo_only_its_latest_non_download_step(services) -> None:
+    _ready_system(services)
+    manager = services.recording_manager
+    record = manager.create("undo flow", "local")
+    record.status = RecordingStatus.PAUSED
+    record.step_count = 1
+    services.recordings.save(record)
+    from smartops.domain.models import RecordingStep
+
+    services.recordings.save_step(RecordingStep(record.id, 1, "click", action="click", selector="#wrong"))
+
+    updated = manager.undo_last_step(record.id)
+
+    assert updated.status is RecordingStatus.PAUSED
+    assert updated.step_count == 0
+    assert services.recordings.steps(record.id) == []
+
+
+def test_paused_recording_refuses_to_undo_a_download(services) -> None:
+    _ready_system(services)
+    manager = services.recording_manager
+    record = manager.create("download undo", "local")
+    record.status = RecordingStatus.PAUSED
+    record.step_count = 1
+    services.recordings.save(record)
+    from smartops.domain.models import RecordingStep
+
+    services.recordings.save_step(RecordingStep(record.id, 1, "download", action="download"))
+
+    with pytest.raises(PermanentError, match="cannot be undone safely"):
+        manager.undo_last_step(record.id)

@@ -8,7 +8,8 @@ Read in order:
 1. README.md
 2. docs/DAILY_DOWNLOAD_FLOW.md
 3. skills/smartops-core-operator/SKILL.md and, when present, logs/operator-memory.md
-4. The source and focused tests for the behaviour being changed
+4. docs/PROJECT_EYE.md for cross-domain changes
+5. The source and focused tests for the behaviour being changed
 
 ## Build rules
 
@@ -38,6 +39,8 @@ Read in order:
 - Keep only the minimum private runtime evidence needed for the active flow and
   the minimum synthetic fixtures needed for focused tests. Never store secrets
   or sensitive company data in the repository.
+- For a cross-domain change, update `.project-eye/graph.yaml` and the affected
+  journey in `docs/PROJECT_EYE.md` before declaring the work connected.
 
 ## Verification and completion
 

@@ -128,7 +128,7 @@ def test_logged_in_marker_present_downloads_normally(tmp_path: Path) -> None:
     assert result.layer_used is ExtractionLayer.DOM
 
 
-def test_failure_evidence_writes_screenshot_to_disk_not_base64(tmp_path: Path) -> None:
+def test_auth_failure_evidence_never_writes_screenshot_or_trace(tmp_path: Path) -> None:
     site_dir = _site(tmp_path, "site4", LOGIN_PAGE_HTML)
     evidence_dir = tmp_path / "evidence"
     with _local_server(site_dir) as base_url:
@@ -137,16 +137,18 @@ def test_failure_evidence_writes_screenshot_to_disk_not_base64(tmp_path: Path) -
             report="daily_sales",
             destination_dir=tmp_path / "raw",
             evidence_dir=evidence_dir,
-            filters={"url": f"{base_url}/page.html", "download_selector": "#dl", "login_selector": "#login-form"},
+            filters={"url": f"{base_url}/page.html?session=not-for-evidence", "download_selector": "#dl", "login_selector": "#login-form"},
         )
         result = _adapter().extract(request)
 
     assert not result.ok
+    assert result.auth_required is True
     assert "screenshot_base64" not in result.evidence
-    screenshot_path = result.evidence.get("screenshot_path")
-    assert screenshot_path is not None
-    assert Path(screenshot_path).exists()
-    assert Path(screenshot_path).is_relative_to(evidence_dir)
+    assert "screenshot_path" not in result.evidence
+    assert "trace_path" not in result.evidence
+    assert result.evidence["phase"] == "authentication"
+    assert "message" not in result.evidence
+    assert "session=" not in result.evidence["route"]
 
 
 def test_concurrent_runs_do_not_mix_evidence(tmp_path: Path) -> None:
@@ -175,7 +177,7 @@ def test_concurrent_runs_do_not_mix_evidence(tmp_path: Path) -> None:
     evidence_b = adapter.capture_evidence("run_b")
     assert evidence_a["run_id"] == "run_a"
     assert evidence_b["run_id"] == "run_b"
-    assert evidence_a["url"] != "" and evidence_b["url"] != ""
+    assert evidence_a["route"] != "" and evidence_b["route"] != ""
 
 
 def test_direct_download_url_serving_html_falls_back_to_dom(tmp_path: Path) -> None:

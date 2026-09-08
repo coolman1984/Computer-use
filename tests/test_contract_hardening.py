@@ -210,6 +210,19 @@ def test_replay_never_overwrites_duplicate_downloads_left_by_an_interruption(tmp
     assert (destination / "report-3.csv").read_bytes() == b"new"
 
 
+def test_replay_marks_an_empty_download_as_an_error_not_a_file(tmp_path) -> None:
+    from smartops.adapters.browser.replay import ReplaySession
+
+    session = ReplaySession(object(), artifact_dir=tmp_path)
+    session._pending_downloads = [_Download(b"")]
+
+    session.collect_downloads(tmp_path / "downloads")
+
+    assert session.downloads == []
+    assert session.download_errors == ["download was empty"]
+    assert list((tmp_path / "downloads").iterdir()) == []
+
+
 class _ProofLocator:
     def __init__(self) -> None:
         self.first = self
@@ -217,6 +230,9 @@ class _ProofLocator:
 
     def wait_for(self, *, state, timeout) -> None:
         self.timeout = timeout
+
+    def count(self) -> int:
+        return 1
 
 
 class _ProofScope:

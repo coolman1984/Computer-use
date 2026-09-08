@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import json
 import threading
@@ -133,6 +134,17 @@ def _target_url(system: SystemProfile) -> str:
     return system.reports[0].url if system.reports else ""
 
 
+def _safe_route(url: str) -> str:
+    """Diagnostic route without query, fragment, or credential-bearing user-info."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        port = f":{parts.port}" if parts.port is not None else ""
+        return f"{parts.scheme}://{host}{port}{parts.path or '/'}" if host else ""
+    except Exception:
+        return ""
+
+
 def check_system(
     system: SystemProfile,
     *,
@@ -149,6 +161,7 @@ def check_system(
     )
 
     from .sessions import session_path
+    from .adapters.browser.session import open_browser_context
 
     url = _target_url(system)
     if not url:
@@ -161,31 +174,31 @@ def check_system(
         )
 
     state_path = session_path(sessions_dir, system.key)
+    safe_url = _safe_route(url)
     screenshot = ""
     try:
         with sync_playwright() as playwright:
-            launch_kwargs: dict[str, Any] = {"headless": browser_settings.headless}
-            chosen = executable_path or browser_settings.executable_path
-            if chosen:
-                launch_kwargs["executable_path"] = chosen
-            else:
-                launch_kwargs["channel"] = "chrome"
-            browser = playwright.chromium.launch(**launch_kwargs)
+            # Checks are not a weaker, disposable browser mode. They must see
+            # the same persistent profile and effective launch configuration
+            # as Sign in, Record, Test, Run, and the scheduler.
+            browser_session = open_browser_context(
+                playwright,
+                browser_settings,
+                executable_path=executable_path,
+                storage_state_path=state_path if state_path.exists() else None,
+            )
             try:
-                context_kwargs: dict[str, Any] = {
-                    "viewport": {
-                        "width": browser_settings.viewport_width,
-                        "height": browser_settings.viewport_height,
-                    }
-                }
-                if state_path.exists():
-                    context_kwargs["storage_state"] = str(state_path)
-                context = browser.new_context(**context_kwargs)
+                context = browser_session.context
                 context.set_default_timeout(timeout_seconds * 1000)
                 page = context.new_page()
                 page.goto(url, wait_until="domcontentloaded")
 
-                if evidence_dir is not None:
+                signed_in = _signed_in(page, system)
+                # The connection page is commonly the authentication surface.
+                # A screenshot there can expose identity or authentication UI,
+                # so capture it only after independent proof of a signed-in
+                # application state. Reachability itself needs no image.
+                if evidence_dir is not None and signed_in is True:
                     try:
                         directory = Path(evidence_dir)
                         directory.mkdir(parents=True, exist_ok=True)
@@ -195,10 +208,9 @@ def check_system(
                     except Exception:
                         pass  # evidence is a bonus; its absence is not a failed check
 
-                signed_in = _signed_in(page, system)
-                return _verdict(system, url, signed_in, screenshot)
+                return _verdict(system, safe_url, signed_in, screenshot)
             finally:
-                browser.close()
+                browser_session.close()
     except PlaywrightTimeoutError:
         return ConnectionCheck(
             ok=False,
@@ -209,7 +221,7 @@ def check_system(
                 "Check the address is right and that you can open it yourself in a browser "
                 "on this machine — a company site often needs the VPN to be connected."
             ),
-            checked_url=url,
+            checked_url=safe_url,
             screenshot_path=screenshot,
         )
     except Exception as exc:
@@ -238,7 +250,7 @@ def check_system(
                 "Check the address is right and that this machine can reach the site "
                 "(VPN, network, or a typo in the address)."
             ),
-            checked_url=url,
+            checked_url=safe_url,
             screenshot_path=screenshot,
             details={"error": type(exc).__name__},
         )

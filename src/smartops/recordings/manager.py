@@ -9,6 +9,7 @@ from ..domain.enums import EventType, RecordingStatus, Severity
 from ..domain.models import Recording, RecordingStep
 from ..sessions import session_path
 from .converter import build_plan, review_plan
+from .object_repository import register_action_object
 
 _PROOF_TYPES = {
     "selector_visible", "selector_hidden", "value_equals", "value_not_empty",
@@ -104,6 +105,30 @@ class RecordingManager:
         worker=self.workers.get(record.id)
         if not worker: raise PermanentError("The recorder worker is not connected")
         worker.resume(); record.status=RecordingStatus.RECORDING; self.services.recordings.save(record); self._emit(EventType.RECORDING_RESUMED, record, "Step capture resumed"); return record
+    def undo_last_step(self, recording_id: str) -> Recording:
+        """Safely remove the latest captured interaction while recording is paused.
+
+        Captured browser events can still be in flight while a person clicks.
+        Requiring pause prevents deleting one step while a later one is queued.
+        Downloads are external artifacts and are never silently undone.
+        """
+        record = self._required(recording_id)
+        if record.status is not RecordingStatus.PAUSED:
+            raise PermanentError("Pause the recording before undoing its latest step.")
+        steps = self.services.recordings.steps(record.id)
+        if not steps:
+            raise PermanentError("There is no captured step to undo.")
+        latest = steps[-1]
+        if (latest.action or latest.kind) == "download":
+            raise PermanentError(
+                "A downloaded file cannot be undone safely. Re-record this part in a new recording."
+            )
+        if not self.services.recordings.delete_step(record.id, latest.seq):
+            raise PermanentError("The latest step changed before it could be undone; refresh and try again.")
+        record.step_count = max(0, record.step_count - 1)
+        self.services.recordings.save(record)
+        self._emit(EventType.RECORDING_PAUSED, record, f"Removed recorded step {latest.seq}; capture remains paused")
+        return record
     def stop(self, recording_id: str) -> Recording:
         record=self._required(recording_id)
         if record.status == RecordingStatus.COMPLETED: return record
@@ -280,6 +305,10 @@ class RecordingManager:
         if unknown:
             raise PermanentError(f"These review fields cannot be changed: {', '.join(sorted(unknown))}")
         self._edit_locator(match, changes)
+        if "locator_candidates" in changes and isinstance(plan.get("object_repository"), dict):
+            # A reviewed locator edit creates/reuses its own descriptor rather
+            # than mutating an object another step still relies on.
+            register_action_object(plan["object_repository"], match)
         self._edit_inputs(match, changes)
         self._edit_success(match, changes)
         self._edit_wait(match, changes)
@@ -306,14 +335,39 @@ class RecordingManager:
                 raise PermanentError("Each element locator must be a real, non-redacted selector.")
             if value not in cleaned:
                 cleaned.append(value)
-        if not cleaned and (action.get("action") or "click") not in _NO_ELEMENT_ACTIONS:
-            raise PermanentError("This step needs at least one real way to find its element.")
         previous_locator = action.get("locator") or {}
+        recorded_anchors = [previous_locator.get("anchor"), *(previous_locator.get("anchors") or [])]
+        has_anchor = any(
+            isinstance(anchor, dict) and anchor.get("container") and anchor.get("target")
+            for anchor in recorded_anchors
+        )
+        semantic = previous_locator.get("semantic") or {}
+        has_semantic = isinstance(semantic, dict) and bool(
+            semantic.get("tag") and semantic.get("role")
+        )
+        if (
+            not cleaned
+            and not has_anchor
+            and not has_semantic
+            and (action.get("action") or "click") not in _NO_ELEMENT_ACTIONS
+        ):
+            raise PermanentError("This step needs at least one real way to find its element.")
         action["locator"] = {
             "strategy": "css",
             "value": cleaned[0] if cleaned else "",
             "fallbacks": cleaned[1:],
         }
+        # Editing direct candidates must not silently discard the independently
+        # recorded fallbacks.  They belong to this UI object, not to one old
+        # selector, and remain reviewable until the recording is rebuilt.
+        if isinstance(previous_locator.get("anchor"), dict):
+            action["locator"]["anchor"] = dict(previous_locator["anchor"])
+        if isinstance(previous_locator.get("anchors"), list):
+            action["locator"]["anchors"] = [
+                dict(anchor) for anchor in previous_locator["anchors"] if isinstance(anchor, dict)
+            ]
+        if isinstance(previous_locator.get("semantic"), dict):
+            action["locator"]["semantic"] = dict(previous_locator["semantic"])
         for key in ("position_mode", "element_x_ratio", "element_y_ratio"):
             if key in previous_locator:
                 action["locator"][key] = previous_locator[key]

@@ -246,6 +246,11 @@ def replay_recording(ctx: StepContext) -> StepResult:
         file_path=file_paths[0],
         layer_used=result.layer_used.value,
         step_results=result.step_results,
+        # A successful fallback is useful operational evidence, but never an
+        # instruction to mutate the approved workflow.  Preserve only the
+        # replay engine's already-sanitized, review_required proposals so the
+        # run detail can guide a later human review.
+        repair_candidates=list((result.evidence or {}).get("repair_candidates") or []),
     )
 
 
@@ -355,9 +360,17 @@ def validate_file(ctx: StepContext) -> StepResult:
         min_size_bytes=int(raw_rules.get("min_size_bytes", 1)),
         expected_extensions=tuple(raw_rules.get("expected_extensions", ())),
         required_columns=tuple(raw_rules.get("required_columns", ())),
+        required_sheets=tuple(raw_rules.get("required_sheets", ())),
         min_rows=raw_rules.get("min_rows"),
+        max_size_bytes=raw_rules.get("max_size_bytes"),
         max_age_hours=raw_rules.get("max_age_hours"),
         reject_duplicate_hash=bool(raw_rules.get("reject_duplicate_hash", True)),
+        reject_web_pages=bool(raw_rules.get("reject_web_pages", True)),
+        must_contain=tuple(raw_rules.get("must_contain", ())),
+        max_xlsx_entries=int(raw_rules.get("max_xlsx_entries", 5_000)),
+        max_xlsx_uncompressed_bytes=int(
+            raw_rules.get("max_xlsx_uncompressed_bytes", 100 * 1024 * 1024)
+        ),
     )
     by_id = {f.id: f for f in ctx.services.files.list(run_id=ctx.run_id)}
     all_failures: list[str] = []

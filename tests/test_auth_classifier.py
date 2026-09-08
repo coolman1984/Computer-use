@@ -238,6 +238,19 @@ def test_login_on_top_without_a_signed_in_marker_is_signed_out() -> None:
     assert state_is_expired(SIGNED_OUT, page, FILTERS) is True
 
 
+def test_ambiguous_login_selector_is_transitional_not_a_credential_target() -> None:
+    page = _Page(
+        {
+            "#login-frame": [_Element(visible=True, on_top=True), _Element(visible=True, on_top=True)],
+            "#app-frame": [],
+            "#notice-close": [],
+        }
+    )
+
+    assert classify_auth_state(page, FILTERS) == TRANSITIONING
+    assert session_expired(page, FILTERS) is False
+
+
 def test_both_markers_absent_is_transitioning_and_fails_closed_to_login() -> None:
     page = _Page({"#login-frame": [], "#app-frame": [], "#notice-close": []})
 

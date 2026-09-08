@@ -111,6 +111,56 @@ def test_extensionless_xlsx_is_validated_from_its_workbook_contents(tmp_path: Pa
     assert report.row_count == 2
     assert report.failures == []
 
+def test_xlsx_checks_declared_worksheet_and_business_period(tmp_path: Path) -> None:
+    path = tmp_path / "report.xlsx"
+    _make_xlsx(path, [["period", "amount"], ["2026-09", "12"]])
+
+    report = LocalFileValidator().validate(
+        path,
+        ValidationRules(required_sheets=("Sheet1",), must_contain=("2026-09",)),
+    )
+
+    assert report.passed
+    assert report.details["worksheets"] == ["Sheet1"]
+
+
+def test_xlsx_missing_worksheet_or_wrong_period_fails(tmp_path: Path) -> None:
+    path = tmp_path / "report.xlsx"
+    _make_xlsx(path, [["period"], ["2026-09"]])
+
+    report = LocalFileValidator().validate(
+        path,
+        ValidationRules(required_sheets=("Summary",), must_contain=("2026-08",)),
+    )
+
+    assert not report.passed
+    assert any("Missing worksheets" in failure for failure in report.failures)
+    assert any("2026-08" in failure for failure in report.failures)
+
+
+def test_file_size_safety_limit_fails_before_report_is_accepted(tmp_path: Path) -> None:
+    path = tmp_path / "report.csv"
+    path.write_text("column\nvalue\n", encoding="utf-8")
+
+    report = LocalFileValidator().validate(path, ValidationRules(max_size_bytes=4))
+
+    assert not report.passed
+    assert any("too large" in failure for failure in report.failures)
+
+
+def test_xlsx_expansion_limit_rejects_an_archive_before_xml_is_loaded(tmp_path: Path) -> None:
+    path = tmp_path / "oversized.xlsx"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/workbook.xml", _XLSX_WORKBOOK)
+        archive.writestr("xl/worksheets/sheet1.xml", b"x" * 4096)
+
+    report = LocalFileValidator().validate(
+        path, ValidationRules(max_xlsx_uncompressed_bytes=128)
+    )
+
+    assert not report.passed
+    assert any("safety limit" in failure for failure in report.failures)
+
 
 def test_empty_file_fails_min_size(tmp_path: Path) -> None:
     path = tmp_path / "empty.csv"

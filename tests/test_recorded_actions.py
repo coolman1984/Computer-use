@@ -728,3 +728,75 @@ def test_acceptance_the_full_task_records_and_replays_from_a_cold_session(record
     step_states = run.state.get("step_results") or []
     assert len(step_states) == len(plan["actions"])
     assert all(s["ok"] for s in step_states)
+
+
+def test_recorder_and_replay_handle_a_control_replaced_during_mousedown(recorded, site) -> None:
+    """Capture → reviewed plan → fresh replay for a re-rendering control."""
+    def choose_vd(page):
+        box = page.locator("#org-vd-box").bounding_box()
+        assert box
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.down()
+        page.mouse.up()
+        # Start the next interaction before the fallback grace period expires.
+        # The completed VD gesture must be committed, not overwritten.
+        page.click("#download-summary")
+
+    steps = _capture(recorded, site, choose_vd)
+    pointer_clicks = [
+        step for step in steps
+        if step["action"] == "click" and step["locator"].get("interaction") == "pointer"
+    ]
+    assert len(pointer_clicks) == 1
+    assert "org-vd-box" in pointer_clicks[0]["locator"]["value"]
+    assert pointer_clicks[0]["locator"]["anchor"] == {
+        "container": '[id="org-tree"]',
+        "target": 'button[type="button"]',
+    }
+
+    record = recorded.recordings.list(limit=1)[0]
+    timeline = Path(recorded.recordings.get(record.id).artifact_dir)
+    events = [json.loads(line) for line in (timeline / "observations" / "timeline.jsonl").read_text().splitlines()]
+    action = next(event for event in events if event["kind"] == "action_captured")
+    assert action["data"]["before"]["tag"] == "button"
+    assert action["data"]["after"]["count"] == 1
+    assert "VD selected" not in json.dumps(events)
+
+    # The recorder honestly leaves the business effect of a custom click for
+    # review. A reviewer adds the observable state, but may not replace the
+    # captured locator or interaction type with a hand-written action.
+    record = recorded.recordings.list(limit=1)[0]
+    plan = build_plan(
+        recording_id=record.id, system_key="portal", report_key="daily_sales",
+        steps=recorded.recordings.steps(record.id), start_url=f"{site.base_url}/report.html",
+    )
+    pointer_action = next(
+        action for action in plan["actions"]
+        if action["locator"].get("interaction") == "pointer"
+    )
+    assert "org-vd-box" in pointer_action["locator"]["value"]
+    pointer_action["success"] = {
+        "type": "selector_visible", "value": "#org-vd-selected",
+    }
+    assert review_plan(plan)["ready"]
+
+    result = _replay(recorded, site, plan["actions"], expects=1)
+    assert result.ok, result.message
+
+
+def test_recorder_does_not_turn_an_unreleased_press_into_a_click(recorded, site) -> None:
+    def begin_then_stop(page):
+        box = page.locator("#org-vd-box").bounding_box()
+        assert box
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.down()
+
+    steps = _capture(recorded, site, begin_then_stop)
+    assert not [step for step in steps if step["action"] == "click"]
+
+
+def test_an_ordinary_click_is_recorded_once_not_as_a_pointer_fallback(recorded, site) -> None:
+    steps = _capture(recorded, site, lambda page: page.click("#prepare"))
+    clicks = [step for step in steps if step["action"] == "click"]
+    assert len(clicks) == 1
+    assert clicks[0]["locator"].get("interaction") is None

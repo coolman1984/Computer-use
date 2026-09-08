@@ -109,6 +109,31 @@ def _first_sheet_xml_name(archive: zipfile.ZipFile) -> str:
     return sheets[0]
 
 
+def _xlsx_sheet_names(archive: zipfile.ZipFile) -> list[str]:
+    """Read declared worksheet names from the workbook manifest."""
+    if "xl/workbook.xml" not in archive.namelist():
+        raise ValueError("missing workbook manifest")
+    tree = ET.fromstring(archive.read("xl/workbook.xml"))
+    return [sheet.get("name", "").strip() for sheet in tree.findall(".//m:sheet", _XLSX_NS)]
+
+
+def _xlsx_archive_is_within_limits(path: Path, rules: ValidationRules) -> list[str]:
+    """Check archive metadata before any member is decompressed into memory."""
+    with zipfile.ZipFile(path) as archive:
+        entries = archive.infolist()
+        if len(entries) > rules.max_xlsx_entries:
+            raise ValueError(
+                f"too many archive entries ({len(entries)} > {rules.max_xlsx_entries})"
+            )
+        expanded = sum(entry.file_size for entry in entries)
+        if expanded > rules.max_xlsx_uncompressed_bytes:
+            raise ValueError(
+                "workbook expands beyond the configured safety limit "
+                f"({expanded} > {rules.max_xlsx_uncompressed_bytes} bytes)"
+            )
+        return _xlsx_sheet_names(archive)
+
+
 def _cell_value(cell: ET.Element, shared: list[str]) -> str:
     cell_type = cell.get("t")
     if cell_type == "s":
@@ -141,6 +166,44 @@ def _read_xlsx_header_and_count(path: Path) -> tuple[list[str], int]:
     return header_list, max(0, len(rows) - 1)
 
 
+def _csv_contains_terms(path: Path, terms: tuple[str, ...]) -> list[str]:
+    """Search text incrementally; do not load a large export just to find its period."""
+    remaining = set(terms)
+    overlap = max((len(term) for term in terms), default=1) - 1
+    tail = ""
+    with path.open("r", encoding="utf-8-sig", errors="replace") as handle:
+        while remaining:
+            chunk = handle.read(_CHUNK_SIZE)
+            if not chunk:
+                break
+            sample = tail + chunk
+            remaining = {term for term in remaining if term not in sample}
+            tail = sample[-overlap:] if overlap else ""
+    return sorted(remaining)
+
+
+def _xlsx_missing_terms(path: Path, terms: tuple[str, ...]) -> list[str]:
+    """Search workbook cell values, never raw compressed XLSX bytes."""
+    remaining = set(terms)
+    with zipfile.ZipFile(path) as archive:
+        shared = _shared_strings(archive)
+        sheets = sorted(
+            name
+            for name in archive.namelist()
+            if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+        )
+        for sheet_name in sheets:
+            if not remaining:
+                break
+            tree = ET.fromstring(archive.read(sheet_name))
+            for cell in tree.findall(".//m:c", _XLSX_NS):
+                value = _cell_value(cell, shared)
+                remaining = {term for term in remaining if term not in value}
+                if not remaining:
+                    break
+    return sorted(remaining)
+
+
 class LocalFileValidator:
     """Checks existence, size, extension, hash, columns, row count, age, and duplicates."""
 
@@ -162,6 +225,10 @@ class LocalFileValidator:
         size_bytes = path.stat().st_size
         if size_bytes < rules.min_size_bytes:
             failures.append(f"File is too small ({size_bytes} bytes)")
+        if rules.max_size_bytes is not None and size_bytes > rules.max_size_bytes:
+            failures.append(
+                f"File is too large ({size_bytes} bytes > {rules.max_size_bytes} bytes)"
+            )
         if size_bytes == 0:
             # Nothing further can be true of an empty file, and every later check
             # would either pass vacuously or raise.
@@ -196,7 +263,8 @@ class LocalFileValidator:
 
         header: list[str] = []
         row_count: int | None = None
-        needs_content = bool(rules.required_columns) or rules.min_rows is not None
+        sheet_names: list[str] = []
+        needs_content = bool(rules.required_columns) or rules.min_rows is not None or bool(rules.required_sheets)
         # Reading an HTML page as a CSV "succeeds" and reports nonsense columns;
         # skip it so the failure above stands as the real reason.
         if is_web_page:
@@ -208,6 +276,7 @@ class LocalFileValidator:
                 failures.append(f"Could not open the file as CSV: {exc}")
         elif is_xlsx:
             try:
+                sheet_names = _xlsx_archive_is_within_limits(path, rules)
                 header, row_count = _read_xlsx_header_and_count(path)
             except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError) as exc:
                 failures.append(f"Could not open the Excel file: {exc}")
@@ -219,17 +288,33 @@ class LocalFileValidator:
             if missing:
                 failures.append(f"Missing columns: {', '.join(missing)}")
 
+        if rules.required_sheets:
+            missing_sheets = [sheet for sheet in rules.required_sheets if sheet not in sheet_names]
+            if missing_sheets:
+                failures.append(f"Missing worksheets: {', '.join(missing_sheets)}")
+
         if rules.min_rows is not None and row_count is not None and row_count < rules.min_rows:
             failures.append(f"Row count ({row_count}) is below the minimum ({rules.min_rows})")
 
         if rules.must_contain and not is_web_page:
-            text = _decode(head if size_bytes <= _SNIFF_BYTES else path.read_bytes())
-            missing_text = [needle for needle in rules.must_contain if needle not in text]
+            if suffix == ".csv":
+                missing_text = _csv_contains_terms(path, rules.must_contain)
+            elif suffix == ".xlsx" and not failures:
+                try:
+                    missing_text = _xlsx_missing_terms(path, rules.must_contain)
+                except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError) as exc:
+                    failures.append(f"Could not inspect Excel content: {exc}")
+                    missing_text = []
+            else:
+                missing_text = list(rules.must_contain)
             if missing_text:
                 failures.append(
                     "The file does not mention: " + ", ".join(missing_text)
                     + " — it may be for the wrong period or the wrong report"
                 )
+
+        if sheet_names:
+            details["worksheets"] = sheet_names
 
         if rules.max_age_hours is not None:
             age_hours = (self._now() - path.stat().st_mtime) / 3600

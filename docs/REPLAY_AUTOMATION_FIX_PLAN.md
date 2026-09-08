@@ -27,6 +27,22 @@ as **MISSING** from the dedicated automation profile. The automation remains
 the earlier controlled attempt showed a rejected login and the plan forbids another
 credential submission until the browser-profile/credential condition is resolved.
 
+**Recorder hardening checkpoint (2026-09-07):** The local branch now also protects
+the G-MES-style control that redraws on `mousedown`. A completed short gesture is
+not overwritten by a rapid next gesture; an unfinished gesture is not invented at
+Stop; normal clicks are not duplicated; and replay uses the live element box rather
+than a saved screen point. Recorder tab identities are assigned once and are not
+renumbered after a tab closes. Evidence-journal failure is best-effort and cannot
+block a recorded step or a download. The journal accepts structural allowlisted
+facts only, never selectors, frame references, filenames, or values. Replay now
+rejects ambiguous locator matches, shares one bounded lookup deadline across
+fallbacks, and reports a sent pointer press with unconfirmed release as an unknown
+external effect that must not be retried. The browser acceptance test now replays
+the captured-and-compiled pointer action after an explicit reviewed success rule,
+rather than a hand-written replacement. These changes passed syntax, diff, and
+focused non-browser smoke checks in this workspace; the full pytest suite and real
+Chromium fixture remain required proof and were not claimed here.
+
 ---
 
 ## 1. One-paragraph answer
@@ -289,3 +305,170 @@ Exit: one complete controlled run with a registered validated workbook.
 - CredUI prompt APIs: https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-creduipromptforwindowscredentialsw
 - pytest-timeout: https://pypi.org/project/pytest-timeout/
 - Playwright sync API threading constraints: https://playwright.dev/python/docs/library
+
+---
+
+## 11. Recorder and artifact-contract checkpoint (2026-09-08)
+
+This checkpoint completes the next safe code batch after the dynamic-control
+repair. It does **not** claim a corporate or headed-browser result.
+
+- **Shared launch path:** Sign-in and connection Check now use
+  `open_browser_context`, the same factory already used by Record, Test, Run,
+  and scheduled execution. A persistent automation profile, browser path,
+  extension settings, and ownership guard therefore no longer change silently
+  between those stages.
+- **Authentication evidence:** An authentication failure now records only a
+  reason code and a route without query/fragment/user-info. It does not save a
+  screenshot or Playwright trace. Replay re-checks session state before each
+  recorded action and stops as `AUTH_REQUIRED` before sending a later action
+  when the session is proven expired.
+- **Download contract:** Browser and recorder download paths reserve an atomic,
+  sanitized filename under the run directory. Server-suggested names cannot
+  traverse directories, collide, or use Windows-reserved names. A failed save
+  removes only its empty placeholder; non-empty partial data remains for safe
+  diagnosis. A storage failure after a direct network response is returned as
+  a failure instead of triggering a second export through the DOM path.
+- **Validation contract:** Rules now reach validation for web-page rejection,
+  required workbook sheets, maximum size, required business text (including
+  workbook cell values), and XLSX entry/expansion limits. XLSX values are
+  inspected as workbook XML, never as raw compressed bytes.
+
+Focused source-level checks passed: `compileall`, `git diff --check`, safe
+download reservation/recovery smoke checks, CSV/XLSX contract smoke checks,
+and route-redaction smoke checks. The focused pytest suite and headed Chrome
+fixture remain **not run** in this workspace because both `pytest` and the
+Playwright browser package/binary are unavailable. The next gate is the local
+headed fixture test with a separate test profile; do not run G-MES until it
+passes.
+
+### Research-driven admission hardening
+
+The recorder remains deterministic by default. Research completed on 2026-09-08
+confirmed three choices:
+
+- UiPath positions semantic targeting as a fallback for dynamic UI, but advises
+  keeping conventional targeting where a fixed, testable structure is available.
+  SmartOps therefore retains unique DOM locators and reviewed fallbacks as the
+  production path; it does not silently switch to an AI/visual click.
+- OpenAdapt Flow separates a successful rehearsal from a governed execution and
+  binds the latter to the exact workflow, effective inputs, and policy. SmartOps
+  now writes a non-secret digest into a plan's `_smartops_admission` metadata on
+  Test and Approval. A later change to the plan, validation rules, auth profile,
+  or relevant browser mode invalidates that new-style approval before a run and
+  turns off its schedule. Existing approved processes without this metadata
+  remain runnable for backward compatibility; their next fresh Test upgrades
+  them automatically.
+- Skyvern combines visual/DOM reasoning, workflow state, credentials, artifacts,
+  and validation. SmartOps already has the safer equivalent separation for its
+  report purpose: deterministic replay, credential isolation, artifact contract,
+  and validation. Vision remains an explicit future capability, not a hidden
+  fallback for a report export.
+
+Sources: [UiPath semantic selectors](https://docs.uipath.com/activities/other/latest/ui-automation/about-semantic-selectors),
+[OpenAdapt Flow governed replay](https://github.com/OpenAdaptAI/openadapt-flow),
+and [Skyvern browser automation](https://github.com/skyvern-ai/skyvern).
+
+### Anchored control targeting (2026-09-08)
+
+The recorder now preserves up to three constrained nearby anchors with a
+captured DOM control:
+
+```json
+{"anchor": {"container": "[data-testid=report-filters]", "target": "button[type=submit]"}}
+```
+
+This is a UiPath-style nearby anchor, but made deterministic for report work:
+
+- Capture uses only structural attributes from a stable nearby container and a
+  tag/role/type target within it; it never stores visible business text,
+  credentials, or coordinates as the anchor.
+- Replay tries direct unique selectors first. If they cannot resolve, it accepts
+  the anchor only when the container has exactly one match and its nested target
+  has exactly one match in the resolved page/frame scope.
+- An absent or ambiguous anchor fails the step with a specific diagnostic. It
+  never selects the first match and never falls through to an old screen point
+  for a DOM plan.
+- Editing direct locator candidates keeps the recorded anchor graph and
+  semantic fallback instead of silently deleting either. New plans use version
+  4 and the execution contract version is 3, so a fresh Test/Approval binds
+  this changed behavior.
+
+The focused replay smoke test covers successful unique resolution plus
+ambiguous-container rejection. The headed capture/replay fixture asserts that
+the dynamic Nexacro-like VD control records `#org-tree` as its anchor, but is
+still pending because this workspace has no runnable browser. The approach is
+informed by [UiPath's recorder guidance](https://docs.uipath.com/studio-web/automation-suite/2.2510/user-guide/ui-automation-autopilot-recorder),
+which describes an anchor as a nearby element used to uniquely identify the
+target, and its [object-repository model](https://docs.uipath.com/studiox/standalone/2021.10/user-guide/object-repository),
+which retains both target and anchor metadata for reuse.
+
+### Correctness hardening follow-up (2026-09-08)
+
+The subsequent source review found and fixed four false-success/unsafe-target
+paths:
+
+- A proof selector, a login selector, and an explicit Notice-close selector no
+  longer use the first matching DOM node. They require one match; ambiguous
+  state remains transitional or fails the relevant step.
+- Empty network and browser downloads are failures rather than registered
+  artifacts. A response that already reached the server is not retried through
+  another export click.
+- Entry navigation no longer waits for `networkidle`. It compares scheme, host,
+  path, declared business query parameters, explicitly transient parameters,
+  and optional business fragments before deciding whether a page must be
+  re-opened.
+- Replay's no-proof yield is a short UI turn, not an unreliable network-idle
+  wait. Approved steps still require explicit business evidence.
+
+Focused manual smoke checks covered route policy, strict authentication,
+strict selector proof, and anchored replay. `compileall` and `git diff --check`
+passed. The pytest and headed-browser gates remain blocked in this workspace by
+the missing pytest package and a broken/no browser runtime; they remain required
+before any corporate test or approval.
+
+---
+
+## 12. Recorder V2 map and connected paths
+
+This is an implementation map, not a promise of unsupported visual/desktop
+automation. Each capability has one owner and one connected path:
+
+```mermaid
+flowchart TD
+    A["Human recording"] --> B["Capture contract"]
+    B --> C["Plan compiler"]
+    C --> D["UI object repository"]
+    D --> E["Reviewed automation plan"]
+    E --> F["Replay session"]
+    F --> G["Proof and downloads"]
+    F --> H["Repair proposal"]
+    H --> I["Human review and new revision"]
+```
+
+| Need | Owning code | Connected outcome |
+|---|---|---|
+| Direct target, nearby anchors, and semantic control shape | `recordings/worker.py` | Recorded locator contract, with up to three structural anchors and a privacy-safe tag/role/type fallback. |
+| Reusable application → screen → element catalogue | `recordings/object_repository.py` | `object_repository` plus `object_ref` in each compiled action. The replay engine treats that repository as authoritative. |
+| Compilation and compatibility | `recordings/converter.py` | Plan version 4; old inline locator plans still replay. |
+| Safe review edits | `recordings/manager.py` | A locator edit gets a new/reused object id and cannot unexpectedly alter another action. |
+| Deterministic replay | `adapters/browser/replay.py` | Direct selector → fallback → up to three anchors → semantic shape; every result must be unique. |
+| Repair without hidden behavior change | `recordings/healing.py` → `adapters/browser/replay.py` → `workflows/builtin.py` | A successful non-primary fallback becomes a `review_required` proposal in the completed run's step output. It never rewrites an approved workflow. |
+| Correcting a live recording | `recordings/manager.py` + API | Pause → undo the latest non-download step → resume and recapture. Raw evidence remains intact. |
+| Artifact proof and validation | browser adapter + validation adapter | Files remain collision-safe, non-empty, validated, and registered before success. |
+
+### Explicit capability boundary
+
+- **Built now:** browser DOM, generated selector alternatives, structural
+  anchors, tag/role/type fallback, frame/page targeting, deterministic replay,
+  human-reviewed repair suggestions, and pause/undo/recapture.
+- **Not yet built:** computer-vision grounding, native Windows UI Automation,
+  automatic technology switching, and AI-driven repair execution. These need a
+  Windows-capable runtime, an approved vision/provider contract, fixtures, and
+  separate safety gates. They must fail as unsupported rather than silently
+  falling back to coordinate clicking.
+
+This follows [UiPath's target/anchor descriptor model](https://docs.uipath.com/activities/other/latest/ui-automation/selection-options),
+[Workflow Use's deterministic workflow plus fallback approach](https://github.com/browser-use/workflow-use),
+[OpenAdapt Flow's governed demonstration compiler](https://github.com/OpenAdaptAI/openadapt-flow),
+and [Microsoft UFO's documented visual plus Windows-control direction](https://github.com/microsoft/ufo).

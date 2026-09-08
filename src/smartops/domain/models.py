@@ -174,7 +174,9 @@ class RecordingStep:
     # Where: {"page": "main" | "latest" | "page-2", "frame": "" | frame selector}.
     target: dict[str, Any] = field(default_factory=dict)
     # How to find the element again: {"strategy", "value", "fallbacks": [...]}
-    # plus x_ratio/y_ratio as the last resort when the page offers no stable name.
+    # and optionally {"anchor": {"container", "target"}} for one unique
+    # control inside a stable nearby container. x_ratio/y_ratio remain a last
+    # resort when the page offers no stable DOM identity.
     locator: dict[str, Any] = field(default_factory=dict)
     # What goes in: {"value"} for typing and selecting, {"key"} for the keyboard,
     # {"secret_ref"} when the value must come from the credential store instead —

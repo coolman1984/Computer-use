@@ -23,6 +23,7 @@ from ...credentials import CredentialStore
 from ...domain.enums import ExtractionLayer
 from ...ports.browser import ExtractionRequest, ExtractionResult, ReplayRequest
 from .replay import ReplaySession, StepFailed
+from .downloads import discard_empty_reservation, reserve_download_path
 from .authentication import ensure_authenticated, prevent_debugger_pauses, session_expired
 from .session import open_browser_context
 from ...storage.paths import slug
@@ -105,9 +106,14 @@ class PlaywrightBrowserAdapter:
     def _finish_tracing(
         self, context, request: ExtractionRequest, result: ExtractionResult
     ) -> None:
-        """Save the trace only on failure, into the evidence folder; otherwise discard it."""
+        """Save an execution trace only when it cannot contain sign-in data.
+
+        Playwright traces and full-page screenshots can include typed credentials,
+        cookies, or an SSO form.  A failure that requires authentication is useful
+        without that material, so it gets a small sanitized diagnostic instead.
+        """
         try:
-            if not result.ok and request.evidence_dir is not None:
+            if not result.ok and not result.auth_required and request.evidence_dir is not None:
                 evidence_dir = Path(request.evidence_dir)
                 evidence_dir.mkdir(parents=True, exist_ok=True)
                 trace_path = evidence_dir / f"{self._evidence_key(request)}-trace.zip"
@@ -129,7 +135,7 @@ class PlaywrightBrowserAdapter:
             if entry_url:
                 page = context.new_page()
                 try:
-                    page.goto(entry_url, wait_until="networkidle")
+                    page.goto(entry_url, wait_until="domcontentloaded")
                     auth_error = self._ensure_authenticated(context, page, request, filters)
                     if auth_error:
                         return self._failure(
@@ -166,9 +172,32 @@ class PlaywrightBrowserAdapter:
                 # DOM layer instead of treating this as a false success.
                 return None
             body = response.body()
+            if not body:
+                # The remote request was answered, so do not fall through and
+                # submit the export a second time. Report the invalid artifact.
+                return self._failure(
+                    request,
+                    ExtractionLayer.NETWORK,
+                    "The report request returned an empty file.",
+                    started,
+                )
             name = Path(direct_url.split("?")[0]).name or f"{request.report}"
-            target = Path(request.destination_dir) / name
-            target.write_bytes(body)
+            target = reserve_download_path(
+                request.destination_dir, name, fallback=request.report or "download"
+            )
+            try:
+                target.write_bytes(body)
+            except Exception as exc:
+                discard_empty_reservation(target)
+                # The server already answered the report request. Falling back
+                # to DOM here would send it again and can create a duplicate or
+                # costly export, so surface the storage failure instead.
+                return self._failure(
+                    request,
+                    ExtractionLayer.NETWORK,
+                    f"The report was received but could not be saved: {type(exc).__name__}",
+                    started,
+                )
             return ExtractionResult(
                 ok=True,
                 layer_used=ExtractionLayer.NETWORK,
@@ -182,6 +211,37 @@ class PlaywrightBrowserAdapter:
 
     def _session_expired(self, page, filters: dict[str, Any]) -> bool:
         return session_expired(page, filters)
+
+    @staticmethod
+    def _needs_entry_navigation(current_url: str, entry_url: str, filters: dict[str, Any]) -> bool:
+        """Compare a business route without reloading for harmless URL noise."""
+        try:
+            from urllib.parse import parse_qs, urlsplit
+
+            current, required = urlsplit(current_url), urlsplit(entry_url)
+            if (current.scheme, current.netloc, current.path) != (
+                required.scheme,
+                required.netloc,
+                required.path,
+            ):
+                return True
+            required_query = parse_qs(required.query, keep_blank_values=True)
+            current_query = parse_qs(current.query, keep_blank_values=True)
+            transient = {str(key) for key in (filters.get("transient_query_params") or [])}
+            configured = filters.get("business_query_params") or []
+            significant = (
+                {str(key) for key in configured}
+                if configured
+                else set(required_query) - transient
+            )
+            significant -= transient
+            if any(current_query.get(key) != required_query.get(key) for key in significant):
+                return True
+            return bool(filters.get("hash_is_business_view") and current.fragment != required.fragment)
+        except Exception:
+            # A malformed or unreadable route is not evidence that we are on the
+            # intended report view, so recover by going to the configured URL.
+            return True
 
     def _ensure_authenticated(
         self,
@@ -222,18 +282,21 @@ class PlaywrightBrowserAdapter:
 
         page = context.new_page()
         try:
-            page.goto(entry_url, wait_until="networkidle")
+            page.goto(entry_url, wait_until="domcontentloaded")
 
             message = self._ensure_authenticated(context, page, request, filters)
             if message:
-                self._capture_failure_evidence(page, request, message)
+                self._capture_failure_evidence(page, request, message, auth_stage=True)
                 return self._failure(request, ExtractionLayer.DOM, message, started, auth_required=True)
-            # A successful login can land on a home page; return to the report URL.
-            if page.url != entry_url:
-                page.goto(entry_url, wait_until="networkidle")
+            # A successful login can land on a home page; return to the report
+            # view only when the configured business route differs. Query keys
+            # in the requested URL are business-significant by default; callers
+            # must explicitly mark only known transient keys as transient.
+            if self._needs_entry_navigation(page.url, entry_url, filters):
+                page.goto(entry_url, wait_until="domcontentloaded")
             if self._session_expired(page, filters):
                 message = f"Automatic login did not establish a valid session for {request.system}."
-                self._capture_failure_evidence(page, request, message)
+                self._capture_failure_evidence(page, request, message, auth_stage=True)
                 return self._failure(request, ExtractionLayer.DOM, message, started, auth_required=True)
 
             wait_selector = filters.get("wait_selector")
@@ -244,8 +307,22 @@ class PlaywrightBrowserAdapter:
                 page.click(download_selector)
             download = download_info.value
             suggested = download.suggested_filename or request.report
-            target = Path(request.destination_dir) / suggested
-            download.save_as(target)
+            target = reserve_download_path(
+                request.destination_dir, suggested, fallback=request.report or "download"
+            )
+            try:
+                download.save_as(str(target))
+            except Exception:
+                discard_empty_reservation(target)
+                raise
+            if not target.exists() or target.stat().st_size <= 0:
+                discard_empty_reservation(target)
+                return self._failure(
+                    request,
+                    ExtractionLayer.DOM,
+                    "The browser received an empty download.",
+                    started,
+                )
             return ExtractionResult(
                 ok=True,
                 layer_used=ExtractionLayer.DOM,
@@ -263,10 +340,43 @@ class PlaywrightBrowserAdapter:
         finally:
             page.close()
 
-    def _capture_failure_evidence(self, page, request: ExtractionRequest, message: str) -> None:
+    @staticmethod
+    def _safe_route(page: Any) -> str:
+        """Return only the scheme, host and path of a page address.
+
+        Query strings, fragments, and URL user-info frequently hold SSO state
+        or report parameters.  They are not required to diagnose the page that
+        failed and must not enter durable evidence.
+        """
+        try:
+            parts = urlsplit(str(page.url or ""))
+            host = parts.hostname or ""
+            port = f":{parts.port}" if parts.port is not None else ""
+            if parts.scheme and host:
+                return f"{parts.scheme}://{host}{port}{parts.path or '/'}"
+        except Exception:
+            pass
+        return ""
+
+    def _capture_failure_evidence(
+        self,
+        page,
+        request: ExtractionRequest,
+        message: str,
+        *,
+        auth_stage: bool = False,
+    ) -> None:
+        """Keep minimal safe evidence and never capture the authentication surface."""
         key = self._evidence_key(request)
-        evidence: dict[str, Any] = {"message": message, "url": page.url}
-        if request.evidence_dir is not None:
+        evidence: dict[str, Any] = {
+            "phase": "authentication" if auth_stage else "execution",
+            "reason_code": "AUTHENTICATION_NOT_PROVEN" if auth_stage else "EXECUTION_FAILED",
+            "route": self._safe_route(page),
+        }
+        # A rendered sign-in page can contain passwords, MFA prompts, or a
+        # corporate identity.  Do not screenshot it even when evidence was
+        # explicitly enabled; the run result itself remains actionable.
+        if not auth_stage and request.evidence_dir is not None:
             try:
                 evidence_dir = Path(request.evidence_dir)
                 evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -371,6 +481,7 @@ class PlaywrightBrowserAdapter:
             artifact_dir=Path(request.destination_dir),
             credential_store=self._credential_store,
             evidence_timeout_ms=int(min(request.timeout_seconds, 60) * 1000),
+            object_repository=plan.get("object_repository") or {},
         )
         page = session.open(plan["start_url"])
         try:
@@ -378,7 +489,7 @@ class PlaywrightBrowserAdapter:
                 context, page, as_extraction, filters, on_authenticated_page=session.adopt
             )
             if auth_message:
-                self._capture_failure_evidence(page, as_extraction, auth_message)
+                self._capture_failure_evidence(page, as_extraction, auth_message, auth_stage=True)
                 return self._replay_failure(request, auth_message, started, auth_required=True)
             # Sign-in may have handed the session to another tab, so the page to
             # continue on is the one authentication settled on, not the one we
@@ -391,6 +502,17 @@ class PlaywrightBrowserAdapter:
                 page.goto(plan["start_url"], wait_until="domcontentloaded")
 
             for action in plan.get("actions") or []:
+                page = session.current_page() or page
+                if self._session_expired(page, filters):
+                    message = "The session expired while repeating the recording. No later step was sent."
+                    self._capture_failure_evidence(page, as_extraction, message, auth_stage=True)
+                    return self._replay_failure(
+                        request,
+                        message,
+                        started,
+                        auth_required=True,
+                        step_results=session.step_results,
+                    )
                 session.perform(action)
                 # Files are saved as they arrive rather than all at the end: a
                 # later step can navigate away or close the tab a download
@@ -491,6 +613,7 @@ class PlaywrightBrowserAdapter:
             size_bytes=first.stat().st_size,
             duration_seconds=self._clock() - started,
             step_results=session.step_results,
+            evidence={"repair_candidates": list(session.repair_candidates)},
         )
 
     def _replay_failure(
