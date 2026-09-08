@@ -15,7 +15,7 @@ domains:
     - processes/manager
     - workflows/builtin
     - workflows/profiles
-    lines: 2030
+    lines: 2054
   browser:
     modules:
     - adapters/browser/authentication
@@ -32,7 +32,7 @@ domains:
     - scheduler
     - services
     - worker
-    lines: 1101
+    lines: 1223
   contract:
     modules:
     - domain/enums
@@ -212,7 +212,7 @@ nodes:
   domain: results
   path: src/smartops/adapters/incidents/pack.py
   lines: 118
-  depended_on_by: 0
+  depended_on_by: 1
 - id: adapters/notify
   type: module
   domain: operations
@@ -277,7 +277,7 @@ nodes:
   type: module
   domain: composition
   path: src/smartops/cli.py
-  lines: 428
+  lines: 535
   depended_on_by: 1
 - id: config
   type: module
@@ -332,7 +332,7 @@ nodes:
   domain: contract
   path: src/smartops/domain/enums.py
   lines: 196
-  depended_on_by: 24
+  depended_on_by: 25
 - id: domain/models
   type: module
   domain: contract
@@ -367,7 +367,7 @@ nodes:
   type: module
   domain: automation
   path: src/smartops/engine/runner.py
-  lines: 489
+  lines: 513
   depended_on_by: 1
 - id: events
   type: module
@@ -398,7 +398,7 @@ nodes:
   domain: operations
   path: src/smartops/journey.py
   lines: 429
-  depended_on_by: 1
+  depended_on_by: 2
 - id: login
   type: module
   domain: operations
@@ -494,13 +494,13 @@ nodes:
   domain: recording
   path: src/smartops/recordings/elements.py
   lines: 290
-  depended_on_by: 4
+  depended_on_by: 5
 - id: recordings/instruments
   type: module
   domain: recording
   path: src/smartops/recordings/instruments.py
   lines: 69
-  depended_on_by: 0
+  depended_on_by: 1
 - id: recordings/manager
   type: module
   domain: recording
@@ -559,7 +559,7 @@ nodes:
   type: module
   domain: composition
   path: src/smartops/services.py
-  lines: 204
+  lines: 219
   depended_on_by: 3
 - id: sessions
   type: module
@@ -776,6 +776,15 @@ edges:
   to: core/errors
   relation: imports
 - from: cli
+  to: domain/enums
+  relation: imports
+- from: cli
+  to: journey
+  relation: imports
+- from: cli
+  to: recordings/elements
+  relation: imports
+- from: cli
   to: recordings/probe
   relation: imports
 - from: cli
@@ -931,6 +940,9 @@ edges:
 - from: recordings/coach
   to: recordings
   relation: imports
+- from: recordings/coach
+  to: recordings/instruments
+  relation: imports
 - from: recordings/confidence
   to: domain/enums
   relation: imports
@@ -1050,6 +1062,9 @@ edges:
   relation: imports
 - from: services
   to: adapters/history/archiver
+  relation: imports
+- from: services
+  to: adapters/incidents/pack
   relation: imports
 - from: services
   to: adapters/notify/local
@@ -1286,6 +1301,7 @@ domain_edges:
   to: contract
   relation: depends_on
   through:
+  - cli -> domain/enums
   - scheduler -> domain/enums
   - scheduler -> domain/models
 - from: composition
@@ -1300,8 +1316,8 @@ domain_edges:
   relation: depends_on
   through:
   - cli -> checks
+  - cli -> journey
   - services -> checks
-  - services -> chrome_bridge
 - from: composition
   to: persistence
   relation: depends_on
@@ -1312,14 +1328,15 @@ domain_edges:
   to: recording
   relation: depends_on
   through:
+  - cli -> recordings/elements
   - cli -> recordings/probe
   - cli -> recordings/vision
-  - scheduler -> recordings/converter
 - from: composition
   to: results
   relation: depends_on
   through:
   - services -> adapters/history/archiver
+  - services -> adapters/incidents/pack
   - services -> adapters/notify/local
 - from: composition
   to: shared
@@ -1540,7 +1557,7 @@ entrypoints:
   purpose: the background worker that executes runs
 most_depended_on:
 - id: domain/enums
-  depended_on_by: 24
+  depended_on_by: 25
 - id: core/errors
   depended_on_by: 20
 - id: domain/models
@@ -1559,7 +1576,7 @@ most_depended_on:
   depended_on_by: 5
 - id: recordings/converter
   depended_on_by: 5
+- id: recordings/elements
+  depended_on_by: 5
 - id: workflows/profiles
   depended_on_by: 5
-- id: adapters/browser/session
-  depended_on_by: 4

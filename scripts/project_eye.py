@@ -113,9 +113,20 @@ def imports_of(path: Path, name: str) -> set[str]:
         if isinstance(node, ast.ImportFrom):
             if node.level:  # a relative import: resolve it against this module
                 base = here[: len(here) - (node.level - 1)] if node.level > 1 else here
-                record("/".join([*base, *(node.module or "").split(".")]))
+                package = [part for part in (node.module or "").split(".") if part]
             elif (node.module or "").startswith("smartops"):
-                record("/".join((node.module or "").split(".")[1:]))
+                base, package = [], (node.module or "").split(".")[1:]
+            else:
+                continue
+            record("/".join([*base, *package]))
+            # `from . import instruments` names a *module*, not a symbol inside
+            # one, and reading only `node.module` missed the edge entirely — the
+            # graph then showed a module nothing imported and called it dead
+            # code. A map that loses edges is the same failure as a map that is
+            # simply wrong, so each imported name is offered as a module too and
+            # `record` keeps only the ones that really are files.
+            for alias in node.names:
+                record("/".join([*base, *package, alias.name]))
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.startswith("smartops."):

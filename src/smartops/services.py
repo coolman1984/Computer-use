@@ -12,6 +12,7 @@ from .adapters.agents.cli_runner import CliAgentRunner
 from .adapters.agents.commands import default_command_builder
 from .adapters.browser.playwright_engine import PlaywrightBrowserAdapter
 from .adapters.history.archiver import HistoryArchiver
+from .adapters.incidents.pack import IncidentPackBuilder
 from .adapters.notify.local import CompositeNotifier, LocalLogNotifier, WebhookNotifier
 from .adapters.validation.local import LocalFileValidator
 from .checks import ConnectionCheckStore
@@ -99,6 +100,20 @@ class Services:
         self.credentials = credential_store or default_credential_store()
         self.browser = PlaywrightBrowserAdapter(self.settings.browser, credential_store=self.credentials)
         self.history = HistoryArchiver(self.settings.storage.history_dir)
+        # The evidence a failed run leaves behind. It existed, fully tested, and
+        # nothing ever called it: incidents were opened with no evidence folder
+        # and no pack_path, so "a failed flow can be inspected" was a promise
+        # the platform did not keep. Found by the project graph as a component
+        # with no caller.
+        self.incident_packs = IncidentPackBuilder(
+            incidents=self.incidents,
+            runs=self.runs,
+            steps=self.steps,
+            events=self.events,
+            files=self.files,
+            base_dir=self.settings.storage.incidents_dir,
+            clock=self.clock,
+        )
         # settings.storage.systems_dir, or empty if the folder does not
         # exist. Real definitions live outside the repo via SMARTOPS_SYSTEMS_DIR (D023).
         self.systems = SystemRegistry.load(self.settings.storage.systems_dir)

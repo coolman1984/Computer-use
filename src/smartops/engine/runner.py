@@ -472,14 +472,38 @@ class WorkflowRunner:
             run_id=run.id,
             signature=signature,
         )
+        pack_path = self._build_incident_pack(incident.id)
         self.services.events.emit(
             EventType.INCIDENT_OPENED,
             run_id=run.id,
             step_name=step_def.name,
             severity=Severity.ERROR,
             message="Incident opened for diagnosis",
-            payload={"incident_id": incident.id, "signature": signature},
+            payload={
+                "incident_id": incident.id,
+                "signature": signature,
+                "evidence_pack": pack_path,
+            },
         )
+
+    def _build_incident_pack(self, incident_id: str) -> str:
+        """Gather what a person needs to diagnose this failure, while it is fresh.
+
+        The run's steps, its events, the files it produced and the incidents
+        that looked like this one before — collected once, now, rather than
+        pieced together later from four places by somebody who was not here.
+
+        Never allowed to fail the failure handling: an incident with no evidence
+        folder is a worse day than an incident with one, but an exception thrown
+        while recording an incident would lose the incident itself.
+        """
+        builder = getattr(self.services, "incident_packs", None)
+        if builder is None:
+            return ""
+        try:
+            return str(builder.build(incident_id))
+        except Exception:
+            return ""
 
     def _context_emitter(self, run_id: str, step_name: str) -> Callable[..., Any]:
         def emit(event_type: EventType, **kwargs: Any) -> Any:

@@ -140,3 +140,4 @@ None of it is ever committed. This repository is public.
 | `GET /api/systems/{key}/elements` | What this system's automations depend on |
 | `PUT /api/systems/{key}/elements/{ref}` | Repair one control, for every step |
 | `python -m smartops probe <system>` | The same capability report, from a terminal |
+| `python -m smartops brief` | Where this deployment stands: stage, next action, controls that stopped resolving, open incidents and where their evidence is |

@@ -141,3 +141,67 @@ def test_extra_evidence_is_attached_when_given(services, tmp_path: Path) -> None
 def test_missing_incident_raises_clear_error(services, tmp_path: Path) -> None:
     with pytest.raises(SmartOpsError, match="not found"):
         _builder(services, tmp_path).build("inc_does_not_exist")
+
+
+def test_a_failed_run_leaves_its_evidence_behind_without_being_asked(services) -> None:
+    """The pack builder existed, was fully tested, and nothing ever called it.
+
+    Incidents were opened with no evidence folder and no pack_path, so "a failed
+    flow can be inspected" was a promise the platform did not keep. The project
+    graph found it as a component with no caller; this is what keeps it wired.
+    """
+    from smartops.core.errors import PermanentError
+    from smartops.domain.enums import IncidentStatus, RunStatus
+
+    def always_fails(ctx):
+        raise PermanentError("the portal refused the export")
+
+    services.step_registry.add("test.fails", always_fails)
+    services.workflows.register(
+        WorkflowDefinition(
+            key="test.failing",
+            title="A workflow that fails",
+            steps=(StepDefinition(name="export", uses="test.fails"),),
+        )
+    )
+
+    run = services.runner.create_run("test.failing")
+    services.runner.execute(run.id)
+
+    assert services.runs.get(run.id).status is RunStatus.FAILED
+    incidents = services.incidents.list(status=IncidentStatus.OPEN, limit=10)
+    assert incidents, "a failed run must open an incident"
+
+    incident = services.incidents.get(incidents[0].id)
+    assert incident.pack_path, "the incident was opened with no evidence to inspect"
+    assert Path(incident.pack_path).exists()
+
+
+def test_a_broken_pack_builder_never_costs_the_incident_itself(services) -> None:
+    """An exception while recording a failure must not lose the failure."""
+    from smartops.core.errors import PermanentError
+    from smartops.domain.enums import IncidentStatus, RunStatus
+
+    class _Broken:
+        def build(self, incident_id, **kwargs):
+            raise OSError("the evidence directory is read-only")
+
+    services.incident_packs = _Broken()
+
+    def always_fails(ctx):
+        raise PermanentError("the portal refused the export")
+
+    services.step_registry.add("test.fails2", always_fails)
+    services.workflows.register(
+        WorkflowDefinition(
+            key="test.failing2",
+            title="Another failing workflow",
+            steps=(StepDefinition(name="export", uses="test.fails2"),),
+        )
+    )
+
+    run = services.runner.create_run("test.failing2")
+    services.runner.execute(run.id)
+
+    assert services.runs.get(run.id).status is RunStatus.FAILED
+    assert services.incidents.list(status=IncidentStatus.OPEN, limit=10)

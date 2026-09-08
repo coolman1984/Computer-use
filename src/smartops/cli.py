@@ -16,6 +16,7 @@ from typing import Sequence
 from .adapters.browser.session import concurrency_warning_message
 from .checks import extension_provisioning_status
 from .core.errors import SmartOpsError
+from .domain.enums import IncidentStatus
 from .sessions import capture_login, session_age_hours
 
 
@@ -44,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "serve", help="Run SmartOps: the web app, the background worker, and the scheduler"
     )
+    brief = sub.add_parser(
+        "brief",
+        help="Where this deployment stands, in one page, for whoever works on it next",
+    )
+    brief.add_argument("--json", action="store_true", help="Print the brief as JSON")
+
     probe = sub.add_parser(
         "probe",
         help="Ask a screen how it can be automated, before spending a recording on it",
@@ -236,6 +243,105 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         services.close()
 
 
+def _cmd_brief(args: argparse.Namespace) -> int:
+    """Everything somebody starting work on this deployment needs, in one place.
+
+    Not a new opinion about the project: it reads the journey the web app
+    already computes, the elements the recordings already registered, and the
+    incidents runs have already opened. All of that existed and was reachable
+    only through the interface, so an assistant working in a terminal had to
+    guess at the state of the system it was changing — and guessing is how the
+    wrong thing gets fixed confidently.
+    """
+    import json
+
+    from .journey import build_journey
+    from .recordings.elements import ElementRepository
+
+    services = _build_services()
+    try:
+        journey = build_journey(services)
+        stages = journey.to_dict()["stages"]
+        current = next((stage for stage in stages if stage["key"] == journey.current), None)
+
+        systems = []
+        for system in services.systems.list():
+            path = services.recording_manager.system_elements_path(system.key)
+            repository = ElementRepository(path).load() if path.exists() else ElementRepository()
+            unresolved = [
+                element for element in repository
+                if element.last_check and not element.last_check.get("resolves")
+            ]
+            systems.append({
+                "key": system.key,
+                "elements": len(repository),
+                "unresolved": [
+                    {"reference": element.reference, "found": element.last_check.get("found")}
+                    for element in unresolved
+                ],
+            })
+
+        recording_now = [
+            record.to_dict()["id"]
+            for record in services.recordings.list(limit=20)
+            if record.status.value in {"starting", "recording", "paused"}
+        ]
+        open_incidents = [
+            {
+                "id": incident.id,
+                "title": incident.title,
+                # Where the evidence is. Empty means the incident was opened
+                # without any, which is itself worth knowing.
+                "evidence": incident.pack_path or "",
+            }
+            for incident in services.incidents.list(status=IncidentStatus.OPEN, limit=10)
+        ]
+
+        report = {
+            "stage": journey.current,
+            "next_action": (current or {}).get("detail", ""),
+            "blocked": bool((current or {}).get("blocked")),
+            "stages": [
+                {"key": stage["key"], "done": stage["done"], "blocked": stage["blocked"]}
+                for stage in stages
+            ],
+            "systems": systems,
+            "recording_now": recording_now,
+            "open_incidents": open_incidents,
+        }
+
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+
+        done = sum(1 for stage in stages if stage["done"])
+        print(f"Stage: {journey.current}  ({done} of {len(stages)} stages done)")
+        if report["next_action"]:
+            print(f"Next:  {report['next_action']}")
+        if report["blocked"]:
+            print("       This stage is blocked; the detail above says by what.")
+        print()
+        for system in systems:
+            print(f"  {system['key']}: {system['elements']} known controls")
+            for element in system["unresolved"]:
+                found = element["found"]
+                trouble = "nothing matched it" if found == 0 else f"{found} things matched it"
+                print(f"    - {element['reference']}: {trouble}")
+        if recording_now:
+            print(f"\n  Recording in progress: {', '.join(recording_now)}")
+        if open_incidents:
+            print("\n  Open incidents:")
+            for incident in open_incidents:
+                where = incident["evidence"] or "(no evidence was collected)"
+                print(f"    - {incident['title']}\n      {where}")
+        return 0
+    except SmartOpsError as exc:
+        print(f"Error: {exc.message}")
+        return 1
+    finally:
+        services.close()
+
+
 def _cmd_probe(args: argparse.Namespace) -> int:
     """Open one screen in the configured browser and report what can automate it.
 
@@ -390,6 +496,7 @@ _HANDLERS = {
     "systems": _cmd_systems,
     "login": _cmd_login,
     "collect": _cmd_collect,
+    "brief": _cmd_brief,
     "probe": _cmd_probe,
     "work": _cmd_work,
     "serve": _cmd_serve,

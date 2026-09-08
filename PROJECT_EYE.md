@@ -165,9 +165,34 @@ disappear.
    naming those owners is the next structural piece of work, and per the
    contract it comes after mapping, not instead of it.
 
-5. **No end-to-end journey test on a real corporate portal.** Every journey in
+5. **`operations` is where a module goes when nobody decided who owns it.**
+   Two of its residents were found by this map to be disconnected entirely —
+   one because the scanner could not see `from . import x`, one because it had
+   simply never been wired up. Both are fixed; the bucket itself is not.
+
+6. **No end-to-end journey test on a real corporate portal.** Every journey in
    §5 is proved against local fixtures. The single largest gap in the project,
    and the only one that cannot be closed from here.
+
+## 8b. What the map found, and what came of it
+
+The point of a derived map is that it answers questions nobody thought to ask.
+Three answers on its first use:
+
+* **A component with no caller.** `adapters/incidents/pack` built the evidence
+  folder a failed run leaves for whoever diagnoses it. It was complete, it was
+  tested, and nothing in the running system ever called it — so every failure
+  opened an incident with no evidence and an empty `pack_path`, and "a failed
+  flow can be inspected" was a promise the platform did not keep. Now built
+  when the incident is opened, and unable to take the incident down with it if
+  the folder cannot be written.
+* **A blind spot in the scanner itself.** `from . import instruments` names a
+  module rather than a symbol, and the scanner read only `node.module` — so it
+  reported the assistant's own instruments as dead code. A map that loses edges
+  fails the same way as a map that is wrong. Fixed, and the import count went
+  from 194 to 195.
+* **A two-way dependency between the recorder and the executor**, recorded in
+  the previous revision and fixed there.
 
 ## 9. Where the risk concentrates
 
@@ -190,7 +215,8 @@ Roughly change-frequency × how much depends on it × how much is uncertain:
 | Import cycles | 0 |
 | Two-way domain dependencies | 3 (§8) |
 | Forbidden imports | 0 |
-| Suite | 446 passing, 2 skipped for a missing display and a missing Google Chrome |
+| Suite | 455 passing, 2 skipped for a missing display and a missing Google Chrome |
+| Orphan modules | 0 |
 
 Regenerate with `python scripts/project_eye.py`; the suite fails if this has
 drifted from the code.
