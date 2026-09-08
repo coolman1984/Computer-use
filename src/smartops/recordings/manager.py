@@ -14,7 +14,9 @@ from ..domain.enums import (
 )
 from ..domain.models import Recording, RecordingStep
 from ..sessions import session_path
+from ..storage.paths import slug
 from .converter import build_plan, review_plan
+from .elements import ElementRepository, merge
 
 from .worker import PlaywrightRecordingWorker
 
@@ -34,6 +36,66 @@ class RecordingManager:
     def __init__(self, services: Any) -> None:
         self.services, self.workers = services, {}
         self._incomplete_stops: set[str] = set()
+    def system_elements_path(self, system_key: str) -> Path:
+        """Where one system's shared element repository lives.
+
+        Beside the recordings rather than in the repository checked into Git:
+        it describes a company's screens, and this project's own rule is that
+        nothing about them is ever committed.
+        """
+        return Path(self.services.settings.storage.recordings_dir) / "elements" / f"{slug(system_key)}.json"
+
+    def _merge_elements(self, record: Recording) -> None:
+        """Fold a finished recording's controls into the system's shared set.
+
+        Done here, once, when the recording settles — so a second recording of
+        the same portal improves the descriptions the first one produced instead
+        of starting a private copy of them.
+        """
+        source_path = Path(record.artifact_dir) / "elements.json"
+        if not source_path.exists():
+            return
+        try:
+            shared = ElementRepository(self.system_elements_path(record.system_key)).load()
+            merge(shared, ElementRepository(source_path).load())
+            shared.save()
+        except Exception:
+            pass  # a shared description is an optimisation; never fail a recording for it
+
+    def undo_last_step(self, recording_id: str) -> Recording:
+        """Drop the step just recorded, while the browser is still open.
+
+        A person demonstrating a task clicks the wrong thing occasionally, and
+        until now the only remedy was to throw the whole recording away and
+        start again — which is why people stopped recording long tasks. The
+        mis-click is removed here and the next action carries on from the step
+        before it.
+        """
+        record = self._required(recording_id)
+        if record.status not in _ACTIVE:
+            raise PermanentError("Only a running recording can have its last step undone.")
+        steps = self.services.recordings.steps(recording_id)
+        if not steps:
+            raise PermanentError("This recording has no steps to undo yet.")
+        last = steps[-1]
+        self.services.recordings.delete_step(recording_id, last.seq)
+        record.step_count = max(0, record.step_count - 1)
+        record.download_count = max(0, record.download_count - int(last.kind == "download"))
+        self.services.recordings.save(record)
+        # steps.jsonl is the append-only mirror of the same list; rewriting it
+        # keeps the two from disagreeing about what the recording contains.
+        root = Path(record.artifact_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        with (root / "steps.jsonl").open("w", encoding="utf-8") as out:
+            for step in self.services.recordings.steps(recording_id):
+                out.write(json.dumps(step.to_dict(), ensure_ascii=False) + "\n")
+        self._emit(
+            EventType.RECORDING_STARTED, record,
+            f"Removed step {last.seq} ({last.action or last.kind}) at the operator's request",
+            Severity.INFO,
+        )
+        return record
+
     def _emit(self, event: EventType, record: Recording, message: str, severity: Severity = Severity.INFO) -> None:
         self.services.events.emit(event, severity=severity, message=message, payload={"recording_id": record.id, "status": record.status.value})
     def create(self, name: str, system_key: str, parent: Recording | None = None) -> Recording:
@@ -480,6 +542,7 @@ class RecordingManager:
             record.status = RecordingStatus.FAILED if error else RecordingStatus.COMPLETED
             record.error_message = error
         record.finished_at=self.services.clock.now(); record.worker_pid=None; self.services.recordings.save(record)
+        self._merge_elements(record)
         Path(record.artifact_dir).mkdir(parents=True, exist_ok=True)
         (Path(record.artifact_dir)/"manifest.json").write_text(json.dumps(record.to_dict(), ensure_ascii=False),encoding="utf-8")
         if incomplete:

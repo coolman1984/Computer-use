@@ -122,6 +122,10 @@ class ReplaySession:
         # What the current step's proof container held before the step ran; see
         # the content_changed check for why the comparison has to start there.
         self._size_before: tuple[int, int] | None = None
+        # The shared description of this system's controls, when the run was
+        # given one. None means every step falls back to its own locators, which
+        # is exactly what happened before this existed.
+        self.elements: Any = None
 
     # ---------- setup ----------
 
@@ -952,6 +956,13 @@ class ReplaySession:
         except Exception:
             return None
 
+    def _repository_locators(self, action: dict[str, Any]) -> list[str]:
+        """What the shared element repository currently says about this control."""
+        if self.elements is None:
+            return []
+        reference = (action.get("inputs") or {}).get("_element")
+        return self.elements.locators_for(str(reference)) if reference else []
+
     def _maybe_locate(self, action: dict[str, Any]) -> Any | None:
         locator = action.get("locator") or {}
         if not (locator.get("value") or locator.get("fallbacks")):
@@ -967,8 +978,15 @@ class ReplaySession:
         """
         locator_spec = action.get("locator") or {}
         scope = self._scope(action)
-        candidates = [locator_spec.get("value", "")] + list(locator_spec.get("fallbacks") or [])
-        candidates = [c for c in candidates if c]
+        # The shared description of this control comes first when there is one:
+        # a control repaired once in review is repaired for every step that
+        # names it, without any of those steps being edited. The step's own
+        # locators always follow, so a plan whose repository is missing — or
+        # made before the repository existed — behaves exactly as it always did.
+        candidates = self._repository_locators(action)
+        candidates += [locator_spec.get("value", "")] + list(locator_spec.get("fallbacks") or [])
+        seen: set[str] = set()
+        candidates = [c for c in candidates if c and not (c in seen or seen.add(c))]
 
         for selector in candidates:
             try:

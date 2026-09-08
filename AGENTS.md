@@ -6,9 +6,12 @@ These instructions are mandatory for any software agent working on this reposito
 
 Read in order:
 1. README.md
-2. docs/DAILY_DOWNLOAD_FLOW.md
-3. skills/smartops-core-operator/SKILL.md and, when present, logs/operator-memory.md
-4. The source and focused tests for the behaviour being changed
+2. docs/ARCHITECTURE_MAP.md — what each module owns, and the rules a new one
+   must fit. Adding a module without reading this is how the same job ends up
+   owned twice.
+3. docs/DAILY_DOWNLOAD_FLOW.md
+4. skills/smartops-core-operator/SKILL.md and, when present, logs/operator-memory.md
+5. The source and focused tests for the behaviour being changed
 
 ## Build rules
 

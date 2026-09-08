@@ -272,6 +272,20 @@ class RecordingRepository(BaseRepository):
     def steps(self, recording_id: str) -> list[RecordingStep]:
         return [self._step(r) for r in self.db.connection.execute("SELECT * FROM recording_steps WHERE recording_id=? ORDER BY seq", (recording_id,))]
 
+    def delete_step(self, recording_id: str, seq: int) -> None:
+        """Remove one captured step, for a mis-click undone while recording.
+
+        Only ever the last one, which is why nothing is renumbered: the next
+        step captured takes the number this one gave up, so the sequence stays
+        dense without any existing step changing its identity underneath the
+        timeline and the evidence that already refer to it.
+        """
+        with self.db.transaction() as tx:
+            tx.execute(
+                "DELETE FROM recording_steps WHERE recording_id=? AND seq=?",
+                (recording_id, seq),
+            )
+
     def purge(self, recording_id: str) -> None:
         """Delete the recording row after maintenance has removed its private files."""
         with self.db.transaction() as tx:

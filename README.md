@@ -53,6 +53,8 @@ found in the real workflow, run only its focused regression test, then retry the
 same app step. Do not introduce a second browser framework or a competing
 automation path.
 
+See [docs/ARCHITECTURE_MAP.md](docs/ARCHITECTURE_MAP.md) for what each module
+owns and what depends on it — read it before adding one.
 See [docs/DAILY_DOWNLOAD_FLOW.md](docs/DAILY_DOWNLOAD_FLOW.md) for the concise
 operator and troubleshooting guide, and
 [docs/RECORDER_ROADMAP.md](docs/RECORDER_ROADMAP.md) for how the capture side is

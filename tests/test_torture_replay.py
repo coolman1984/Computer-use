@@ -351,3 +351,70 @@ def test_a_step_with_no_description_still_fails_with_the_plain_message(
 
     failures = [step for step in _performed(result) if not step[2]]
     assert failures and "no longer on the page" in failures[0][3]
+
+
+def test_a_repair_in_the_shared_repository_reaches_a_plan_nobody_edited(
+    services, engine, site, tmp_path
+) -> None:
+    """The whole reason the repository exists.
+
+    The plan's own locator names a button that no longer exists. Nothing about
+    the plan changes; the control is repaired once in the shared repository, and
+    the step finds it.
+    """
+    from smartops.recordings.elements import ElementRepository
+
+    path = tmp_path / "elements.json"
+    repository = ElementRepository(path)
+    element = repository.remember(
+        url=f"{site.base_url}/torture/renamed_button.html",
+        locators=['[id="btnInquiry"]'],
+        fingerprint={"name": "Inquiry", "role": "button"},
+    )
+    repository.repair(element.reference, ['role=button[name="Search"]'])
+    repository.save()
+
+    from smartops.ports.browser import ReplayRequest
+    from smartops.sessions import session_path
+
+    destination = Path(services.settings.storage.raw_data_dir) / "replay"
+    destination.mkdir(parents=True, exist_ok=True)
+    result = engine.replay(ReplayRequest(
+        system="portal", report="daily", destination_dir=destination,
+        plan={
+            "plan_version": 2,
+            "start_url": f"{site.base_url}/torture/renamed_button.html",
+            "actions": [_action(1, "click",
+                                locator={"strategy": "css", "value": '[id="btnInquiry"]'},
+                                inputs={"_element": element.reference})],
+        },
+        session_state_path=session_path(services.settings.storage.sessions_dir, "portal"),
+        elements_path=path,
+    ))
+
+    _all_ran(result)
+
+
+def test_the_same_plan_without_the_repository_still_fails_the_old_way(
+    services, engine, site
+) -> None:
+    """A run given no repository must behave exactly as it did before one existed."""
+    from smartops.ports.browser import ReplayRequest
+    from smartops.sessions import session_path
+
+    destination = Path(services.settings.storage.raw_data_dir) / "replay"
+    destination.mkdir(parents=True, exist_ok=True)
+    result = engine.replay(ReplayRequest(
+        system="portal", report="daily", destination_dir=destination,
+        plan={
+            "plan_version": 2,
+            "start_url": f"{site.base_url}/torture/renamed_button.html",
+            "actions": [_action(1, "click",
+                                locator={"strategy": "css", "value": '[id="btnInquiry"]'},
+                                inputs={"_element": "some/screen#gone-00000000"})],
+        },
+        session_state_path=session_path(services.settings.storage.sessions_dir, "portal"),
+    ))
+
+    failures = [step for step in _performed(result) if not step[2]]
+    assert failures, "with no repository there is nothing to repair the locator"

@@ -64,6 +64,11 @@ class ReplayRequest:
     run_id: str = ""
     session_state_path: Path | None = None
     evidence_dir: Path | None = None
+    # Where this system's shared element repository lives, when it has one.
+    # Absent means every step is found by the locators frozen into its own plan,
+    # which is how replay worked before the repository existed and is still the
+    # fallback whenever the file is missing or unreadable.
+    elements_path: Path | None = None
 
 
 @dataclass

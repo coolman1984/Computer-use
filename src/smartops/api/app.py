@@ -82,6 +82,12 @@ class DraftRequest(BaseModel):
     report_key: str = Field(default="", max_length=120)
 
 
+class ElementRepairRequest(BaseModel):
+    """How a control should be found from now on, in every step that uses it."""
+
+    locators: list[str] = Field(min_length=1, max_length=12)
+
+
 class DraftActionUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -921,6 +927,67 @@ def create_app(services: Services | None = None) -> FastAPI:
         if not svc.recordings.get(recording_id):
             raise HTTPException(status_code=404, detail="Recording not found")
         return {"steps": svc.recording_coach.thin_evidence(recording_id)}
+
+    @app.post("/api/recordings/{recording_id}/undo-last-step")
+    def undo_last_step(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
+        """Remove the step just recorded, while the browser is still open.
+
+        A person demonstrating a task clicks the wrong thing occasionally. Until
+        now the only remedy was to throw the recording away and start again,
+        which is why long tasks stopped being recorded at all.
+        """
+        return _recording_control("undo_last_step", recording_id, svc)
+
+    @app.get("/api/systems/{system_key}/elements")
+    def system_elements(system_key: str, svc: Services = Depends(provide)) -> dict[str, Any]:
+        """Every control this system's automations depend on, in one list.
+
+        The answer to a question nothing could answer before: what does this
+        automation actually rely on, and which of those controls is no longer
+        being found?
+        """
+        from ..recordings.elements import ElementRepository
+
+        repository = ElementRepository(
+            svc.recording_manager.system_elements_path(system_key)
+        ).load()
+        elements = [element.to_dict() | {"reference": element.reference} for element in repository]
+        return {
+            "system": system_key,
+            "element_count": len(elements),
+            "unresolved": [
+                item for item in elements
+                if item["last_check"] and not item["last_check"].get("resolves")
+            ],
+            "elements": sorted(elements, key=lambda item: (-item["used_by"], item["reference"])),
+        }
+
+    @app.put("/api/systems/{system_key}/elements/{reference:path}")
+    def repair_element(
+        system_key: str,
+        reference: str,
+        body: ElementRepairRequest,
+        svc: Services = Depends(provide),
+    ) -> dict[str, Any]:
+        """Fix how one control is found, for every step that uses it.
+
+        This is what the shared repository is for. A person decides once that
+        the renamed button is the same button; every step that names this
+        element is repaired, instead of the same edit being made separately in
+        each of them with a fresh chance of getting it slightly wrong.
+        """
+        from ..recordings.elements import ElementRepository
+
+        path = svc.recording_manager.system_elements_path(system_key)
+        repository = ElementRepository(path).load()
+        element = repository.repair(reference, body.locators)
+        if element is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No such element on this system, or no usable selector was given",
+            )
+        repository.save()
+        return {"reference": element.reference, "element": element.to_dict()}
 
     # ---------- stage 5: review ----------
 

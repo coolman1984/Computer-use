@@ -36,6 +36,7 @@ from ..adapters.browser.session import open_browser_context
 from ..config import BrowserSettings
 from ..credentials import CredentialStore
 from .confidence import score_step
+from .elements import ElementRepository
 from .redaction import redact_selector, redact_text, redact_url, safe_network_summary
 from .probe import probe_page
 from .timeline import ActionObservation, Timeline
@@ -139,6 +140,44 @@ _CAPTURE_SCRIPT = """
   // neighbour rather than by itself. The browser is asked for elements to the
   // right of that text and the nearest one wins, which is what makes this
   // survive a redesign that moves the row but keeps the label.
+  // Every stable neighbour that helps identify this control, not just the
+  // nearest one.
+  //
+  // One anchor is enough until the screen has two of the same thing. A report
+  // form with "Plant" over a column of identical dropdowns, or a grid whose
+  // every row carries a Download button, defeats a single anchor: the words are
+  // there, they are just there several times. Several anchors, each with the
+  // direction it sits in, narrow it the way a person would — "the one under
+  // Plant, in the row that says VD".
+  function anchorsFor(el) {
+    const found = [];
+    try {
+      const rect = el.getBoundingClientRect();
+      if (!rect.width) return found;
+      const clean = (v) => (v || '').replace(/\s+/g, ' ').trim();
+      const usable = (v) => (v && v.length <= 40 && /[a-z\u0600-\u06FF]/i.test(v)) ? v : '';
+      const middleY = rect.top + rect.height / 2;
+      const middleX = rect.left + rect.width / 2;
+      for (const node of document.querySelectorAll('td,th,label,span,div,p,legend')) {
+        if (found.length >= 3) break;
+        if (node.contains(el) || node.childElementCount > 0) continue;
+        const text = usable(clean(node.textContent));
+        if (!text || found.some((anchor) => anchor.text === text)) continue;
+        const other = node.getBoundingClientRect();
+        if (!other.width) continue;
+        const sameLine = Math.abs((other.top + other.height / 2) - middleY) < rect.height;
+        const sameColumn = Math.abs((other.left + other.width / 2) - middleX) < rect.width;
+        if (sameLine && other.right <= rect.left && rect.left - other.right < 400) {
+          found.push({ text: text, side: 'left', gap: Math.round(rect.left - other.right) });
+        } else if (sameColumn && other.bottom <= rect.top && rect.top - other.bottom < 200) {
+          found.push({ text: text, side: 'above', gap: Math.round(rect.top - other.bottom) });
+        }
+      }
+      found.sort((a, b) => a.gap - b.gap);
+    } catch (_) { /* an unusual layout simply yields no anchors */ }
+    return found;
+  }
+
   function anchorTextFor(el) {
     const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
     const usable = (value) => {
@@ -203,6 +242,7 @@ _CAPTURE_SCRIPT = """
       role: roleOf(el),
       name: accessibleName(el),
       anchor: anchorTextFor(el),
+      anchors: anchorsFor(el),
       // Where it sat, as a fraction of the window, so "the button moved to the
       // other side of the screen" is answerable without storing a coordinate.
       x: rect && innerWidth ? Math.round((rect.left + rect.width / 2) / innerWidth * 100) / 100 : null,
@@ -233,11 +273,16 @@ _CAPTURE_SCRIPT = """
     // element carries itself, and above an id the page invented this morning,
     // because a label outlives a redesign that renumbers everything else.
     if (!credentialField(el)) {
-      const anchor = anchorTextFor(el);
-      if (anchor) {
-        add(tag + ':right-of(:text-is(' + q(anchor) + '))');
-        add(tag + ':right-of(:text(' + q(anchor) + '))');
-        add(tag + ':near(:text-is(' + q(anchor) + '))');
+      const anchors = anchorsFor(el);
+      for (const anchor of anchors) {
+        const relation = anchor.side === 'above' ? ':below(' : ':right-of(';
+        add(tag + relation + ':text-is(' + q(anchor.text) + '))');
+      }
+      // The nearest one also gets the looser forms, which survive a label that
+      // gained a colon or a unit since the recording was made.
+      if (anchors.length) {
+        add(tag + ':right-of(:text(' + q(anchors[0].text) + '))');
+        add(tag + ':near(:text-is(' + q(anchors[0].text) + '))');
       }
     }
     if (label && !role) add('text=' + q(label));
@@ -817,6 +862,10 @@ class PlaywrightRecordingWorker:
         # visible-locator diff and its proof candidates together. A sidecar next
         # to steps.jsonl, not a replacement for it — see recordings/timeline.py.
         self.timeline = Timeline(artifact_dir)
+        # Every control this recording touches, described once. A step keeps its
+        # own locators as before; this is what makes repairing one of them
+        # repair every step that uses it. See recordings/elements.py.
+        self.elements = ElementRepository(artifact_dir / "elements.json")
         # Steps scored weak as they are captured, so a person recording live can
         # be told to redo one while it is still cheap to. Bounded because this is
         # a live signal for the current recording, not a history worth keeping.
@@ -995,6 +1044,41 @@ class PlaywrightRecordingWorker:
         self._flush_pages()
         # Whatever arrived while we were stopping still belongs in the recording.
         self._drain(limit=500)
+        self._check_elements_still_resolve()
+
+    def _check_elements_still_resolve(self) -> None:
+        """Before the browser closes, ask the page for every control we recorded.
+
+        A recording is normally judged only when somebody tries to replay it,
+        which can be days later and is a bad moment to learn that one of its
+        steps was ambiguous from the start. The browser is still open here, on
+        the screens the task actually used, so the question costs nothing and
+        can be answered while the person who made the recording is still
+        sitting in front of it.
+
+        Three answers matter, and two of them are failures: nothing matched, so
+        the step is already broken; several matched, so it is ambiguous, which
+        fails just as surely but for the opposite reason and is far harder to
+        spot by eye.
+        """
+        pages = [page for page in list(self._pages) if not _closed(page)]
+        if not pages:
+            return
+        for element in self.elements:
+            found, error = 0, "not on any open page"
+            for page in pages:
+                for selector in element.locators:
+                    try:
+                        count = page.locator(selector).count()
+                    except Exception as exc:
+                        error = f"{type(exc).__name__}"
+                        continue
+                    if count:
+                        found, error = count, ""
+                        break
+                if found:
+                    break
+            self.elements.record_check(element.reference, found=found, error=error)
 
     def _open_and_authenticate(self, context: Any) -> Any:
         """Open the entry page and finish saved-credential login before capture."""
@@ -1265,6 +1349,7 @@ class PlaywrightRecordingWorker:
         # What the evidence in this recording is actually worth. Written here so
         # it exists even for a recording that ended badly — a session that could
         # not be seen at all is exactly the one somebody needs to be told about.
+        self.elements.save()
         try:
             (self.artifact_dir / "screenshots").mkdir(parents=True, exist_ok=True)
             (self.artifact_dir / "screenshots" / "vision-summary.json").write_text(
@@ -1500,6 +1585,7 @@ class PlaywrightRecordingWorker:
             if fingerprint:
                 step["inputs"]["_fingerprint"] = fingerprint
             self._fill_contract(step, payload)
+            self._remember_element(step, page_url, fingerprint, payload)
             self._emit(
                 step,
                 quality_before=before_quality,
@@ -1508,6 +1594,33 @@ class PlaywrightRecordingWorker:
             )
         except Exception:
             pass  # a step we failed to record must not take down the recording
+
+    def _remember_element(
+        self, step: dict[str, Any], page_url: str, fingerprint: dict[str, Any], payload: dict
+    ) -> None:
+        """Register this step's control, and let the step name it.
+
+        The reference travels beside the step's own locators, never instead of
+        them: a run consults the repository first because it is the freshest
+        description, and falls back to what the step recorded when there is no
+        repository to consult. That is what keeps a recording made before any of
+        this working exactly as it did.
+        """
+        locator = step.get("locator") or {}
+        candidates = [locator.get("value", ""), *(locator.get("fallbacks") or [])]
+        candidates = [value for value in candidates if value and value != "[redacted]"]
+        if not candidates:
+            return  # a step with nothing to find has no element to describe
+        anchors = [
+            {"text": redact_text(str(anchor.get("text") or ""), 40),
+             "side": str(anchor.get("side") or "")[:10]}
+            for anchor in ((payload.get("fingerprint") or {}).get("anchors") or [])
+            if isinstance(anchor, dict) and anchor.get("text")
+        ][:3]
+        element = self.elements.remember(
+            url=page_url, locators=candidates, fingerprint=fingerprint, anchors=anchors
+        )
+        step["inputs"]["_element"] = element.reference
 
     def _fill_contract(self, step: dict[str, Any], payload: dict) -> None:
         """Inputs, success evidence and retry policy, decided per action type."""
@@ -1757,6 +1870,13 @@ def _redacted_observed_locators(observed: Any) -> list[dict[str, Any]]:
         safe.append({"strategy": "css", "value": value, "fallbacks": fallbacks})
         seen.add(value)
     return safe
+
+
+def _closed(page: Any) -> bool:
+    try:
+        return bool(page.is_closed())
+    except Exception:
+        return True
 
 
 def _safe_url(page: Any) -> str:

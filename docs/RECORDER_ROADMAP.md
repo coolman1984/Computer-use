@@ -173,6 +173,45 @@ cannot find it names the closest thing the page now has, in that control's real
 name, and stops: *"the button called 'Inquiry' is no longer on this page. The
 closest thing on it now is a button called 'Search'. Nothing was clicked."*
 
+### Phase 3e — Describe each control once · **done**
+
+The keystone, and the piece that changes the shape of everything else.
+
+Until now every step carried its own private copy of how to find its element.
+Twelve steps pressing the same Inquiry button held twelve locator lists, so a
+site that renamed that button broke twelve steps and needed twelve separate
+repairs — each one a fresh chance to get it slightly wrong. Nothing connected
+them, so "what does this automation actually depend on?" had no answer at all.
+
+`recordings/elements.py` is the answer commercial platforms reached long ago: a
+system holds screens, a screen holds controls, and a step names a control
+instead of restating how to find it. Repair the control once and every step
+that names it is repaired — proved by a test that takes a plan nobody edited,
+whose button has been renamed, and gets it running with one repair.
+
+Two rules keep it safe. **A step never depends on the repository existing**: its
+own locators stay on it, the repository is consulted first only because it is
+the fresher description, and a plan made before any of this behaves exactly as
+it did. And **nothing here decides anything** — that a renamed control is "the
+same" control is a person's call, made once, in review.
+
+Three things fall out of it:
+
+* **Several anchors, not one.** A screen with "Plant" above a column of
+  identical dropdowns defeats a single anchor: the words are there, just
+  several times. Each control now records up to three stable neighbours with
+  the direction each sits in.
+* **A check before the browser closes.** A recording is normally judged when
+  somebody tries to replay it, days later, which is a bad moment to learn a
+  step was ambiguous from the start. Every recorded control is now asked for
+  while the browser is still open, and both failures are caught: nothing
+  matched, and *several* matched.
+* **Taking back a mis-click.** A stray click used to mean throwing the whole
+  recording away, which is why long tasks stopped being recorded. The last step
+  can be removed while the browser is still open; the next action takes the
+  number it gave up, so nothing already referring to an earlier step shifts
+  underneath it.
+
 ### Phase 4 — One timeline instead of five subsystems · **done**
 
 Until now each sense keeps its own notes: steps in the database, frames on disk,
@@ -281,6 +320,20 @@ reconciled with failing closed:
 * [Healenium and the self-healing category](https://qaskills.sh/blog/healenium-selenium-self-healing-guide):
   score the live page against a stored fingerprint of the element. Adopted as
   diagnosis. Rejected as action.
+* **UiPath's object repository** — an application holds screens, a screen holds
+  elements, and a workflow refers to an element rather than repeating a
+  selector. Adopted whole in `recordings/elements.py`; it is the single
+  highest-leverage idea found in any of this research.
+* **Automation Anywhere's live recapture** — showing what was captured while
+  recording, so a wrong click can be taken back before the recording ends.
+  Adopted as undo.
+* **OpenAdapt's refusal to overwrite** — a healed workflow is written beside the
+  original for review, and a run with no trusted candidate stops rather than
+  guessing. Already this project's rule; the fingerprint diagnosis follows it.
+* **OpenAdapt's authentication handoff** — capture pauses through sign-in and
+  resumes after. Already true here for a stronger reason: authentication
+  completes *before* any capture facility is installed, so a credential cannot
+  enter a screenshot, a trace, or a step even in principle.
 * [Stagehand, Skyvern and the agent-driven frameworks](https://www.skyvern.com/blog/browser-use-alternatives/):
   their answer to a changed page is to let a model decide at run time. This
   project deliberately keeps the model out of the run: it helps compile the

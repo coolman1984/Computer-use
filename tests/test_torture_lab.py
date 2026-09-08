@@ -322,8 +322,12 @@ def test_every_option_chosen_in_a_multi_select_is_recorded(recorded, site) -> No
 
     # A single-choice list is untouched by any of this.
     shift = next(step for step in chosen if "shift" in step["locator"]["value"])
-    assert shift["inputs"] == {"value": "night"}
+    assert shift["inputs"]["value"] == "night"
+    assert "values" not in shift["inputs"]
     assert shift["success"] == {"type": "value_equals", "value": "night"}
+    # Both lists also name the control they acted on, so a repair to either one
+    # reaches this step without it being edited.
+    assert plants["inputs"]["_element"] != shift["inputs"]["_element"]
 
 
 # ---------- the step that runs the query ----------
