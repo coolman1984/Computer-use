@@ -177,7 +177,10 @@ def login_on_top(page: Any, filters: dict[str, Any]) -> bool:
         return False
     try:
         locator = page.locator(selector)
-        if locator.count() < 1:
+        # A login selector matching two controls is not proof that either one
+        # is the real form. Treat it as transitional instead of trial-clicking
+        # the first match.
+        if locator.count() != 1:
             return False
     except Exception:
         return False
@@ -360,7 +363,11 @@ def find_locator(
             for scope in scopes:
                 try:
                     locator = scope.locator(selector)
-                    if locator.count() > 0:
+                    # Credentials must never be filled into an arbitrary first
+                    # match in a popup or frame. A duplicated selector is a
+                    # configuration error, so keep looking and finally fail
+                    # with the normal bounded diagnostic.
+                    if locator.count() == 1:
                         return candidate, locator
                 except Exception:
                     continue
@@ -385,6 +392,11 @@ def _click_explicit_close(locator: Any) -> bool:
     on actionability until the run timeout, which is what turned a Notice into
     a whole-run failure.
     """
+    try:
+        if locator.count() != 1:
+            return False
+    except Exception:
+        return False
     target = _first(locator)
     click = getattr(target, "click", None)
     if click is None:

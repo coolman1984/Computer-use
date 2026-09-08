@@ -272,6 +272,15 @@ class RecordingRepository(BaseRepository):
     def steps(self, recording_id: str) -> list[RecordingStep]:
         return [self._step(r) for r in self.db.connection.execute("SELECT * FROM recording_steps WHERE recording_id=? ORDER BY seq", (recording_id,))]
 
+    def delete_step(self, recording_id: str, seq: int) -> bool:
+        """Remove one semantic step; raw recording evidence is intentionally kept."""
+        with self.db.transaction() as tx:
+            result = tx.execute(
+                "DELETE FROM recording_steps WHERE recording_id=? AND seq=?",
+                (recording_id, seq),
+            )
+        return bool(result.rowcount)
+
     def purge(self, recording_id: str) -> None:
         """Delete the recording row after maintenance has removed its private files."""
         with self.db.transaction() as tx:

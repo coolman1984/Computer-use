@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import BrowserSettings
+from .adapters.browser.session import open_browser_context
 from .core.errors import ConfigurationError, PermanentError
 from .domain.enums import EventType, Severity
 from .sessions import session_path
@@ -146,25 +147,19 @@ class LoginManager:
             from playwright.sync_api import sync_playwright
 
             with sync_playwright() as playwright:
-                launch_kwargs: dict[str, Any] = {"headless": False}
-                chosen = self._executable_path or settings.executable_path
-                if chosen:
-                    launch_kwargs["executable_path"] = chosen
-                else:
-                    launch_kwargs["channel"] = "chrome"
-                browser = playwright.chromium.launch(**launch_kwargs)
+                # Sign-in must use the exact same browser/profile factory as
+                # Record, Test, Run, and scheduled execution. Otherwise the
+                # human could sign in successfully into a throw-away Chrome
+                # while the automation later opens a different identity.
+                browser_session = open_browser_context(
+                    playwright,
+                    settings,
+                    headless=False,
+                    executable_path=self._executable_path,
+                    storage_state_path=target if target.exists() else None,
+                )
                 try:
-                    context_kwargs: dict[str, Any] = {
-                        "viewport": {
-                            "width": settings.viewport_width,
-                            "height": settings.viewport_height,
-                        }
-                    }
-                    # Reuse a partially valid session so the user does not have
-                    # to start from a cold sign-in every single time.
-                    if target.exists():
-                        context_kwargs["storage_state"] = str(target)
-                    context = browser.new_context(**context_kwargs)
+                    context = browser_session.context
                     page = context.new_page()
                     page.goto(system.auth.login_url, wait_until="domcontentloaded")
                     session.status = "waiting"
@@ -183,7 +178,7 @@ class LoginManager:
                     session.message = "Your session was saved. This system is connected."
                     self._emit(EventType.LOGIN_SUCCEEDED, system.key, "Sign-in session saved")
                 finally:
-                    browser.close()
+                    browser_session.close()
         except Exception as exc:
             session.status = "failed"
             session.error = type(exc).__name__

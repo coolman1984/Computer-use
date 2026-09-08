@@ -39,11 +39,8 @@
 <!-- Content the main document cannot see: proves frame handling. -->
 <iframe id="totals" src="totals.html" width="400" height="120"></iframe>
 
-<!-- A control that acts on mousedown and re-renders itself before the button
-     comes back up, the way Nexacro tree and grid cells do. The browser fires no
-     click event for that gesture (or one on an ancestor), yet the person did
-     click it: recording must still capture the step against this node. -->
-<div id="org-tree"></div>
+<!-- A Nexacro-like control redraws the pressed node on mouse-down. -->
+<div id="org-tree" role="tree" aria-label="Organisation"></div>
 <div id="org-state">Org All</div>
 <div id="org-vd-selected" hidden>VD selected</div>
 <button id="inquiry">Inquiry</button>
@@ -70,19 +67,18 @@
 
   let orgChecked = false;
   function renderOrg() {
-    // Replaces the nodes wholesale, like a component library redraw.
+    // Replaces the pressed node before mouseup, like a component tree redraw.
     document.getElementById('org-tree').innerHTML =
-      '<div class="org-item"><span id="org-vd-box">' + (orgChecked ? '[x]' : '[ ]') +
-      '</span> <span id="org-vd-label">VD</span></div>';
+      '<button id="org-vd-box" type="button" aria-pressed="' + orgChecked + '">VD</button>';
     document.getElementById('org-state').textContent = orgChecked ? 'Org VD' : 'Org All';
     document.getElementById('org-vd-selected').hidden = !orgChecked;
   }
   renderOrg();
   window.__orgClickEvents = 0;
   document.getElementById('org-tree').addEventListener('mousedown', (e) => {
-    if (!e.target.closest('.org-item')) return;
+    if (!e.target.closest('#org-vd-box')) return;
     e.preventDefault();
-    orgChecked = !orgChecked;
+    orgChecked = true;
     renderOrg();
   });
   document.getElementById('org-tree').addEventListener('click', () => { window.__orgClickEvents += 1; });

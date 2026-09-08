@@ -1,0 +1,22 @@
+version: 1
+rules:
+  - id: EYE-001
+    from: src/smartops/api/**
+    forbidden_to: [src/smartops/storage/repositories.py]
+    reason: Intended direction; existing API read-path drift is documented in PROJECT_EYE and needs a tested read-model migration.
+  - id: EYE-002
+    from: src/smartops/recordings/**
+    forbidden_to: [src/smartops/scheduler.py]
+    reason: Recording cannot create or schedule production runs.
+  - id: EYE-003
+    from: src/smartops/adapters/browser/**
+    forbidden_to: [src/smartops/processes/manager.py]
+    reason: Browser code reports facts; process governance owns approval and scheduling.
+  - id: EYE-004
+    from: src/smartops/recordings/healing.py
+    forbidden_to: [src/smartops/storage/repositories.py, src/smartops/processes/manager.py]
+    reason: A repair proposal must not mutate plans or approval state.
+  - id: EYE-005
+    from: src/smartops/workflows/builtin.py
+    required_path: [src/smartops/adapters/validation/local.py, src/smartops/storage/repositories.py]
+    reason: A replay artifact must be registered and validated before a run can succeed.

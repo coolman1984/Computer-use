@@ -25,6 +25,7 @@ Three things shape the design:
 
 from __future__ import annotations
 
+import math
 import time
 import zipfile
 from pathlib import Path
@@ -32,6 +33,9 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ...core.errors import PermanentError
+from .downloads import discard_empty_reservation, reserve_download_path
+from ...recordings.object_repository import resolve_locator
+from ...recordings.healing import repair_proposal
 
 # How long to wait for a step's success evidence before deciding it did not
 # happen. Generous: a corporate report can take a while to render, and the point
@@ -82,14 +86,17 @@ class ReplaySession:
         artifact_dir: Path,
         credential_store: Any = None,
         evidence_timeout_ms: int = DEFAULT_EVIDENCE_TIMEOUT_MS,
+        object_repository: dict[str, Any] | None = None,
     ) -> None:
         self.context = context
         self.artifact_dir = Path(artifact_dir)
         self.credentials = credential_store
         self.timeout = evidence_timeout_ms
+        self.object_repository = object_repository or {}
         self.downloads: list[Path] = []
         self.download_errors: list[str] = []
         self.step_results: list[dict[str, Any]] = []
+        self.repair_candidates: list[dict[str, Any]] = []
         self._pages: list[Any] = []
         # Context pages that existed before this replay belong to the caller.
         # Stale-page cleanup may close only pages created and tracked by this
@@ -237,16 +244,13 @@ class ReplaySession:
         destination.mkdir(parents=True, exist_ok=True)
         while self._pending_downloads:
             download = self._pending_downloads.pop(0)
+            target: Path | None = None
             try:
-                name = download.suggested_filename or f"download-{len(self.downloads) + 1}"
-                target = destination / name
-                # Two files with the same suggested name in one task would
-                # otherwise overwrite each other, which is the same silent loss
-                # the per-run folders exist to prevent.
-                suffix = 2
-                while target.exists():
-                    target = destination / f"{Path(name).stem}-{suffix}{Path(name).suffix}"
-                    suffix += 1
+                target = reserve_download_path(
+                    destination,
+                    download.suggested_filename,
+                    fallback=f"download-{len(self.downloads) + 1}",
+                )
                 download.save_as(str(target))
                 extension = _extension_from_download_content(target)
                 if extension:
@@ -259,7 +263,12 @@ class ReplaySession:
                     target = normalized
                 if target.exists() and target.stat().st_size > 0:
                     self.downloads.append(target)
+                else:
+                    discard_empty_reservation(target)
+                    self.download_errors.append("download was empty")
             except Exception as exc:
+                if target is not None:
+                    discard_empty_reservation(target)
                 self.download_errors.append(f"{type(exc).__name__}: {exc}")
                 continue  # one file we could not save must not lose the others
 
@@ -274,6 +283,15 @@ class ReplaySession:
         # An unsafe step gets exactly one attempt whatever the plan says: the
         # cost of repeating a submit is worse than the cost of failing the run.
         if not safe:
+            attempts = 1
+        # A pointer fallback is used precisely because mousedown can trigger
+        # the business effect before the element is replaced. It is never safe
+        # to issue a second physical press just because the result was unclear.
+        # Keep this retry decision independent of V2 repository resolution.
+        # A dangling object reference must be raised inside the attempt loop so
+        # the failed step is recorded with the same evidence as every other
+        # resolution failure.
+        if (action.get("locator") or {}).get("interaction") == "pointer":
             attempts = 1
 
         started = time.time()
@@ -355,7 +373,10 @@ class ReplaySession:
 
     def _do_click(self, action: dict[str, Any]) -> None:
         locator = self._locate(action)
-        spec = action.get("locator") or {}
+        spec = self._locator_spec(action)
+        if spec.get("interaction") == "pointer":
+            self._do_pointer_click(action, locator)
+            return
         if spec.get("position_mode") != "element_relative":
             locator.click()
             return
@@ -380,44 +401,57 @@ class ReplaySession:
         y = min(max(y_ratio, 0.0), 1.0) * float(box["height"])
         locator.click(position={"x": x, "y": y})
 
-    def _do_pointer_click(self, action: dict[str, Any]) -> None:
-        """Repeat a recorded press/release after DOM replacement on mouse-down.
+    def _do_pointer_click(self, action: dict[str, Any], locator: Any) -> None:
+        """Repeat a recorded press/re-render gesture through a live locator.
 
-        This path is deliberately narrow.  It is emitted only when capture saw
-        a press whose ordinary click was swallowed or retargeted, and it always
-        resolves a unique current locator, passes Playwright's actionability
-        trial, and measures fresh geometry.  The saved plan contains no screen
-        coordinates; locator bounding boxes are main-frame viewport CSS pixels,
-        including for elements inside frames.
+        Some component frameworks replace a control on mousedown. Locator.click
+        correctly treats that detachment as a failed DOM click, although a person
+        completed the physical gesture. We still require Playwright's trial
+        actionability check and a current bounding box; no absolute screen point,
+        force click, or blind retry is allowed.
         """
-        scope = self._scope(action)
-        spec = action.get("locator") or {}
-        candidates = [spec.get("value", "")] + list(spec.get("fallbacks") or [])
-        candidates = [candidate for candidate in candidates if isinstance(candidate, str) and candidate]
-        trial_timeout = min(1000, max(100, getattr(self, "_active_timeout_ms", self.timeout)))
+        try:
+            locator.click(trial=True, timeout=max(1, int(getattr(self, "_active_timeout_ms", self.timeout))))
+            box = locator.bounding_box()
+        except Exception as exc:
+            raise StepFailed(action.get("seq", 0), f"the recorded pointer target is not ready: {exc}")
+        if not box or box.get("width", 0) <= 0 or box.get("height", 0) <= 0:
+            raise StepFailed(action.get("seq", 0), "the recorded pointer target has no clickable area")
+        spec = self._locator_spec(action)
+        x_ratio = self._ratio(spec.get("element_x_ratio", 0.5), action, "x")
+        y_ratio = self._ratio(spec.get("element_y_ratio", 0.5), action, "y")
+        x = float(box["x"]) + x_ratio * float(box["width"])
+        y = float(box["y"]) + y_ratio * float(box["height"])
+        page_name = (action.get("target") or {}).get("page", "main")
+        page = self._resolve_page(page_name)
+        page.mouse.move(x, y)
+        pressed = False
+        try:
+            page.mouse.down()
+            pressed = True
+            page.mouse.up()
+        except Exception as exc:
+            if pressed:
+                try:
+                    page.mouse.up()
+                except Exception:
+                    pass
+                raise StepFailed(
+                    action.get("seq", 0),
+                    "the pointer press was sent but its release could not be confirmed; "
+                    "the remote effect is unknown, so do not retry this step",
+                ) from exc
+            raise StepFailed(action.get("seq", 0), "the pointer gesture could not be sent") from exc
 
-        for selector in candidates:
-            try:
-                matches = scope.locator(selector)
-                if matches.count() != 1:
-                    continue
-                locator = matches.first
-                locator.click(trial=True, timeout=trial_timeout)
-                box = locator.bounding_box()
-                if not box or box.get("width", 0) <= 0 or box.get("height", 0) <= 0:
-                    continue
-                page = self._page()
-                page.mouse.move(float(box["x"]) + float(box["width"]) / 2, float(box["y"]) + float(box["height"]) / 2)
-                page.mouse.down()
-                page.mouse.up()
-                return
-            except Exception:
-                continue
-
-        raise StepFailed(
-            action.get("seq", 0),
-            "the recorded press/release control is not uniquely actionable",
-        )
+    @staticmethod
+    def _ratio(value: Any, action: dict[str, Any], axis: str) -> float:
+        try:
+            ratio = float(value)
+        except (TypeError, ValueError):
+            raise StepFailed(action.get("seq", 0), f"the recorded pointer {axis} position is invalid")
+        if not math.isfinite(ratio):
+            raise StepFailed(action.get("seq", 0), f"the recorded pointer {axis} position is invalid")
+        return min(max(ratio, 0.0), 1.0)
 
     def _do_fill(self, action: dict[str, Any]) -> None:
         self._locate(action).fill(self._value_for(action))
@@ -568,21 +602,37 @@ class ReplaySession:
         if kind == "selector_visible":
             selector = success.get("value", "")
             try:
-                self._scope(action).locator(selector).first.wait_for(
+                found = self._scope(action).locator(selector)
+                found.wait_for(
                     state="visible", timeout=getattr(self, "_active_timeout_ms", self.timeout)
                 )
+                count = int(found.count())
+                if count != 1:
+                    raise ValueError(f"{count} matching elements")
             except Exception:
-                raise StepFailed(seq, f"'{selector}' never appeared, so the step did not take effect")
+                raise StepFailed(
+                    seq,
+                    f"'{selector}' was not a unique visible result, so the step did not take effect",
+                )
             return
 
         if kind == "selector_hidden":
             selector = success.get("value", "")
             try:
-                self._scope(action).locator(selector).first.wait_for(
+                found = self._scope(action).locator(selector)
+                count = int(found.count())
+                if count == 0:
+                    return
+                if count != 1:
+                    raise ValueError(f"{count} matching elements")
+                found.wait_for(
                     state="hidden", timeout=getattr(self, "_active_timeout_ms", self.timeout)
                 )
             except Exception:
-                raise StepFailed(seq, f"'{selector}' was still on the page, so the step did not take effect")
+                raise StepFailed(
+                    seq,
+                    f"'{selector}' did not become a unique hidden result, so the step did not take effect",
+                )
             return
 
         if kind == "value_equals":
@@ -661,10 +711,11 @@ class ReplaySession:
         return False
 
     def _settle(self) -> None:
+        """Yield one short UI turn; network idleness is not app readiness."""
         try:
-            self._page().wait_for_load_state("networkidle", timeout=5000)
+            self._page().wait_for_timeout(150)
         except Exception:
-            pass  # a page that never goes idle is not by itself a failure
+            pass  # a closing page cannot receive the optional short yield
 
     def _current_value(self, action: dict[str, Any]) -> str:
         try:
@@ -707,6 +758,16 @@ class ReplaySession:
         return False
 
     # ---------- finding things ----------
+
+    def _locator_spec(self, action: dict[str, Any]) -> dict[str, Any]:
+        """Resolve a V2 object reference while preserving old inline plans."""
+        try:
+            return resolve_locator(action, self.object_repository)
+        except KeyError:
+            raise StepFailed(
+                action.get("seq", 0),
+                f"the referenced UI object '{action.get('object_ref')}' is missing from this plan",
+            )
 
     def _page(self) -> Any:
         if self._current is None:
@@ -790,14 +851,23 @@ class ReplaySession:
                 return frame
         try:
             # Fall back to treating it as a selector for the <iframe> element.
-            element = page.locator(frame_ref).first.element_handle(timeout=3000)
+            matches = page.locator(frame_ref)
+            if int(matches.count()) != 1:
+                return None
+            element = matches.element_handle(timeout=3000)
             return element.content_frame() if element else None
         except Exception:
             return None
 
     def _maybe_locate(self, action: dict[str, Any]) -> Any | None:
-        locator = action.get("locator") or {}
-        if not (locator.get("value") or locator.get("fallbacks")):
+        locator = self._locator_spec(action)
+        if not (
+            locator.get("value")
+            or locator.get("fallbacks")
+            or locator.get("anchor")
+            or locator.get("anchors")
+            or locator.get("semantic")
+        ):
             return None
         return self._locate(action)
 
@@ -808,18 +878,114 @@ class ReplaySession:
         its test ids and its labels. Trying them in order is what keeps an
         automation working through a cosmetic change instead of failing on one.
         """
-        locator_spec = action.get("locator") or {}
+        locator_spec = self._locator_spec(action)
         scope = self._scope(action)
         candidates = [locator_spec.get("value", "")] + list(locator_spec.get("fallbacks") or [])
         candidates = [c for c in candidates if c]
+        deadline = time.monotonic() + max(
+            1, int(getattr(self, "_active_timeout_ms", self.timeout))
+        ) / 1000
+        ambiguous_count: int | None = None
 
-        for selector in candidates:
+        for index, selector in enumerate(candidates):
             try:
-                found = scope.locator(selector).first
-                found.wait_for(state="visible", timeout=4000)
+                remaining_ms = int((deadline - time.monotonic()) * 1000)
+                if remaining_ms <= 0:
+                    break
+                found = scope.locator(selector)
+                count = int(found.count())
+                if count > 1:
+                    ambiguous_count = count
+                    continue
+                if count == 0:
+                    continue
+                found.wait_for(state="visible", timeout=max(1, remaining_ms))
+                self._record_resolution(action, "primary" if index == 0 else "fallback", selector)
                 return found
             except Exception:
                 continue
+
+        # The control itself may be dynamically regenerated, while the form
+        # group around it is stable. An anchor is a constrained fallback, not
+        # a licence to guess: exactly one container and exactly one relative
+        # target must exist in the already-resolved page/frame scope.
+        anchors: list[Any] = []
+        if locator_spec.get("anchor"):
+            anchors.append(locator_spec["anchor"])
+        anchors.extend(locator_spec.get("anchors") or [])
+        anchor_problem = ""
+        for anchor in anchors[:3]:
+            container_selector = anchor.get("container") if isinstance(anchor, dict) else ""
+            target_selector = anchor.get("target") if isinstance(anchor, dict) else ""
+            if not (
+                isinstance(container_selector, str)
+                and isinstance(target_selector, str)
+                and container_selector
+                and target_selector
+            ):
+                continue
+            try:
+                remaining_ms = int((deadline - time.monotonic()) * 1000)
+                if remaining_ms > 0:
+                    containers = scope.locator(container_selector)
+                    container_count = int(containers.count())
+                    if container_count != 1:
+                        anchor_problem = (
+                            "the recorded anchor is not unique "
+                            f"({container_count} matching containers)"
+                        )
+                        continue
+                    containers.wait_for(state="visible", timeout=max(1, remaining_ms))
+                    anchored = containers.locator(target_selector)
+                    target_count = int(anchored.count())
+                    if target_count != 1:
+                        anchor_problem = (
+                            "the target inside its recorded anchor is not unique "
+                            f"({target_count} matching elements)"
+                        )
+                        continue
+                    remaining_ms = int((deadline - time.monotonic()) * 1000)
+                    if remaining_ms > 0:
+                        anchored.wait_for(state="visible", timeout=max(1, remaining_ms))
+                        self._record_resolution(action, "anchor", container_selector)
+                        return anchored
+            except Exception:
+                # A detached/replaced anchor is treated like any other stale
+                # selector below, never as permission to use coordinates.
+                continue
+
+        # The final deterministic DOM option is the recorded control role/tag.
+        # It intentionally carries no visible label or business value, so it is
+        # safe to store but can only be used when it uniquely identifies one
+        # live element in the correct page/frame.
+        semantic_selector = _semantic_selector(locator_spec.get("semantic"))
+        if semantic_selector:
+            try:
+                remaining_ms = int((deadline - time.monotonic()) * 1000)
+                if remaining_ms > 0:
+                    semantic = scope.locator(semantic_selector)
+                    semantic_count = int(semantic.count())
+                    if semantic_count == 1:
+                        semantic.wait_for(state="visible", timeout=max(1, remaining_ms))
+                        self._record_resolution(action, "semantic", semantic_selector)
+                        return semantic
+                    if semantic_count > 1:
+                        ambiguous_count = semantic_count
+            except Exception:
+                pass
+
+        if ambiguous_count is not None:
+            raise StepFailed(
+                action.get("seq", 0),
+                f"the recorded target is ambiguous ({ambiguous_count} matching elements); "
+                "record a more specific control before retrying",
+            )
+
+        if anchor_problem:
+            raise StepFailed(
+                action.get("seq", 0),
+                f"{anchor_problem}; record a more specific nearby control",
+            )
 
         # Only after every stable way has failed: the recorded position on
         # screen, as a fraction of the viewport, never as pixels.
@@ -832,6 +998,11 @@ class ReplaySession:
             "changed, so record the task again",
         )
 
+    def _record_resolution(self, action: dict[str, Any], strategy: str, selector: str) -> None:
+        proposal = repair_proposal(action, strategy=strategy, selector=selector)
+        if proposal and proposal not in self.repair_candidates:
+            self.repair_candidates.append(proposal)
+
     def _position_locator(self, action: dict[str, Any], scope: Any) -> Any | None:
         # A DOM step must fail when all of its recorded selectors fail. Falling
         # through to an old coordinate would turn a clear site-change failure
@@ -839,7 +1010,7 @@ class ReplaySession:
         # visual and are blocked by the review gate before production use.
         if action.get("layer") != "visual":
             return None
-        spec = action.get("locator") or {}
+        spec = self._locator_spec(action)
         x_ratio, y_ratio = spec.get("x_ratio"), spec.get("y_ratio")
         if x_ratio is None or y_ratio is None:
             return None
@@ -923,3 +1094,21 @@ def _closed(page: Any) -> bool:
     except Exception:
         return True
 
+
+def _semantic_selector(semantic: Any) -> str:
+    """Build a restricted CSS selector from safe recorded role/tag metadata."""
+    if not isinstance(semantic, dict):
+        return ""
+    tag = str(semantic.get("tag") or "").lower()
+    role = str(semantic.get("role") or "")
+    field_type = str(semantic.get("type") or "")
+    if not tag or not role or not tag.replace("-", "").isalnum():
+        return ""
+    import json
+
+    selector = tag
+    if semantic.get("explicit_role"):
+        selector += f"[role={json.dumps(role)}]"
+    if field_type:
+        selector += f"[type={json.dumps(field_type)}]"
+    return selector

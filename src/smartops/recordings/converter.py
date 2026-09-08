@@ -21,8 +21,9 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from ..domain.models import RecordingStep
+from .object_repository import build_object_repository
 
-PLAN_VERSION = 2
+PLAN_VERSION = 4
 
 # Confidence per layer, used only to explain the plan to a non-technical
 # reviewer ("this step is solid" vs "this step is a guess").
@@ -56,7 +57,13 @@ def _layer_for(step: RecordingStep) -> str:
     """
     if (step.action or step.kind) in _NO_ELEMENT:
         return "dom"
-    if step.selector or (step.locator or {}).get("value"):
+    anchor = (step.locator or {}).get("anchor") or {}
+    semantic = (step.locator or {}).get("semantic") or {}
+    if step.selector or (step.locator or {}).get("value") or (
+        isinstance(anchor, dict) and anchor.get("container") and anchor.get("target")
+    ) or (
+        isinstance(semantic, dict) and semantic.get("role") and semantic.get("tag")
+    ):
         return "dom"
     if step.x_ratio is not None and step.y_ratio is not None:
         return "visual"
@@ -125,6 +132,11 @@ def build_plan(
         if action["success"]["type"] != "none":
             action["checkpoint"] = f"after-step-{action['seq']}"
 
+    # Every reusable UI descriptor has one reviewed home in the plan. Actions
+    # point to it through object_ref; the inline locator stays only as a
+    # compatibility view for older screens/readers during this migration.
+    object_repository = build_object_repository(actions, system_key)
+
     return {
         "plan_version": PLAN_VERSION,
         "recording_id": recording_id,
@@ -132,6 +144,7 @@ def build_plan(
         "report_key": report_key,
         "start_url": start_url or _start_url(steps),
         "actions": actions,
+        "object_repository": object_repository,
         "expects_download": bool(downloads),
         "expected_download_count": len(downloads),
         "download_names": [d.inputs.get("file_name", "") for d in downloads if d.inputs],

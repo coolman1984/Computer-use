@@ -26,6 +26,7 @@ from ..domain.enums import (
 from ..domain.models import Process
 from ..recordings.converter import review_plan
 from ..workflows.profiles import validate_schedule
+from .admission import admission_values, current_execution_digest, with_admission
 
 # A process can only be edited (plan, rules, name) while it is still in one of
 # these states. Once approved, a change has to go through a fresh test, so an
@@ -149,8 +150,16 @@ class ProcessManager:
             raise PermanentError("This automation is retired. Create a new one to replace it.")
         self._require_ready_plan(process)
 
+        digest = current_execution_digest(self.services, process)
+        # Store the test's exact execution identity before it starts. If a
+        # system profile changes while the test is running, settle_test compares
+        # it again and refuses to call the now-different automation tested.
+        process.plan = with_admission(process.plan, test_requested_digest=digest)
+
         run = self.services.runner.create_run(
-            "process.replay", params=process.to_run_params(), trigger=TriggerType.MANUAL
+            "process.replay",
+            params={**process.to_run_params(), "execution_digest": digest},
+            trigger=TriggerType.MANUAL,
         )
         process.status = ProcessStatus.TESTING
         process.last_test_run_id = run.id
@@ -172,6 +181,28 @@ class ProcessManager:
         if run is None or process.last_test_run_id != run_id:
             return process
         if run.status is RunStatus.SUCCEEDED:
+            tested_digest = str((run.params or {}).get("execution_digest") or "")
+            current_digest = current_execution_digest(self.services, process)
+            if not tested_digest or tested_digest != current_digest:
+                process.status = ProcessStatus.TEST_FAILED
+                process.error_message = (
+                    "The automation settings changed while its test was running. "
+                    "Run the test again before approval."
+                )
+                self.services.processes.save(process)
+                self._emit(
+                    EventType.PROCESS_TEST_FAILED,
+                    process,
+                    "The test result was not accepted because the automation changed during testing.",
+                    severity=Severity.WARNING,
+                    run_id=run_id,
+                )
+                return process
+            process.plan = with_admission(
+                process.plan,
+                tested_digest=tested_digest,
+                approved_digest=None,
+            )
             process.status = ProcessStatus.TESTED
             process.error_message = None
             self.services.processes.save(process)
@@ -207,6 +238,14 @@ class ProcessManager:
                 "it is allowed to run on its own, so it has to be proven first.",
                 details={"status": process.status.value, "next": "test"},
             )
+        current_digest = current_execution_digest(self.services, process)
+        if admission_values(process.plan).get("tested_digest") != current_digest:
+            raise PermanentError(
+                "The automation or its sign-in/browser settings changed after the test. "
+                "Run the test again before approval.",
+                details={"next": "test", "configuration_changed": True},
+            )
+        process.plan = with_admission(process.plan, approved_digest=current_digest)
         process.status = ProcessStatus.APPROVED
         process.approved_at = self.services.clock.now()
         process.error_message = None
@@ -240,6 +279,7 @@ class ProcessManager:
                     details={"status": process.status.value, "next": _next_action(process)},
                 )
             self._require_ready_plan(process)
+            self._require_current_approval(process)
             active = self.active_run(process_id)
             if active is not None:
                 raise ConcurrencyError(
@@ -263,6 +303,37 @@ class ProcessManager:
                 verdict["problems"][0],
                 details={"review": verdict, "next": "record_again"},
             )
+
+    def _require_current_approval(self, process: Process) -> None:
+        """Stop a newly-bound approval when its live execution contract drifted.
+
+        Older approved processes did not have this immutable binding. They keep
+        working for backward compatibility, but their next successful Test will
+        start carrying the stronger contract automatically.
+        """
+        approved_digest = admission_values(process.plan).get("approved_digest")
+        if not approved_digest:
+            return
+        if approved_digest == current_execution_digest(self.services, process):
+            return
+        process.status = ProcessStatus.TEST_FAILED
+        process.schedule_enabled = False
+        process.approved_at = None
+        process.error_message = (
+            "The automation's tested settings changed after approval. It was unscheduled; "
+            "run a new Test and approve it again."
+        )
+        self.services.processes.save(process)
+        self._emit(
+            EventType.PROCESS_TEST_FAILED,
+            process,
+            "Approval was invalidated because the automation settings changed.",
+            severity=Severity.WARNING,
+        )
+        raise PermanentError(
+            process.error_message,
+            details={"next": "test", "configuration_changed": True},
+        )
 
     def active_run(self, process_id: str, *, lookback: int = 200) -> Any | None:
         """The unfinished run of this automation, if one exists.

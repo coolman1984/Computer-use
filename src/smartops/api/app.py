@@ -822,6 +822,10 @@ def create_app(services: Services | None = None) -> FastAPI:
     def resume_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
         return _recording_control("resume", recording_id, svc)
 
+    @app.post("/api/recordings/{recording_id}/undo-last-step")
+    def undo_last_recording_step(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
+        return _recording_control("undo_last_step", recording_id, svc)
+
     @app.post("/api/recordings/{recording_id}/stop")
     def stop_recording(recording_id: str, svc: Services = Depends(provide)) -> dict[str, Any]:
         return _recording_control("stop", recording_id, svc)

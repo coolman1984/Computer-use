@@ -32,9 +32,11 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from ..adapters.browser.authentication import ensure_authenticated
+from ..adapters.browser.downloads import discard_empty_reservation, reserve_download_path
 from ..adapters.browser.session import open_browser_context
 from ..config import BrowserSettings
 from ..credentials import CredentialStore
+from .observation import ObservationBus, safe_state
 from .redaction import redact_selector, redact_text, redact_url, safe_network_summary
 
 # Runs inside every recorded page and every frame. It listens in the CAPTURING
@@ -54,21 +56,92 @@ _CAPTURE_SCRIPT = """
 
   // Several ways to find the same element, best first. Replay tries them in
   // order, so a page that drops its ids can still be driven by name or label.
-  function locatorFor(el) {
-    const out = { strategy: 'css', value: '', fallbacks: [] };
-    if (!el || !el.tagName) return out;
-    const add = (sel) => { if (sel && !out.fallbacks.includes(sel)) out.fallbacks.push(sel); };
-    if (el.id) add('[id=' + q(el.id) + ']');
+  // The values are attributes only; never capture visible business text here.
+  function stableSelectors(el, forAnchor = false) {
+    if (!el || !el.tagName) return [];
+    const selectors = [];
+    const add = (sel) => { if (sel && !selectors.includes(sel)) selectors.push(sel); };
+    const dataTestId = el.getAttribute && el.getAttribute('data-testid');
+    if (dataTestId) add('[data-testid=' + q(dataTestId) + ']');
+    const dataTest = el.getAttribute && el.getAttribute('data-test');
+    if (dataTest) add('[data-test=' + q(dataTest) + ']');
     const name = el.getAttribute && el.getAttribute('name');
     if (name) add('[name=' + q(name) + ']');
-    const testId = el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-test'));
-    if (testId) add('[data-testid=' + q(testId) + ']');
+    if (el.id) add('[id=' + q(el.id) + ']');
+    // The anchor itself must be entirely structural: accessible names and href
+    // text can contain business data, so they are direct-selector fallbacks
+    // only and never become part of a nearby anchor.
+    if (forAnchor) return selectors;
     const aria = el.getAttribute && el.getAttribute('aria-label');
     if (aria) add('[aria-label=' + q(aria) + ']');
     const tag = el.tagName.toLowerCase();
     if (tag === 'a' && el.getAttribute('href')) add('a[href=' + q(el.getAttribute('href')) + ']');
+    return selectors;
+  }
+
+  // An anchor is deliberately a narrow fallback: a stable container plus one
+  // structurally unique control inside it. It never uses screen coordinates or
+  // visible text, which could be personal or business data. Replay rejects an
+  // anchor or a target that is ambiguous.
+  function anchoredTargets(el) {
+    if (!el || !el.tagName) return [];
+    const candidates = [];
+    const tag = el.tagName.toLowerCase();
+    const attributes = [];
+    const role = el.getAttribute && el.getAttribute('role');
+    const type = el.getAttribute && el.getAttribute('type');
+    if (role) attributes.push('[role=' + q(role) + ']');
+    if (type) attributes.push('[type=' + q(type) + ']');
+    const relative = tag + attributes.join('');
+    let parent = el.parentElement;
+    // Do not turn an arbitrary deep DOM path into an anchor. Three levels is
+    // enough for ordinary form groups and prevents brittle structural guesses.
+    for (let depth = 0; parent && depth < 3; depth += 1, parent = parent.parentElement) {
+      for (const container of stableSelectors(parent, true)) {
+        try {
+          if (parent.querySelectorAll(relative).length === 1) {
+            candidates.push({ container, target: relative });
+          }
+        } catch (_) { /* invalid DOM state: keep the normal selector only */ }
+      }
+    }
+    return candidates.slice(0, 3);
+  }
+
+  // Semantic data is a deliberately small, privacy-safe description of the
+  // control's function. It contains no visible text, value, screenshot, or
+  // accessible name. Replay uses it only as a strict last DOM fallback.
+  function semanticFor(el) {
+    if (!el || !el.tagName) return null;
+    const tag = el.tagName.toLowerCase();
+    const type = el.getAttribute && el.getAttribute('type');
+    const explicitRole = el.getAttribute && el.getAttribute('role');
+    let role = explicitRole;
+    if (!role) {
+      if (tag === 'button') role = 'button';
+      else if (tag === 'a') role = 'link';
+      else if (tag === 'select') role = 'combobox';
+      else if (tag === 'textarea' || (tag === 'input' && (!type || type === 'text'))) role = 'textbox';
+      else if (tag === 'input' && type === 'checkbox') role = 'checkbox';
+      else if (tag === 'input' && type === 'radio') role = 'radio';
+    }
+    return role ? { tag, role, ...(explicitRole ? { explicit_role: true } : {}), ...(type ? { type } : {}) } : null;
+  }
+
+  function locatorFor(el) {
+    const out = { strategy: 'css', value: '', fallbacks: [] };
+    if (!el || !el.tagName) return out;
+    const add = (sel) => { if (sel && !out.fallbacks.includes(sel)) out.fallbacks.push(sel); };
+    for (const selector of stableSelectors(el)) add(selector);
     out.value = out.fallbacks[0] || '';
     out.fallbacks = out.fallbacks.slice(1);
+    const anchors = anchoredTargets(el);
+    if (anchors.length) {
+      out.anchor = anchors[0];
+      if (anchors.length > 1) out.anchors = anchors.slice(1);
+    }
+    const semantic = semanticFor(el);
+    if (semantic) out.semantic = semantic;
     return out;
   }
 
@@ -146,6 +219,26 @@ _CAPTURE_SCRIPT = """
     try { window.__smartopsReport(payload); } catch (_) { /* recording ended */ }
   };
 
+  // Structural facts only. They describe whether a target was usable before
+  // the page's own event handler runs, without copying labels, values or DOM.
+  function targetState(el) {
+    if (!el || !el.getBoundingClientRect) return {};
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    const visible = r.width > 0 && r.height > 0 &&
+      s.display !== 'none' && s.visibility !== 'hidden';
+    const role = (el.getAttribute && el.getAttribute('role')) || '';
+    const ariaChecked = el.getAttribute && el.getAttribute('aria-checked');
+    return {
+      tag: (el.tagName || '').toLowerCase(),
+      role: role.slice(0, 64),
+      visible: visible,
+      enabled: !(el.disabled || (el.getAttribute && el.getAttribute('aria-disabled') === 'true')),
+      checked: typeof el.checked === 'boolean' ? el.checked : ariaChecked === 'true',
+      selected: !!(el.selected || (el.getAttribute && el.getAttribute('aria-selected') === 'true')),
+    };
+  }
+
   // What has been typed into a field but not yet committed. "change" is the
   // right event to record — it fires once, with the finished value, instead of
   // once per keystroke — but on a text input it only fires on blur, and a person
@@ -175,7 +268,34 @@ _CAPTURE_SCRIPT = """
   // Lets the recorder commit anything still being typed when the person stops
   // the recording. Without it, a value typed into the last field and never
   // followed by another action would simply not be in the recording.
-  window.__smartopsFlush = flushPending;
+  let press = null;
+  let lastFallback = null;
+  const PRESS_MATCH_PX = 8;
+  const PRESS_MAX_MS = 1500;
+  const CLICK_GRACE_MS = 250;
+
+  function commitFallback(candidate) {
+    if (!candidate || !candidate.released || candidate.clickSeen || candidate.reported) return;
+    candidate.reported = true;
+    if (candidate.timer !== null) { clearTimeout(candidate.timer); candidate.timer = null; }
+    if (press === candidate) press = null;
+    flushPending();
+    candidate.payload.gesture = 'pointer';
+    report(candidate.payload);
+    // A framework can dispatch a late, retargeted click after this fallback.
+    // It belongs to the same physical gesture, unless a new mousedown occurs.
+    lastFallback = candidate;
+  }
+
+  // Stop is a boundary, not permission to invent an unfinished click. A press
+  // with a matching release is safe to commit; a press that never released is
+  // a cancelled/unfinished gesture and remains absent from the workflow.
+  window.__smartopsFlush = () => {
+    flushPending();
+    if (press && press.released && !press.clickSeen) commitFallback(press);
+    else if (press && press.timer !== null) clearTimeout(press.timer);
+    press = null;
+  };
 
   function rememberFill(el) {
     // Something else was being typed and has not been written down yet: commit
@@ -217,68 +337,70 @@ _CAPTURE_SCRIPT = """
 
   document.addEventListener('blur', () => flushPending(), true);
 
-  // Some component libraries act on mousedown and re-render the pressed node
-  // before the mouse button comes back up. Nexacro's organisation tree does
-  // this: the checkbox toggles on the press, the tree redraws, and the browser
-  // never fires a click event for the gesture — or fires it on some ancestor
-  // that says nothing about which box was ticked. That is how a recording of
-  // G-MES lost the "tick VD" step and its replay asked for a report with no
-  // organisation selected. So the press is remembered here: a matching
-  // release with no click event shortly after is reported as the click it was,
-  // and a click that lands on an ancestor of the pressed node is reported
-  // against the node the person actually pressed.
   const clickPayload = (el, e, w, h) => ({
     action: 'click',
     locator: locatorFor(el),
-    observedVisibleLocators: observableLocators(),
     x: e.clientX / w, y: e.clientY / h,
+    before: targetState(el),
     ...relativePoint(el, e, w, h),
     ...describe(el),
   });
-  let press = null;
-  let pressTimer = null;
-  const PRESS_MATCH_PX = 8;
-  const CLICK_GRACE_MS = 250;
 
+  // Nexacro-like controls can act on mousedown and replace their pressed node
+  // before mouseup. Emit exactly one semantic click after a short gesture.
   document.addEventListener('mousedown', (e) => {
     if (e.button !== 0 || !e.target || !e.target.tagName) return;
-    clearTimeout(pressTimer);
+    if (press && press.released && !press.clickSeen) commitFallback(press);
+    else if (press && press.timer !== null) clearTimeout(press.timer);
+    press = null;
+    lastFallback = null;
     const w = innerWidth || 1, h = innerHeight || 1;
-    // The locator is taken now, while the pressed node is still in the DOM.
-    press = { el: e.target, path: e.composedPath(), at: Date.now(), x: e.clientX, y: e.clientY,
-              payload: { ...clickPayload(e.target, e, w, h), replayAction: 'pointer_click' } };
+    press = {
+      element: e.target, x: e.clientX, y: e.clientY, at: Date.now(),
+      released: false, clickSeen: false, reported: false, timer: null,
+      payload: clickPayload(e.target, e, w, h),
+    };
   }, true);
 
   document.addEventListener('mouseup', (e) => {
-    if (!press || e.button !== 0) return;
-    const p = press;
-    const moved = Math.abs(e.clientX - p.x) > PRESS_MATCH_PX ||
-                  Math.abs(e.clientY - p.y) > PRESS_MATCH_PX;
-    if (moved || Date.now() - p.at > 1500) { press = null; return; }  // a drag, not a click
-    clearTimeout(pressTimer);
-    pressTimer = setTimeout(() => {
-      if (press !== p) return;  // a click event took care of it
+    const candidate = press;
+    if (!candidate || e.button !== 0) return;
+    const moved = Math.abs(e.clientX - candidate.x) > PRESS_MATCH_PX ||
+      Math.abs(e.clientY - candidate.y) > PRESS_MATCH_PX;
+    if (moved || Date.now() - candidate.at > PRESS_MAX_MS) {
       press = null;
-      flushPending();
-      report(p.payload);
-    }, CLICK_GRACE_MS);
+      if (candidate.timer !== null) clearTimeout(candidate.timer);
+      return;
+    }
+    candidate.released = true;
+    candidate.timer = setTimeout(() => commitFallback(candidate), CLICK_GRACE_MS);
   }, true);
 
   document.addEventListener('click', (e) => {
-    clearTimeout(pressTimer);
-    const p = press;
-    press = null;
     flushPending();
-    const el = e.target;
-    const w = innerWidth || 1, h = innerHeight || 1;
-    if (p && p.el !== el && p.path && p.path.includes(el)) {
-      // The browser settled on an ancestor from the original event path after
-      // the pressed node was replaced.  ``el.contains(p.el)`` is no longer
-      // reliable because p.el is detached, so use the transient press-time
-      // path and keep the node locator the person actually pressed.
-      report(p.payload);
+    const candidate = press;
+    if (candidate) {
+      candidate.clickSeen = true;
+      press = null;
+      if (candidate.timer !== null) clearTimeout(candidate.timer);
+      // If a framework replaced the pressed element, preserve the target the
+      // person actually pressed. Keyboard activation has no remembered press
+      // and naturally uses the event target below.
+      if (candidate.element !== e.target) {
+        candidate.payload.gesture = 'pointer';
+        report(candidate.payload);
+        return;
+      }
+    }
+    if (lastFallback &&
+        Math.abs(e.clientX - lastFallback.x) <= PRESS_MATCH_PX &&
+        Math.abs(e.clientY - lastFallback.y) <= PRESS_MATCH_PX &&
+        Date.now() - lastFallback.at <= PRESS_MAX_MS) {
+      lastFallback = null;
       return;
     }
+    const el = e.target;
+    const w = innerWidth || 1, h = innerHeight || 1;
     report(clickPayload(el, e, w, h));
   }, true);
 
@@ -390,6 +512,8 @@ class PlaywrightRecordingWorker:
         # page a person would be clicking in, rather than a second browser.
         self.primary_page: Any = None
         self._pages: list[Any] = []
+        self._page_names: dict[int, str] = {}
+        self._next_page_number = 1
         self._cdp_sessions: list[Any] = []
         self._download_count = 0
         # Events arrive from inside Playwright's own dispatch — a page binding
@@ -400,6 +524,8 @@ class PlaywrightRecordingWorker:
         # event) and every protocol call — screenshots, titles, saving a
         # download — happens on the worker's own loop below.
         self._events: queue.Queue = queue.Queue()
+        self._observations = ObservationBus(artifact_dir, recording_id)
+        self._observation_error_type = ""
 
     def start(self) -> None:
         self._thread = threading.Thread(
@@ -429,11 +555,21 @@ class PlaywrightRecordingWorker:
         """
         if page is self.primary_page:
             return "main"
+        return self._page_names.get(id(page), "unknown")
+
+    def _observe(self, kind: str, *, source: str, data: dict[str, Any] | None = None) -> None:
+        """Evidence may degrade; recording a real business action may not.
+
+        Disk-full and permission errors are useful diagnostics, but they must
+        never prevent a step, download, or completion callback from being
+        persisted. The first failure is retained in memory for the operational
+        error path without risking a recursive journal write.
+        """
         try:
-            index = self._pages.index(page)
-        except ValueError:
-            return "latest"
-        return f"page-{index}"
+            self._observations.emit(kind, source=source, data=data)
+        except Exception as exc:
+            if not self._observation_error_type:
+                self._observation_error_type = type(exc).__name__
 
     @staticmethod
     def _frame_selector(frame: Any, page: Any) -> str:
@@ -458,7 +594,7 @@ class PlaywrightRecordingWorker:
             from playwright.sync_api import sync_playwright
 
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
-            for item in ("screenshots", "downloads", "network", "trace", "session"):
+            for item in ("screenshots", "downloads", "network", "trace", "session", "observations"):
                 (self.artifact_dir / item).mkdir(exist_ok=True)
 
             with sync_playwright() as p:
@@ -479,8 +615,18 @@ class PlaywrightRecordingWorker:
             (self.artifact_dir / "network" / "sanitized-summary.json").write_text(
                 json.dumps(network, ensure_ascii=False), encoding="utf-8"
             )
+            self._observe("recording_finished", source="worker", data={
+                "download_count": self._download_count,
+                "network_request_count": len(network),
+            })
             self.on_finished(None)
         except Exception as exc:
+            # Error text can include a portal URL or a provider response. Keep
+            # only the class in the evidence stream; the caller still receives
+            # the operational error it needs to show the operator.
+            self._observe("recording_failed", source="worker", data={
+                "error_type": type(exc).__name__,
+            })
             self.on_finished(f"Recorder failed: {type(exc).__name__}: {exc}")
 
     def _capture(self, context: Any, network: list[dict]) -> None:
@@ -490,15 +636,16 @@ class PlaywrightRecordingWorker:
         # is installed. Credential values therefore cannot enter a screenshot,
         # trace, network summary, page binding, or recorded step.
         context.tracing.start(screenshots=True, snapshots=True, sources=False)
+        self._observe("recording_started", source="worker")
         # Context-level: applies to every page and every frame this context ever
         # opens, including popups created after this point.
         context.add_init_script(_CAPTURE_SCRIPT)
-        context.on(
-            "request",
-            lambda request: network.append(
-                safe_network_summary(request.method, request.url, request.resource_type)
-            ),
-        )
+        def observe_request(request: Any) -> None:
+            summary = safe_network_summary(request.method, request.url, request.resource_type)
+            network.append(summary)
+            self._events.put(("observation", ("network_request", "network", summary)))
+
+        context.on("request", observe_request)
         context.expose_binding("__smartopsReport", self._handle_event)
         context.on("page", self._track_page)
 
@@ -599,7 +746,7 @@ class PlaywrightRecordingWorker:
         target.write_text(
             json.dumps(
                 {
-                    "error_stage": message,
+                    "reason_code": "AUTHENTICATION_NOT_PROVEN",
                     "page_count": len(pages),
                     "pages": pages,
                 },
@@ -659,6 +806,9 @@ class PlaywrightRecordingWorker:
                     self._finish_step(item)
                 elif kind == "emit":
                     self._emit(item)
+                elif kind == "observation":
+                    observation_kind, source, data = item
+                    self._observe(observation_kind, source=source, data=data)
                 else:
                     self._finish_download(item)
             except Exception:
@@ -688,7 +838,16 @@ class PlaywrightRecordingWorker:
     def _track_page(self, page: Any) -> None:
         if page in self._pages:
             return  # new_page() also fires the "page" event; do not double-bind
+        if page is self.primary_page:
+            name = "main"
+        else:
+            name = f"page-{self._next_page_number}"
+            self._next_page_number += 1
+        self._page_names[id(page)] = name
         self._pages.append(page)
+        self._events.put(("observation", ("page_opened", "browser", {
+            "page": name,
+        })))
         self._prevent_debugger_pauses(page)
         self._bind_downloads(page)
         page.on("close", lambda: self._pages.remove(page) if page in self._pages else None)
@@ -752,16 +911,28 @@ class PlaywrightRecordingWorker:
 
     def _finish_download(self, item: tuple) -> None:
         download, page, page_url = item
-        name = download.suggested_filename or f"download-{self._download_count + 1}"
         directory = self.artifact_dir / "downloads"
-        directory.mkdir(parents=True, exist_ok=True)
-        target = directory / name
-        suffix = 2
-        while target.exists():
-            target = directory / f"{Path(name).stem}-{suffix}{Path(name).suffix}"
-            suffix += 1
-        download.save_as(str(target))
+        target: Path | None = None
+        try:
+            target = reserve_download_path(
+                directory,
+                download.suggested_filename,
+                fallback=f"download-{self._download_count + 1}",
+            )
+            download.save_as(str(target))
+        except Exception as exc:
+            if target is not None:
+                discard_empty_reservation(target)
+            self._observe("download_failed", source="download", data={
+                "page": self._page_name(page), "error_type": type(exc).__name__,
+            })
+            return
+        assert target is not None
         if not (target.exists() and target.stat().st_size > 0):
+            discard_empty_reservation(target)
+            self._observe("download_failed", source="download", data={
+                "page": self._page_name(page),
+            })
             return
         self._download_count += 1
         self._emit({
@@ -777,7 +948,10 @@ class PlaywrightRecordingWorker:
             # step that retries, and only when repeating it is safe.
             "retry": {"max_attempts": 1, "safe_to_repeat": False},
             "page_url_redacted": redact_url(page_url),
-            "target_text_redacted": redact_text(name),
+            "target_text_redacted": redact_text(download.suggested_filename or target.name),
+        })
+        self._observe("download_saved", source="download", data={
+            "page": self._page_name(page), "size_bytes": target.stat().st_size,
         })
 
     # ---------- turning a browser event into a step ----------
@@ -794,14 +968,14 @@ class PlaywrightRecordingWorker:
         try:
             page = source["page"]
             frame = source.get("frame")
-            self._events.put((
-                "step", (payload, page, _safe_url(page), self._frame_selector(frame, page), frame)
-            ))
+            self._events.put(("step", (
+                payload, page, frame, _safe_url(page), self._frame_selector(frame, page)
+            )))
         except Exception:
             pass
 
     def _finish_step(self, item: tuple) -> None:
-        payload, page, page_url, frame_selector, frame = item
+        payload, page, frame, page_url, frame_selector = item
         try:
             action = payload.get("replayAction") or payload.get("action") or "click"
             locator = payload.get("locator") or {}
@@ -839,6 +1013,42 @@ class PlaywrightRecordingWorker:
                 "before_image": before,
                 "after_image": after,
             }
+            anchor = locator.get("anchor") or {}
+            container = redact_selector(str(anchor.get("container") or ""))
+            target = redact_selector(str(anchor.get("target") or ""))
+            if container and target and "[redacted]" not in {container, target}:
+                step["locator"]["anchor"] = {"container": container, "target": target}
+            additional_anchors: list[dict[str, str]] = []
+            for candidate in (locator.get("anchors") or [])[:2]:
+                if not isinstance(candidate, dict):
+                    continue
+                candidate_container = redact_selector(str(candidate.get("container") or ""))
+                candidate_target = redact_selector(str(candidate.get("target") or ""))
+                if candidate_container and candidate_target and "[redacted]" not in {
+                    candidate_container, candidate_target
+                }:
+                    additional_anchors.append({
+                        "container": candidate_container, "target": candidate_target,
+                    })
+            if additional_anchors:
+                step["locator"]["anchors"] = additional_anchors
+            semantic = locator.get("semantic") or {}
+            if isinstance(semantic, dict):
+                role = str(semantic.get("role") or "")
+                tag = str(semantic.get("tag") or "")
+                field_type = str(semantic.get("type") or "")
+                if role and tag:
+                    step["locator"]["semantic"] = {
+                        "role": role[:80],
+                        "tag": tag[:40],
+                        **({"type": field_type[:80]} if field_type else {}),
+                        **({"explicit_role": True} if semantic.get("explicit_role") else {}),
+                    }
+            if payload.get("gesture") == "pointer":
+                # This is not a global coordinate fallback. The locator still
+                # identifies the live element; the pointer gesture is used only
+                # because its normal click handler removes that element mid-click.
+                step["locator"]["interaction"] = "pointer"
             if (
                 payload.get("relativeToElement")
                 and step["locator"].get("value") not in {"", "[redacted]"}
@@ -852,6 +1062,13 @@ class PlaywrightRecordingWorker:
                 })
             self._fill_contract(step, payload)
             self._emit(step)
+            self._observe("action_captured", source="recorder", data={
+                "action": action,
+                "page": step["target"]["page"],
+                "before": safe_state(payload.get("before")),
+                "after": self._target_state(page, frame, step["selector"]),
+                "success_type": (step.get("success") or {}).get("type", "none"),
+            })
         except Exception:
             pass  # a step we failed to record must not take down the recording
 
@@ -931,6 +1148,28 @@ class PlaywrightRecordingWorker:
         step.setdefault("success", {"type": "none"})
         step.setdefault("retry", {"max_attempts": 1, "safe_to_repeat": False})
         self.on_step(step)
+
+    @staticmethod
+    def _target_state(page: Any, frame: Any, selector: str) -> dict[str, Any]:
+        """Read post-action structure without recording text, values, or markup."""
+        if not selector or selector == "[redacted]":
+            return {}
+        try:
+            scope = frame if frame is not None else page
+            locator = scope.locator(selector)
+            count = int(locator.count())
+            if not count:
+                return {"count": 0, "visible": False}
+            if count != 1:
+                return {"count": count, "unique": False}
+            first = locator.first
+            return {
+                "count": count,
+                "visible": bool(first.is_visible(timeout=500)),
+                "enabled": bool(first.is_enabled(timeout=500)),
+            }
+        except Exception:
+            return {}
 
     def _shoot(self, page: Any) -> str:
         """Best-effort screenshot; "" (never None) on failure, so callers treat it uniformly."""

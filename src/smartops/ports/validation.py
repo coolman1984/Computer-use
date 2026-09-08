@@ -12,7 +12,9 @@ class ValidationRules:
     min_size_bytes: int = 1
     expected_extensions: tuple[str, ...] = ()
     required_columns: tuple[str, ...] = ()
+    required_sheets: tuple[str, ...] = ()
     min_rows: int | None = None
+    max_size_bytes: int | None = None
     max_age_hours: float | None = None
     reject_duplicate_hash: bool = True
     # A portal that has lost your session answers a download request with an
@@ -24,6 +26,11 @@ class ValidationRules:
     # caught: a report exported for the wrong month is a perfectly valid file
     # that happens to be the wrong answer, and only its own content can tell.
     must_contain: tuple[str, ...] = ()
+    # Workbook archives are untrusted input. Bound their declared expansion
+    # before XML is read so a zip bomb cannot turn report validation into an
+    # outage. These limits are policy and may be raised per approved report.
+    max_xlsx_entries: int = 5_000
+    max_xlsx_uncompressed_bytes: int = 100 * 1024 * 1024
 
 
 @dataclass
