@@ -49,7 +49,8 @@ ACTIONS_WITHOUT_AN_ELEMENT = frozenset({
 # are captured before anyone knows what proves them — but it is not something a
 # reviewer may choose, because choosing it means choosing to check nothing.
 PROVABLE_SUCCESS_TYPES = frozenset({
-    "selector_visible", "selector_hidden", "value_equals", "selected_values_are",
+    "selector_visible", "selector_hidden", "content_changed",
+    "value_equals", "selected_values_are",
     "value_not_empty", "checked_is", "url_changed", "new_page", "page_available",
     "download_started", "network_response", "next_step_actionable",
 })

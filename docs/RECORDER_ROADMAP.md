@@ -132,6 +132,47 @@ re-armed against whichever document is live; and a tab's *name* is now
 remembered past the tab's own life, because a popup that closes itself was
 taking the identity of its own steps with it.
 
+### Phase 3d — What the rest of the industry already learned · **done**
+
+Three techniques taken from how established automation tools survive real
+enterprise screens, each adapted to this project's rule that it must fail
+rather than guess.
+
+**Find a field by the words beside it.** The signature technique of commercial
+RPA — UiPath calls it an anchor — and the answer to the ordinary enterprise
+form: inputs with no name, no test id, and an id the framework invents on every
+load, sitting in a table cell next to the words "From date". The words are the
+stable part. The recorder now reads the label tied to a field, or failing that
+the nearest text to its left on the same line, and records
+`input:right-of(:text-is("From date"))` alongside the field's own identities —
+ranked above an invented id, because a label outlives a redesign that renumbers
+everything else. Verified against the browser before being adopted: Playwright's
+layout selectors order matches by distance, so the nearest field to the label
+is the one that wins.
+
+**Prove a query by what changed, not by what exists.** The single most valuable
+thing found in the research, because it is the exact shape of this project's
+hardest step. The results grid is usually already on screen holding the previous
+answer, so nothing appears and nothing vanishes when the query runs: a check
+that the grid is visible passes instantly, against stale rows, and the run
+reports success for a query that never ran. Every serious testing guide names
+this — the element exists but its content is stale — as a top cause of false
+passes. The recorder now records how much each container holds (a count of
+descendants and a length of text, never the text itself), the compiler turns a
+container that actually filled into a `content_changed` proof, and the engine
+measures that container before the step and waits for it to differ after.
+
+**Say what the page has now.** Self-healing tools respond to a locator that no
+longer resolves by scoring the live page against a stored description of the
+element and swapping in the closest match at runtime. The scoring is the good
+half; the swapping is a business decision — the difference between "Search" and
+"Submit" is not a lookup — and this platform is not allowed to make it. So the
+recorder stores what a person would say about a control (what kind of thing,
+what it is called, the words beside it, roughly where on screen), and a run that
+cannot find it names the closest thing the page now has, in that control's real
+name, and stops: *"the button called 'Inquiry' is no longer on this page. The
+closest thing on it now is a button called 'Search'. Nothing was clicked."*
+
 ### Phase 4 — One timeline instead of five subsystems · **done**
 
 Until now each sense keeps its own notes: steps in the database, frames on disk,
@@ -216,6 +257,34 @@ rather than guessing.
 One real run, with the operator present, per `tasks/CURRENT.md`. It stops at the
 first failure and is diagnosed from sanitized evidence. Three consecutive clean
 unattended runs before anything is approved or scheduled.
+
+## Where these ideas came from
+
+The techniques in Phase 3d were taken from how established tools handle the
+same problems, then adapted rather than copied — every one of them had to be
+reconciled with failing closed:
+
+* [UiPath — advanced descriptor configuration](https://docs.uipath.com/activities/other/latest/ui-automation/advanced-descriptor-configuration)
+  and [fuzzy selectors and anchors](https://apix-drive.com/en/blog/other/fuzzy-selector-vs-strict-selector-uipath):
+  anchoring an element to a stable neighbour. Adopted. Their fuzzy matching —
+  accepting an element whose attributes merely *resemble* the recorded ones —
+  was not: a Levenshtein-scored near-match is precisely the guess this platform
+  refuses.
+* [Playwright's locator guidance](https://playwright.dev/docs/locators): prefer
+  what a control *is* and what it is *called* over how it is built. Already the
+  recorder's ordering; the research confirmed the priority and prompted the
+  label-anchored fallback beneath it.
+* [Flaky-test analyses of Playwright suites](https://mergify.com/learn/flaky-tests/playwright):
+  the element exists but holds stale data, and `networkidle` never settles in a
+  single-page application. Both shaped `content_changed`; the settle helper
+  already caps its wait rather than trusting network quiet.
+* [Healenium and the self-healing category](https://qaskills.sh/blog/healenium-selenium-self-healing-guide):
+  score the live page against a stored fingerprint of the element. Adopted as
+  diagnosis. Rejected as action.
+* [Stagehand, Skyvern and the agent-driven frameworks](https://www.skyvern.com/blog/browser-use-alternatives/):
+  their answer to a changed page is to let a model decide at run time. This
+  project deliberately keeps the model out of the run: it helps compile the
+  plan, and deterministic replay executes it.
 
 ## What is deliberately not in this plan
 

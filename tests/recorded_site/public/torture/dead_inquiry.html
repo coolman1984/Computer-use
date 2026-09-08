@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>An inquiry that quietly does nothing</title>
+<!-- The failure the change-proof exists to catch: the button is there, the
+     click lands, the grid is visible and full of yesterday's rows — and the
+     query never ran. Every check based on presence passes. -->
+<body style="font:15px system-ui">
+  <button id="btnInquiry">Inquiry</button>
+  <div id="resultGrid">
+    <div class="row">previous answer 1</div>
+    <div class="row">previous answer 2</div>
+    <div class="row">previous answer 3</div>
+  </div>
+</body>

@@ -119,6 +119,9 @@ class ReplaySession:
         # before the first action runs; see _on_dialog for why the answer
         # decides between accepting and dismissing.
         self.expects_dialogs = False
+        # What the current step's proof container held before the step ran; see
+        # the content_changed check for why the comparison has to start there.
+        self._size_before: tuple[int, int] | None = None
 
     # ---------- setup ----------
 
@@ -328,6 +331,9 @@ class ReplaySession:
                     float(action.get("wait_timeout_seconds", self.timeout / 1000)) * 1000
                 )
                 self._verify_precondition(action)
+                # Read what the results area holds *before* acting, because the
+                # proof for a query is that it changed — not that it exists.
+                self._size_before = self._content_size(action)
                 self._dispatch(action)
                 self._verify(action)
                 self._record(seq, action, ok=True, attempt=attempt, started=started)
@@ -462,6 +468,29 @@ class ReplaySession:
             action.get("seq", 0),
             "the recorded press/release control is not uniquely actionable",
         )
+
+    def _content_size(self, action: dict[str, Any]) -> tuple[int, int] | None:
+        """How much the step's proof container holds, or None if it is not there.
+
+        A pair rather than one number: a grid can replace one page of rows with
+        another of the same length, and the descendant count catches that where
+        text length alone would not.
+        """
+        success = action.get("success") or {}
+        if success.get("type") != "content_changed":
+            return None
+        selector = str(success.get("value") or "")
+        if not selector:
+            return None
+        try:
+            measured = self._scope(action).locator(selector).first.evaluate(
+                "(el) => [el.getElementsByTagName('*').length, (el.textContent || '').length]"
+            )
+        except Exception:
+            return None
+        if not isinstance(measured, list) or len(measured) != 2:
+            return None
+        return int(measured[0]), int(measured[1])
 
     def _selected_values(self, action: dict[str, Any]) -> list[str]:
         """Every option currently chosen in a list, which `input_value` cannot give.
@@ -701,6 +730,26 @@ class ReplaySession:
             )
             return
 
+        if kind == "content_changed":
+            # The step that runs the query is the hardest one in a report task to
+            # prove and the easiest one to fool. The results grid is usually
+            # already on screen holding the previous answer, so "the grid is
+            # visible" passes instantly against stale rows and the run reports
+            # success for a query that never ran. What changes is how much is in
+            # it, so that is what gets checked — and only the amount is ever
+            # read, never the contents.
+            before = self._size_before
+            if before is None:
+                raise StepFailed(
+                    seq,
+                    "the results area this step is proved by was not on the page before it ran",
+                )
+            self._wait_until(
+                lambda: self._content_size(action) not in (None, before),
+                seq, "the results area did not change, so the query did not run",
+            )
+            return
+
         if kind == "value_not_empty":
             # Used for secrets: the value itself is never compared or reported.
             self._wait_until(
@@ -934,11 +983,89 @@ class ReplaySession:
         position = self._position_locator(action, scope)
         if position is not None:
             return position
-        raise StepFailed(
-            action.get("seq", 0),
-            "the element this step needs is no longer on the page — the site has probably "
-            "changed, so record the task again",
+        raise StepFailed(action.get("seq", 0), self._missing_element_reason(action, scope))
+
+    # Runs in the page when a step's element cannot be found. It scores what is
+    # actually there against what the recording described, so the failure can say
+    # which control the site now has instead. It only reads and ranks; choosing
+    # one of these is deliberately not on offer, because the difference between
+    # "Search" and "Submit" is a business decision and the platform's rule is to
+    # fail rather than guess.
+    _NEAREST_SCRIPT = """
+    (want) => {
+      // Comparison folds case; what gets reported keeps the page's own, because
+      // the operator has to find that control on the screen by its real name.
+      const clean = (v) => (v || '').replace(/\\s+/g, ' ').trim();
+      const wanted = clean(want.name).toLowerCase();
+      const named = (el) => clean(el.getAttribute('aria-label') || el.getAttribute('title') || el.innerText);
+      const score = (el) => {
+        let points = 0;
+        if (el.tagName.toLowerCase() === want.tag) points += 2;
+        const name = named(el).toLowerCase();
+        if (wanted && name === wanted) points += 6;
+        else if (wanted && name && (name.includes(wanted) || wanted.includes(name))) points += 3;
+        const rect = el.getBoundingClientRect();
+        if (want.x !== null && want.y !== null && rect.width && innerWidth) {
+          const dx = (rect.left + rect.width / 2) / innerWidth - want.x;
+          const dy = (rect.top + rect.height / 2) / innerHeight - want.y;
+          if (Math.hypot(dx, dy) < 0.1) points += 2;
+        }
+        return points;
+      };
+      const out = [];
+      for (const el of document.querySelectorAll(
+        'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem]'
+      )) {
+        const rect = el.getBoundingClientRect();
+        if (!(rect.width > 0 && rect.height > 0)) continue;
+        const points = score(el);
+        if (points >= 3) out.push({ points, tag: el.tagName.toLowerCase(), name: named(el).slice(0, 60) });
+      }
+      out.sort((a, b) => b.points - a.points);
+      return out.slice(0, 3);
+    }
+    """
+
+    def _missing_element_reason(self, action: dict[str, Any], scope: Any) -> str:
+        """Say what the page has now, not merely that it lacks what we wanted."""
+        described = (action.get("inputs") or {}).get("_fingerprint") or {}
+        wanted = described.get("name") or described.get("anchor") or ""
+        if not described:
+            return (
+                "the element this step needs is no longer on the page — the site has probably "
+                "changed, so record the task again"
+            )
+        subject = f"the {described.get('role') or described.get('tag') or 'control'}"
+        if wanted and wanted != "[redacted]":
+            subject += f" called '{wanted}'"
+        try:
+            nearest = scope.evaluate(self._NEAREST_SCRIPT, {
+                "tag": described.get("tag", ""),
+                "name": wanted if wanted != "[redacted]" else "",
+                "x": described.get("x"),
+                "y": described.get("y"),
+            })
+        except Exception:
+            nearest = []
+        if not nearest:
+            return (
+                f"{subject} is no longer on this page, and nothing on it now resembles that "
+                "control — the screen is probably not the one the recording was made on"
+            )
+        closest = nearest[0]
+        alternatives = ", ".join(
+            f"'{item['name']}'" for item in nearest[1:] if item.get("name")
         )
+        reason = (
+            f"{subject} is no longer on this page. The closest thing on it now is a "
+            f"{closest['tag']} called '{closest['name']}'"
+        )
+        if alternatives:
+            reason += f" (then {alternatives})"
+        # Naming a replacement is as far as this goes. Clicking it would mean
+        # deciding, on somebody's business system, that two differently-named
+        # buttons do the same job.
+        return reason + ". Nothing was clicked; check the screen and repair this step in review."
 
     def _position_locator(self, action: dict[str, Any], scope: Any) -> Any | None:
         # A DOM step must fail when all of its recorded selectors fail. Falling

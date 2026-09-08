@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Results that refill in place</title>
+<!-- The hardest step in a report task to prove, and the easiest to fool. The
+     grid is already on screen holding yesterday's answer, so nothing appears
+     and nothing vanishes when the query runs: "the grid is visible" passes
+     instantly, against stale rows. What changes is how much is in it. -->
+<body style="font:15px system-ui">
+  <button id="btnInquiry">Inquiry</button>
+  <div id="resultGrid">
+    <div class="row">previous answer 1</div>
+    <div class="row">previous answer 2</div>
+    <div class="row">previous answer 3</div>
+  </div>
+  <script>
+    document.getElementById('btnInquiry').addEventListener('click', () => {
+      const grid = document.getElementById('resultGrid');
+      // A real portal answers a moment later, not instantly.
+      setTimeout(() => {
+        grid.innerHTML = '';
+        for (let row = 0; row < 24; row++) {
+          const line = document.createElement('div');
+          line.className = 'row';
+          line.textContent = 'result row ' + row;
+          grid.appendChild(line);
+        }
+      }, 400);
+    });
+  </script>
+</body>

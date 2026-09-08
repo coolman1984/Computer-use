@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A form whose fields have nothing of their own</title>
+<!-- The ordinary enterprise form: fields with no name, no test id, and an id
+     the framework invents on every load. The only stable thing on the screen
+     is the words next to them. -->
+<body style="font:15px system-ui">
+  <table>
+    <tr><td>From date</td><td><input class="cell"></td></tr>
+    <tr><td>To date</td><td><input class="cell"></td></tr>
+  </table>
+  <script>
+    document.querySelectorAll('input.cell').forEach((field) => {
+      field.id = 'ext-gen-' + Math.floor(Math.random() * 1e9);
+    });
+  </script>
+</body>

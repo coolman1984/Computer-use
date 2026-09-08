@@ -35,6 +35,15 @@ _LAYER_CONFIDENCE = {"dom": "high", "visual": "low", "manual": "none"}
 _NEXT_ACTIONABLE_ACTIONS = {"click", "fill", "select", "check"}
 _OBSERVED_BEFORE = "_observed_visible_before"
 _OBSERVED_AFTER = "_observed_visible_after"
+_SIZES_BEFORE = "_observed_sizes_before"
+_SIZES_AFTER = "_observed_sizes_after"
+
+# How much a container has to grow before the change is worth calling proof.
+# One or two more nodes is ordinary page churn — a tooltip, a focus ring, a
+# spinner that came and went. A query that returned rows moves this by far
+# more, and demanding a real jump keeps an idle screen from vouching for a
+# query that never ran.
+_MEANINGFUL_GROWTH = 3
 _MODIFIER_KEYS = {"Control", "Shift", "Alt", "Meta"}
 
 # These words identify a click which may submit, change, or publish business
@@ -203,6 +212,55 @@ def _infer_observed_selector_proofs(actions: list[dict[str, Any]]) -> None:
             )
         if selector:
             action["success"] = {"type": "selector_visible", "value": selector}
+            continue
+        # Nothing appeared, which is the normal shape of the most important step
+        # in a report task: the results area was already on screen, holding the
+        # previous answer, and the query refilled it. Then the proof is that it
+        # changed — see the content_changed check in the replay engine.
+        filled = _container_that_filled(action, actions[index + 1] if index + 1 < len(actions) else None)
+        if filled:
+            action["success"] = {"type": "content_changed", "value": filled}
+
+
+def _container_that_filled(action: dict[str, Any], following: dict[str, Any] | None) -> str:
+    """The selector of the container that gained the most content over this step.
+
+    Sizes are compared against the next action's pre-state where there is one,
+    for the same reason the visible-locator diff prefers it: the next human
+    action starts once this one has settled, so it is the most precise boundary
+    available and cannot include effects from unrelated later steps.
+    """
+    before = {item["value"]: item for item in _observed_sizes(action, _SIZES_BEFORE)}
+    if not before:
+        return ""
+    after_source = action
+    key = _SIZES_AFTER
+    if following is not None and _same_scope(action.get("target"), following.get("target")):
+        after_source, key = following, _SIZES_BEFORE
+    grew: list[tuple[int, str]] = []
+    for item in _observed_sizes(after_source, key):
+        was = before.get(item["value"])
+        if was is None:
+            continue  # a container that did not exist before is an appearance, handled above
+        growth = int(item["descendants"]) - int(was["descendants"])
+        if growth >= _MEANINGFUL_GROWTH:
+            grew.append((growth, item["value"]))
+    if not grew:
+        return ""
+    # The container that gained the most is the results area; its ancestors grew
+    # by the same amount and would be a vaguer thing to check.
+    grew.sort(key=lambda pair: (-pair[0], len(pair[1])))
+    return grew[0][1]
+
+
+def _observed_sizes(action: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    values = (action.get("inputs") or {}).get(key)
+    if not isinstance(values, list):
+        return []
+    return [
+        item for item in values
+        if isinstance(item, dict) and item.get("value") and "descendants" in item
+    ]
 
 
 def _observed_locators(action: dict[str, Any], key: str) -> list[dict[str, Any]]:

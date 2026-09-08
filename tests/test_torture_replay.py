@@ -255,3 +255,99 @@ def test_the_same_page_does_produce_the_file_once_the_plan_records_the_dialog(
 
     assert result.ok, result.message
     assert result.file_path and Path(result.file_path).exists()
+
+
+def test_a_query_that_never_ran_fails_even_though_its_grid_is_full(
+    services, engine, site
+) -> None:
+    """Presence proves nothing here: the grid is visible and full of stale rows."""
+    result = _replay(services, engine, site, "dead_inquiry.html", [
+        _action(1, "click", locator={"strategy": "css", "value": '[id="btnInquiry"]'},
+                success={"type": "content_changed", "value": '[id="resultGrid"]'}),
+    ])
+
+    failures = [step for step in _performed(result) if not step[2]]
+    assert failures, "a query that did nothing must not pass on a grid that was already full"
+    assert "did not change" in failures[0][3]
+
+
+def test_the_same_proof_passes_once_the_query_really_refills_the_grid(
+    services, engine, site
+) -> None:
+    """The control case, so the rule above cannot be satisfied by failing everything."""
+    result = _replay(services, engine, site, "stale_grid.html", [
+        _action(1, "click", locator={"strategy": "css", "value": '[id="btnInquiry"]'},
+                success={"type": "content_changed", "value": '[id="resultGrid"]'}),
+    ])
+
+    _all_ran(result)
+
+
+def test_a_change_proof_whose_container_is_missing_fails_clearly(
+    services, engine, site
+) -> None:
+    """Not silently: a proof that cannot be measured is not a proof that passed."""
+    result = _replay(services, engine, site, "stale_grid.html", [
+        _action(1, "click", locator={"strategy": "css", "value": '[id="btnInquiry"]'},
+                success={"type": "content_changed", "value": '[id="noSuchGrid"]'}),
+    ])
+
+    failures = [step for step in _performed(result) if not step[2]]
+    assert failures and "was not on the page before it ran" in failures[0][3]
+
+
+def test_a_field_is_reachable_at_replay_by_the_words_beside_it(
+    services, engine, site
+) -> None:
+    """The anchor has to survive the ids being regenerated on this very load."""
+    result = _replay(services, engine, site, "anchored_form.html", [
+        _action(1, "fill",
+                locator={"strategy": "css", "value": 'input:right-of(:text-is("From date"))'},
+                inputs={"value": "2026-09-01"},
+                success={"type": "value_equals", "value": "2026-09-01"},
+                retry={"max_attempts": 2, "safe_to_repeat": True}),
+        _action(2, "fill",
+                locator={"strategy": "css", "value": 'input:right-of(:text-is("To date"))'},
+                inputs={"value": "2026-09-30"},
+                success={"type": "value_equals", "value": "2026-09-30"},
+                retry={"max_attempts": 2, "safe_to_repeat": True}),
+    ])
+
+    _all_ran(result)
+
+
+def test_a_renamed_control_is_named_in_the_failure_rather_than_guessed_at(
+    services, engine, site
+) -> None:
+    """What happens to every automation after a release.
+
+    The control still exists, in the same place, doing the same job — under a
+    new name and a new id, so every recorded locator misses. The run must say
+    what the page has now, and must still refuse to press it: deciding that
+    'Search' does the job of 'Inquiry' is a business decision, not a lookup.
+    """
+    result = _replay(services, engine, site, "renamed_button.html", [
+        _action(1, "click",
+                locator={"strategy": "css", "value": '[id="btnInquiry"]',
+                         "fallbacks": ['role=button[name="Inquiry"]']},
+                inputs={"_fingerprint": {"tag": "button", "role": "button",
+                                         "name": "Inquiry", "anchor": "", "x": 0.05, "y": 0.05}}),
+    ])
+
+    failures = [step for step in _performed(result) if not step[2]]
+    assert failures, "a step whose element is gone must fail"
+    reason = failures[0][3]
+    assert "Inquiry" in reason and "Search" in reason, reason
+    assert "Nothing was clicked" in reason
+
+
+def test_a_step_with_no_description_still_fails_with_the_plain_message(
+    services, engine, site
+) -> None:
+    """Recordings made before descriptions existed must not lose their error."""
+    result = _replay(services, engine, site, "renamed_button.html", [
+        _action(1, "click", locator={"strategy": "css", "value": '[id="btnInquiry"]'}),
+    ])
+
+    failures = [step for step in _performed(result) if not step[2]]
+    assert failures and "no longer on the page" in failures[0][3]

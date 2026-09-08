@@ -324,3 +324,64 @@ def test_every_option_chosen_in_a_multi_select_is_recorded(recorded, site) -> No
     shift = next(step for step in chosen if "shift" in step["locator"]["value"])
     assert shift["inputs"] == {"value": "night"}
     assert shift["success"] == {"type": "value_equals", "value": "night"}
+
+
+# ---------- the step that runs the query ----------
+
+
+def test_a_grid_that_refills_in_place_is_proved_by_changing_not_by_existing(
+    recorded, site
+) -> None:
+    """The grid was already on screen holding the previous answer.
+
+    Nothing appears and nothing vanishes when the query runs, so the proof the
+    compiler would otherwise reach for — "the grid is visible" — passes
+    instantly against stale rows, and a query that never ran reports success.
+    """
+    from smartops.recordings.converter import build_plan
+
+    def run_the_query(page) -> None:
+        page.click("#btnInquiry")
+        page.wait_for_function(
+            "() => document.querySelectorAll('#resultGrid .row').length === 24"
+        )
+        page.wait_for_timeout(700)
+        page.click("#btnInquiry")  # a second action, so the first one has a settled boundary
+        page.wait_for_timeout(600)
+
+    _capture(recorded, f"{site.base_url}/torture/stale_grid.html", run_the_query)
+    record = recorded.recordings.list(limit=1)[0]
+    plan = build_plan(
+        recording_id=record.id, system_key="portal", report_key="daily",
+        steps=recorded.recordings.steps(record.id),
+        start_url=f"{site.base_url}/torture/stale_grid.html",
+    )
+
+    inquiry = plan["actions"][0]
+    assert inquiry["success"]["type"] == "content_changed", inquiry["success"]
+    assert "resultGrid" in inquiry["success"]["value"]
+
+
+def test_a_field_with_no_identity_of_its_own_is_found_by_the_words_beside_it(
+    recorded, site
+) -> None:
+    """The ordinary enterprise form: the label is the only stable thing on it."""
+    def fill_the_dates(page) -> None:
+        page.fill("table tr:nth-child(1) input", "2026-09-01")
+        page.fill("table tr:nth-child(2) input", "2026-09-30")
+        page.wait_for_timeout(600)
+
+    steps = _capture(recorded, f"{site.base_url}/torture/anchored_form.html", fill_the_dates)
+
+    typed = [step for step in steps if step["action"] == "fill"]
+    assert len(typed) == 2, _actions(steps)
+
+    first = [typed[0]["locator"]["value"], *typed[0]["locator"].get("fallbacks", [])]
+    assert any("From date" in candidate for candidate in first), first
+    # And the invented id is still kept, behind the label rather than in front.
+    anchored = next(i for i, c in enumerate(first) if "From date" in c)
+    generated = next(i for i, c in enumerate(first) if "ext-gen" in c)
+    assert anchored < generated
+
+    second = [typed[1]["locator"]["value"], *typed[1]["locator"].get("fallbacks", [])]
+    assert any("To date" in candidate for candidate in second), second

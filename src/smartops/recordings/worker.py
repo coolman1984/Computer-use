@@ -130,6 +130,86 @@ _CAPTURE_SCRIPT = """
     return text.length > 0 && text.length <= 60 ? text.replace(/\\s+/g, ' ') : '';
   };
 
+  // What the screen calls this field, taken from the thing next to it.
+  //
+  // Enterprise forms are full of inputs with nothing of their own worth
+  // addressing — no name, no test id, an id the framework made up — sitting in
+  // a table cell beside the words "From date". The words are the stable part,
+  // and every serious automation tool leans on that: the field is found by its
+  // neighbour rather than by itself. The browser is asked for elements to the
+  // right of that text and the nearest one wins, which is what makes this
+  // survive a redesign that moves the row but keeps the label.
+  function anchorTextFor(el) {
+    const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
+    const usable = (value) => {
+      // Long prose is a paragraph, not a label; a bare number is a value that
+      // will be different tomorrow.
+      if (!value || value.length > 40) return '';
+      return /[a-z\u0600-\u06FF]/i.test(value) ? value : '';
+    };
+    try {
+      if (el.id) {
+        const tied = document.querySelector('label[for=' + q(el.id) + ']');
+        if (tied) { const text = usable(clean(tied.textContent)); if (text) return text; }
+      }
+      const wrapping = el.closest && el.closest('label');
+      if (wrapping) {
+        // The field's own text is inside the label; only the words around it
+        // are the label.
+        const text = usable(clean(wrapping.textContent));
+        if (text) return text;
+      }
+      const describedBy = el.getAttribute && el.getAttribute('aria-labelledby');
+      if (describedBy) {
+        const named = document.getElementById(describedBy.split(/\s+/)[0]);
+        if (named) { const text = usable(clean(named.textContent)); if (text) return text; }
+      }
+      // Nothing formal ties a label to this field, which is the ordinary case
+      // in a table-laid-out form: take the nearest text sitting to its left on
+      // the same line.
+      const rect = el.getBoundingClientRect();
+      if (!rect.width) return '';
+      let best = '', bestGap = Infinity;
+      for (const node of document.querySelectorAll('td,th,label,span,div,p')) {
+        if (node.contains(el) || node.childElementCount > 0) continue;
+        const other = node.getBoundingClientRect();
+        if (!other.width || other.right > rect.left) continue;
+        const sameLine = Math.abs((other.top + other.height / 2) - (rect.top + rect.height / 2)) < rect.height;
+        if (!sameLine) continue;
+        const gap = rect.left - other.right;
+        if (gap < bestGap && gap < 400) {
+          const text = usable(clean(node.textContent));
+          if (text) { best = text; bestGap = gap; }
+        }
+      }
+      return best;
+    } catch (_) { return ''; }
+  }
+
+  // What this element *was*, in the terms a person would use to describe it.
+  //
+  // Kept for the moment every locator fails. Today that ends the run with "the
+  // element is no longer on the page", which is true and useless: it does not
+  // say whether the button was renamed, moved, or removed, so the only way
+  // forward is to record the whole task again. With this, replay can look at
+  // the page it actually got and name the closest thing to what it wanted —
+  // and then still stop, because picking that thing itself would be guessing
+  // with somebody's business system.
+  function fingerprintFor(el) {
+    if (!el || !el.tagName || credentialField(el)) return null;
+    const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    return {
+      tag: el.tagName.toLowerCase(),
+      role: roleOf(el),
+      name: accessibleName(el),
+      anchor: anchorTextFor(el),
+      // Where it sat, as a fraction of the window, so "the button moved to the
+      // other side of the screen" is answerable without storing a coordinate.
+      x: rect && innerWidth ? Math.round((rect.left + rect.width / 2) / innerWidth * 100) / 100 : null,
+      y: rect && innerHeight ? Math.round((rect.top + rect.height / 2) / innerHeight * 100) / 100 : null,
+    };
+  }
+
   // Several ways to find the same element, strongest identity first. Replay
   // tries them in order, so a page that regenerates its ids between releases can
   // still be driven by name, by test id, or by what its controls are called.
@@ -149,6 +229,17 @@ _CAPTURE_SCRIPT = """
     if (role && label) add('role=' + role + '[name=' + q(label) + ']');
     const tag = el.tagName.toLowerCase();
     if (tag === 'a' && el.getAttribute('href')) add('a[href=' + q(el.getAttribute('href')) + ']');
+    // The field next to the words that name it. Ranked below the identities the
+    // element carries itself, and above an id the page invented this morning,
+    // because a label outlives a redesign that renumbers everything else.
+    if (!credentialField(el)) {
+      const anchor = anchorTextFor(el);
+      if (anchor) {
+        add(tag + ':right-of(:text-is(' + q(anchor) + '))');
+        add(tag + ':right-of(:text(' + q(anchor) + '))');
+        add(tag + ':near(:text-is(' + q(anchor) + '))');
+      }
+    }
     if (label && !role) add('text=' + q(label));
     // Last, and only because a wrong-looking id still beats no locator at all
     // when every meaningful identity is missing.
@@ -228,6 +319,44 @@ _CAPTURE_SCRIPT = """
   }
   window.__smartopsObservableLocators = observableLocators;
 
+  // How much each container currently holds — not what it holds.
+  //
+  // The single most important step in a report task is the one that runs the
+  // query, and it is the one hardest to prove. The results grid is usually
+  // already on screen holding the *previous* answer, so nothing appears and
+  // nothing disappears: a check that the grid is visible passes instantly,
+  // against stale rows, and the run reports success for a query that never
+  // ran. What actually changed is how much is in it.
+  //
+  // Only a count of children and a length of text travel — never the text.
+  // Both are read without touching innerText, which would force the browser to
+  // lay the page out again on every recorded action.
+  function observableSizes() {
+    const output = [], seen = new Set();
+    const candidates = document.querySelectorAll(
+      '[id],[name],[data-testid],[data-test],[aria-label]'
+    );
+    for (const el of candidates) {
+      if (output.length >= 60) break;
+      // A container, not a control: something with enough inside it that a
+      // change in the amount means something happened.
+      if (el.childElementCount < 3) continue;
+      const rect = el.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0)) continue;
+      const locator = locatorFor(el);
+      if (!locator.value || seen.has(locator.value)) continue;
+      seen.add(locator.value);
+      output.push({
+        value: locator.value,
+        children: el.childElementCount,
+        descendants: el.getElementsByTagName('*').length,
+        length: (el.textContent || '').length,
+      });
+    }
+    return output;
+  }
+  window.__smartopsObservableSizes = observableSizes;
+
   const report = (payload) => {
     try { window.__smartopsReport(payload); } catch (_) { /* recording ended */ }
   };
@@ -274,6 +403,7 @@ _CAPTURE_SCRIPT = """
     pending = {
       action: 'fill',
       locator: locatorFor(el),
+      fingerprint: fingerprintFor(el),
       // Only a non-secret value travels. For a secret the platform records that
       // something must be typed here and where to get it at run time.
       value: secret ? '' : fieldValue(el),
@@ -509,7 +639,9 @@ _CAPTURE_SCRIPT = """
   const clickPayload = (el, e, w, h) => ({
     action: 'click',
     locator: locatorFor(el),
+    fingerprint: fingerprintFor(el),
     observedVisibleLocators: observableLocators(),
+    observedSizes: observableSizes(),
     x: e.clientX / w, y: e.clientY / h,
     ...relativePoint(el, e, w, h),
     ...describe(el),
@@ -623,7 +755,8 @@ _CAPTURE_SCRIPT = """
     const focused = realTarget(e);
     report({
       action: 'press', locator: locatorFor(focused), key: parts.join('+'),
-      observedVisibleLocators: observableLocators(), ...describe(focused)
+      observedVisibleLocators: observableLocators(), observedSizes: observableSizes(),
+      ...describe(focused)
     });
   }, true);
 })();
@@ -1326,6 +1459,7 @@ class PlaywrightRecordingWorker:
             # For a human's delayed next action, that next event's before-sample
             # provides the same evidence during compilation.
             payload["observedVisibleLocatorsAfter"] = self._observable_locators(frame or page)
+            payload["observedSizesAfter"] = self._observable_sizes(frame or page)
 
             step: dict[str, Any] = {
                 "kind": action,
@@ -1362,6 +1496,9 @@ class PlaywrightRecordingWorker:
                     "element_x_ratio": float(payload["elementX"]),
                     "element_y_ratio": float(payload["elementY"]),
                 })
+            fingerprint = _redacted_fingerprint(payload.get("fingerprint"))
+            if fingerprint:
+                step["inputs"]["_fingerprint"] = fingerprint
             self._fill_contract(step, payload)
             self._emit(
                 step,
@@ -1454,6 +1591,17 @@ class PlaywrightRecordingWorker:
             step["success"] = {"type": "none"}
             step["retry"] = {"max_attempts": 1, "safe_to_repeat": False}
 
+    def _observable_sizes(self, scope: Any) -> list[dict[str, Any]]:
+        """How much each container holds now, so a filled grid is distinguishable
+        from the same grid still holding the previous answer."""
+        try:
+            observed = scope.evaluate(
+                "() => window.__smartopsObservableSizes ? window.__smartopsObservableSizes() : []"
+            )
+        except Exception:
+            return []
+        return _redacted_observed_sizes(observed)
+
     def _observable_locators(self, scope: Any) -> list[dict[str, Any]]:
         try:
             observed = scope.evaluate(
@@ -1472,6 +1620,12 @@ class PlaywrightRecordingWorker:
             step["inputs"]["_observed_visible_before"] = before
         if after:
             step["inputs"]["_observed_visible_after"] = after
+        sizes_before = _redacted_observed_sizes(payload.get("observedSizes"))
+        sizes_after = _redacted_observed_sizes(payload.get("observedSizesAfter"))
+        if sizes_before:
+            step["inputs"]["_observed_sizes_before"] = sizes_before
+        if sizes_after:
+            step["inputs"]["_observed_sizes_after"] = sizes_after
 
     def _emit(
         self,
@@ -1533,6 +1687,55 @@ class PlaywrightRecordingWorker:
         self._shot_seq = self.vision.frames_taken
         self._last_capture_quality = capture.quality.to_dict() if capture.quality else None
         return capture.relative_path
+
+
+def _redacted_fingerprint(raw: Any) -> dict[str, Any]:
+    """Validate an element description before it reaches the recording contract.
+
+    Only what a person would say about a control travels: what kind of thing it
+    is, what it is called, what words sit beside it, and roughly where on the
+    screen it was — as fractions of the window, never as pixels.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    described = {
+        "tag": str(raw.get("tag") or "")[:20],
+        "role": str(raw.get("role") or "")[:30],
+        "name": redact_text(str(raw.get("name") or ""), 60),
+        "anchor": redact_text(str(raw.get("anchor") or ""), 60),
+    }
+    for axis in ("x", "y"):
+        value = raw.get(axis)
+        if isinstance(value, (int, float)):
+            described[axis] = round(float(value), 2)
+    return described if described.get("tag") else {}
+
+
+def _redacted_observed_sizes(observed: Any) -> list[dict[str, Any]]:
+    """Validate a size snapshot before it reaches the recording contract.
+
+    Only a selector and three counts survive. There is deliberately no path
+    here for a container's text to travel, because the whole point of counting
+    instead of reading is that a report's contents never leave the browser.
+    """
+    if not isinstance(observed, list):
+        return []
+    safe: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in observed[:60]:
+        if not isinstance(raw, dict):
+            continue
+        value = redact_selector(str(raw.get("value") or ""))
+        if not value or value == "[redacted]" or value in seen:
+            continue
+        seen.add(value)
+        safe.append({
+            "value": value,
+            "children": int(raw.get("children") or 0),
+            "descendants": int(raw.get("descendants") or 0),
+            "length": int(raw.get("length") or 0),
+        })
+    return safe
 
 
 def _redacted_observed_locators(observed: Any) -> list[dict[str, Any]]:
