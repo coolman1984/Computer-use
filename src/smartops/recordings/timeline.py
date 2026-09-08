@@ -31,30 +31,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# Every success type `adapters/browser/replay.py::ReplaySession._verify` knows
-# how to check. A proof candidate this module offers must come from that set —
-# inventing a type replay cannot verify would be a promise nobody can keep, and
-# AGENTS.md is explicit that this platform fails rather than guesses.
-SUPPORTED_PROOF_TYPES = {
-    "selector_visible",
-    "selector_hidden",
-    "value_equals",
-    "selected_values_are",
-    "value_not_empty",
-    "checked_is",
-    "url_changed",
-    "new_page",
-    "page_available",
-    "download_started",
-    "network_response",
-    "next_step_actionable",
-}
-
-# Of those, only these four are ones this module's diff engine can honestly
-# derive from a before/after visible-locator comparison and the action kind. A
-# typed value or a checkbox state is proved by reading the field itself, which
-# `worker.py::_fill_contract` already does at the moment of capture; duplicating
-# that here from a locator diff would be a guess, not evidence.
+# Which of the provable success types this module's diff engine can honestly
+# derive from a before/after visible-locator comparison, the action's own kind,
+# and whether the address changed. A typed value or a checkbox state is proved
+# by reading the field itself, which `worker.py::_fill_contract` already does at
+# the moment of capture; deriving that here from a locator diff would be a
+# guess, not evidence.
 _DERIVABLE_PROOF_TYPES = {
     "selector_visible", "selector_hidden", "new_page", "download_started", "url_changed",
 }

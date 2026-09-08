@@ -98,7 +98,10 @@ class ReplaySession:
             getattr(context, "pages", None) or []
         )
         # Replay identities are assigned once and remain stable after closure.
-        self._page_names: dict[int, str] = {}
+        # Keyed by the page object, never by id(): a closed tab's id can be
+        # handed to the next object allocated, and a new tab inheriting a closed
+        # popup's name would send later steps to the wrong window.
+        self._page_names: dict[Any, str] = {}
         self._page_by_name: dict[str, Any] = {}
         self._main_page: Any = None
         self._next_page_number = 1
@@ -112,6 +115,10 @@ class ReplaySession:
         self._responses: list[dict[str, Any]] = []
         self._responses_before = 0
         self._dialogs: list[dict[str, Any]] = []
+        # Whether this plan demonstrated a dialog at all. Set from the plan
+        # before the first action runs; see _on_dialog for why the answer
+        # decides between accepting and dismissing.
+        self.expects_dialogs = False
 
     # ---------- setup ----------
 
@@ -133,12 +140,26 @@ class ReplaySession:
         return page
 
     def _on_dialog(self, dialog: Any) -> None:
-        """Accept a native dialog, matching what the recording accepted."""
-        self._dialogs.append(
-            {"type": getattr(dialog, "type", ""), "message": (getattr(dialog, "message", "") or "")[:200]}
-        )
+        """Answer a native dialog the way the recording did — and only that way.
+
+        A dialog the recording demonstrated is accepted: that is what the person
+        did, and an export behind a confirmation produces nothing otherwise. A
+        dialog the recording never saw is dismissed, because agreeing to a
+        question nobody was asked during capture is exactly the guess this
+        platform is not allowed to make — "are you sure you want to delete these
+        records" is the same shape of dialog as "export now". Dismissing is also
+        what the browser did before any of this was handled, so an unexpected
+        dialog cannot newly break a plan that used to work.
+
+        Either way it is written down, so a run that met a dialog nobody
+        demonstrated says so instead of quietly carrying on.
+        """
+        kind = getattr(dialog, "type", "") or ""
+        message = (getattr(dialog, "message", "") or "")[:200]
+        expected = self.expects_dialogs
+        self._dialogs.append({"type": kind, "message": message, "expected": expected})
         try:
-            dialog.accept()
+            dialog.accept() if expected else dialog.dismiss()
         except Exception:
             pass  # the page closed with the dialog still open
 
@@ -153,7 +174,7 @@ class ReplaySession:
         else:
             name = f"page-{self._next_page_number}"
             self._next_page_number += 1
-        self._page_names[id(page)] = name
+        self._page_names[page] = name
         self._page_by_name[name] = page
         # Download capture is part of the replay contract; propagate an event
         # binding failure instead of silently reporting a missing file later.
@@ -175,7 +196,7 @@ class ReplaySession:
         self._replay_started = True
         self._replay_pages = [page]
         self._next_page_number = 1
-        self._page_names[id(page)] = "main"
+        self._page_names[page] = "main"
         self._page_by_name = {"main": page}
         self._current = page
 
@@ -805,7 +826,7 @@ class ReplaySession:
     def _ensure_page_identities(self) -> None:
         """Backfill identities for compatibility with focused test doubles."""
         for page in list(self._pages):
-            if id(page) in self._page_names:
+            if page in self._page_names:
                 continue
             if self._main_page is None:
                 name = "main"
@@ -813,7 +834,7 @@ class ReplaySession:
             else:
                 name = f"page-{self._next_page_number}"
                 self._next_page_number += 1
-            self._page_names[id(page)] = name
+            self._page_names[page] = name
             self._page_by_name[name] = page
 
     def _try_page(self, name: str) -> Any | None:

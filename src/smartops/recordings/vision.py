@@ -492,11 +492,16 @@ class PageVision:
         self.deep_interval = max(1, deep_interval)
         self._sequence = 0
         self._captures = 0
-        # Per page: the route that last produced real pixels, and its CDP
-        # session. Keyed by id() because Playwright page objects are unhashable
-        # in some versions and are never reused across a recording anyway.
-        self._preferred: dict[int, str] = {}
-        self._sessions: dict[int, Any] = {}
+        # Per page: the route that last produced real pixels, and its DevTools
+        # session. Keyed by the page object itself, never by id(): once a tab
+        # closes and its object is collected, CPython is free to hand the same
+        # id to the next object allocated, and the next tab would then be given
+        # a closed session and another tab's route preference. A closed session
+        # fails quietly — every capture on that page would fall back to the
+        # plain screenshot, losing blank detection and the renderer escalation
+        # without a word. Holding the page keeps the id unreusable as well.
+        self._preferred: dict[Any, str] = {}
+        self._sessions: dict[Any, Any] = {}
         # Set once a page has been seen to withhold its surface, so the
         # recording can say so plainly instead of shipping grey evidence.
         self.blank_frames = 0
@@ -536,7 +541,7 @@ class PageVision:
         Test doubles and non-Chromium builds have no protocol session, and the
         caller falls back to the plain screenshot path rather than failing.
         """
-        key = id(page)
+        key = page
         if key in self._sessions:
             return self._sessions[key]
         session = None
@@ -604,7 +609,7 @@ class PageVision:
         except OSError as exc:
             return Capture(error=f"{type(exc).__name__}: {exc}"[:200])
 
-        preferred = self._preferred.get(id(page), "surface")
+        preferred = self._preferred.get(page, "surface")
         routes = [preferred] + [r for r in ("surface", "renderer") if r != preferred]
 
         first_error = ""
@@ -617,7 +622,7 @@ class PageVision:
                 continue
             quality = self._verdict(page, method, data, deep=deep)
             if not quality.blank:
-                self._preferred[id(page)] = method
+                self._preferred[page] = method
                 return self._write(
                     target, relative, data, method, quality, escalated=index > 0
                 )

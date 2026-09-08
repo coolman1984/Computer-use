@@ -222,3 +222,36 @@ def test_a_multi_select_that_loses_an_option_fails_its_own_proof(
     failures = [step for step in _performed(result) if not step[2]]
     assert failures, "a filter that lost two of its three choices must not pass"
     assert "every option the recording selected" in failures[0][3]
+
+
+def test_a_dialog_the_recording_never_saw_is_refused_not_agreed_to(
+    services, engine, site
+) -> None:
+    """Agreeing to a question nobody was asked during capture is a guess.
+
+    The same native confirmation shape carries "export the report now" and
+    "delete these records". A plan that demonstrated neither has no business
+    answering yes to either, so a run without a recorded dialog step dismisses
+    one — and writes down that it met it.
+    """
+    result = _replay(services, engine, site, "confirm_export.html", [
+        _action(1, "click", locator={"strategy": "css", "value": '[id="btnExport"]'}),
+    ])
+
+    # The click itself ran; what did not happen is the export behind the
+    # confirmation, because nothing in this plan agreed to it.
+    _all_ran(result)
+    assert not result.file_paths, "an unrecorded confirmation must not produce a file"
+
+
+def test_the_same_page_does_produce_the_file_once_the_plan_records_the_dialog(
+    services, engine, site
+) -> None:
+    """The control case, so the rule above cannot be satisfied by refusing everything."""
+    result = _replay(services, engine, site, "confirm_export.html", [
+        _action(1, "click", locator={"strategy": "css", "value": '[id="btnExport"]'}),
+        _action(2, "dialog", inputs={"dialog_type": "confirm", "decision": "accept"}),
+    ], expects=1)
+
+    assert result.ok, result.message
+    assert result.file_path and Path(result.file_path).exists()

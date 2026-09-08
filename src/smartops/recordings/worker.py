@@ -1486,10 +1486,15 @@ class PlaywrightRecordingWorker:
         step.setdefault("inputs", {})
         step.setdefault("success", {"type": "none"})
         step.setdefault("retry", {"max_attempts": 1, "safe_to_repeat": False})
-        # Built from the step dict about to be emitted, on the same thread, right
-        # before it is handed to on_step: the timeline's sequence numbers and the
-        # eventual RecordingStep's sequence numbers advance together only because
-        # nothing can happen to one without the other in between.
+        # The step is written down first, and observed only if it was kept. A
+        # paused recording drops the steps that reach it, and an observation of
+        # a step nobody stored would push every later observation one place out
+        # of step with the recording it describes — so "what changed at step 7"
+        # would answer with step 8's evidence. A callback that answers nothing
+        # (a test double, an older caller) is taken at its word that it kept it.
+        kept = self.on_step(step)
+        if kept is False:
+            return
         observation = self.timeline.record(
             step,
             quality_before=quality_before,
@@ -1497,7 +1502,6 @@ class PlaywrightRecordingWorker:
             url_after=url_after,
         )
         self._note_confidence(step, observation)
-        self.on_step(step)
 
     def _note_confidence(self, step: dict[str, Any], observation: ActionObservation) -> None:
         """Score the step as it is captured, so a weak one can be flagged while recording.

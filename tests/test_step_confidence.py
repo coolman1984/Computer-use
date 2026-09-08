@@ -400,3 +400,25 @@ def test_the_locator_editor_lets_a_dialog_step_have_no_element(services) -> None
     clickable = {"action": "click", "locator": {"strategy": "css", "value": "[id=\"btn\"]"}}
     with pytest.raises(PermanentError, match="at least one real way to find its element"):
         RecordingManager._edit_locator(clickable, {"locator_candidates": []})
+
+
+def test_every_proof_the_engine_checks_can_also_be_chosen_in_review() -> None:
+    """The review editor and the replay engine must know the same vocabulary.
+
+    They drifted once already: the editor refused `selected_values_are` and
+    `next_step_actionable`, so a reviewer could not choose the only proof that
+    works for a filter with several choices, even though the engine checks it
+    perfectly well. Both now read one definition; this is what keeps it that way.
+    """
+    import re
+
+    from smartops.domain.enums import PROVABLE_SUCCESS_TYPES
+
+    engine = Path("src/smartops/adapters/browser/replay.py").read_text(encoding="utf-8")
+    checked = set(re.findall(r'if kind == "([a-z_]+)"', engine)) - {"none"}
+
+    assert checked == set(PROVABLE_SUCCESS_TYPES), (
+        "the replay engine and the shared proof vocabulary disagree: "
+        f"engine only {sorted(checked - set(PROVABLE_SUCCESS_TYPES))}, "
+        f"vocabulary only {sorted(set(PROVABLE_SUCCESS_TYPES) - checked)}"
+    )

@@ -5,16 +5,17 @@ import json, os
 from pathlib import Path
 from typing import Any
 from ..core.errors import ConcurrencyError, PermanentError
-from ..domain.enums import ACTIONS_WITHOUT_AN_ELEMENT, EventType, RecordingStatus, Severity
+from ..domain.enums import (
+    ACTIONS_WITHOUT_AN_ELEMENT,
+    PROVABLE_SUCCESS_TYPES,
+    EventType,
+    RecordingStatus,
+    Severity,
+)
 from ..domain.models import Recording, RecordingStep
 from ..sessions import session_path
 from .converter import build_plan, review_plan
 
-_PROOF_TYPES = {
-    "selector_visible", "selector_hidden", "value_equals", "value_not_empty",
-    "checked_is", "url_changed", "new_page", "page_available", "download_started",
-    "network_response",
-}
 from .worker import PlaywrightRecordingWorker
 
 _ACTIVE = {RecordingStatus.STARTING, RecordingStatus.RECORDING, RecordingStatus.PAUSED, RecordingStatus.STOPPING}
@@ -360,7 +361,7 @@ class RecordingManager:
         if "success" not in changes:
             return
         proof = changes["success"]
-        if not isinstance(proof, dict) or proof.get("type") not in _PROOF_TYPES:
+        if not isinstance(proof, dict) or proof.get("type") not in PROVABLE_SUCCESS_TYPES:
             raise PermanentError("Choose a supported, observable proof of success.")
         kind = proof["type"]
         if kind in {"selector_visible", "selector_hidden", "value_equals", "url_changed"}:
@@ -438,14 +439,23 @@ class RecordingManager:
     def _heartbeat(self, recording_id: str) -> None:
         record=self.services.recordings.get(recording_id)
         if record and record.status in _ACTIVE: record.heartbeat_at=self.services.clock.now(); self.services.recordings.save(record)
-    def _step(self, recording_id: str, data: dict[str, Any]) -> None:
+    def _step(self, recording_id: str, data: dict[str, Any]) -> bool:
+        """Persist one captured step. False when it was dropped and not written.
+
+        The answer matters to the recorder: it keeps a parallel observation for
+        every step, and an observation whose step was thrown away here would
+        shift every later observation out of step with the recording it
+        describes — so an assistant asking "what changed at step 7" would be
+        shown step 8's evidence.
+        """
         record=self.services.recordings.get(recording_id)
-        if not record or record.status == RecordingStatus.PAUSED: return
+        if not record or record.status == RecordingStatus.PAUSED: return False
         self._resolve_secret_ref(record, data)
         step=RecordingStep(recording_id=recording_id, seq=record.step_count+1, occurred_at=self.services.clock.now(), **data); self.services.recordings.save_step(step)
         record.step_count += 1; record.download_count += int(step.kind=="download"); self.services.recordings.save(record)
         root=Path(record.artifact_dir); root.mkdir(parents=True, exist_ok=True)
         with (root/"steps.jsonl").open("a", encoding="utf-8") as out: out.write(json.dumps(step.to_dict(), ensure_ascii=False)+"\n")
+        return True
     @staticmethod
     def _resolve_secret_ref(record: Recording, data: dict[str, Any]) -> None:
         """Name the credential a sensitive field must be filled from at run time.

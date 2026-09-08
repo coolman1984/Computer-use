@@ -33,6 +33,27 @@ ACTIONS_WITHOUT_AN_ELEMENT = frozenset({
     "navigate", "switch_page", "switch_frame", "wait_for", "download", "dialog",
 })
 
+# Every way a step can be proved to have worked. The authority is the replay
+# engine: this is exactly the set `ReplaySession._check_success` knows how to
+# check, and a proof outside it is a promise nobody can keep — the run would
+# either skip the check or fail on a type it does not recognise.
+#
+# Here for the same reason as the set above: three places have to agree about
+# it — the compiler that proposes a proof, the review screen that lets a person
+# choose one, and the observation timeline that offers candidates — and they
+# had already drifted. The review screen was refusing two proofs the engine
+# checks perfectly well, so a reviewer could not pick the only proof that
+# actually works for a multi-choice filter.
+#
+# "none" is deliberately absent. It is a real recorded value — plenty of steps
+# are captured before anyone knows what proves them — but it is not something a
+# reviewer may choose, because choosing it means choosing to check nothing.
+PROVABLE_SUCCESS_TYPES = frozenset({
+    "selector_visible", "selector_hidden", "value_equals", "selected_values_are",
+    "value_not_empty", "checked_is", "url_changed", "new_page", "page_available",
+    "download_started", "network_response", "next_step_actionable",
+})
+
 
 class StepStatus(StrEnum):
     PENDING = "pending"

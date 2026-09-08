@@ -372,6 +372,12 @@ class PlaywrightBrowserAdapter:
             credential_store=self._credential_store,
             evidence_timeout_ms=int(min(request.timeout_seconds, 60) * 1000),
         )
+        # Decided from the plan, before anything can open a dialog: a run only
+        # agrees to a browser dialog that the recording it repeats agreed to.
+        session.expects_dialogs = any(
+            (action.get("action") or action.get("kind")) == "dialog"
+            for action in (plan.get("actions") or [])
+        )
         page = session.open(plan["start_url"])
         try:
             auth_message = self._ensure_authenticated(

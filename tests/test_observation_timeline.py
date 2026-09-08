@@ -22,8 +22,8 @@ import pytest
 pytest.importorskip("playwright.sync_api")
 
 from smartops.domain.models import RecordingStep
+from smartops.domain.enums import PROVABLE_SUCCESS_TYPES
 from smartops.recordings.timeline import (
-    SUPPORTED_PROOF_TYPES,
     ActionObservation,
     Snapshot,
     Timeline,
@@ -200,7 +200,7 @@ def test_timeline_record_builds_an_observation_straight_from_a_worker_step(tmp_p
     assert {"type": "selector_visible", "value": '[id="ready"]'} in observation.proof_candidates
     assert observation.before.frame_path == "screenshots/000001.png"
     assert observation.after.visible_locators == ('[id="prepare"]', '[id="ready"]')
-    assert all(c["type"] in SUPPORTED_PROOF_TYPES for c in observation.proof_candidates)
+    assert all(c["type"] in PROVABLE_SUCCESS_TYPES for c in observation.proof_candidates)
 
 
 # ---------- wired into the real recorder ----------
@@ -217,7 +217,7 @@ def test_a_step_that_reveals_a_new_element_is_recorded_with_a_supported_proof(re
     assert '[id="result-revealed"]' in revealing["changes"]["appeared"]
     assert {"type": "selector_visible", "value": '[id="result-revealed"]'} in revealing["proof_candidates"]
     assert all(
-        candidate["type"] in SUPPORTED_PROOF_TYPES
+        candidate["type"] in PROVABLE_SUCCESS_TYPES
         for observation in observations
         for candidate in observation["proof_candidates"]
     )
@@ -276,3 +276,38 @@ def test_a_click_that_only_changes_the_address_still_has_evidence(recorded, site
     assert clicks, f"the click was not observed: {[s['action'] for s in steps]}"
     proofs = {candidate["type"] for candidate in clicks[0]["proof_candidates"]}
     assert "url_changed" in proofs, clicks[0]["proof_candidates"]
+
+
+def test_a_step_the_recording_threw_away_is_not_observed(services, tmp_path) -> None:
+    """Otherwise every later observation answers for the step after it.
+
+    A paused recording drops the steps that reach it. The observation of a
+    dropped step used to be kept anyway, so from that moment on the timeline
+    and the recording disagreed about which step was which — and the assistant
+    reading "what changed at step 7" was shown step 8's evidence.
+    """
+    from smartops.recordings.worker import PlaywrightRecordingWorker
+
+    kept: list[dict] = []
+    offered: list[dict] = []
+
+    def store(step: dict):
+        """Stands in for RecordingManager._step, refusing the second step the
+        way a paused recording refuses one."""
+        offered.append(step)
+        if len(offered) == 2:
+            return False
+        kept.append(step)
+        return True
+
+    worker = PlaywrightRecordingWorker(
+        "rec-drop", tmp_path, "http://127.0.0.1/never-opened",
+        store, lambda: None, lambda error: None,
+    )
+
+    for action in ("click", "fill", "select"):
+        worker._emit({"kind": action, "action": action})
+
+    assert [step["action"] for step in kept] == ["click", "select"]
+    assert len(worker.timeline) == 2, "an observation was kept for a step nobody stored"
+    assert [item.trigger["action"] for item in worker.timeline] == ["click", "select"]

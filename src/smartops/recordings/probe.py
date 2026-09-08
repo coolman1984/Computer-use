@@ -461,19 +461,23 @@ _EVIDENCE: tuple[tuple[str, str, str, bool], ...] = (
 _USABLE = {"strong", "partial"}
 
 
-def probe_page(page: Any, vision: PageVision | None = None) -> dict[str, Any]:
+def probe_page(page: Any, vision: PageVision) -> dict[str, Any]:
     """Ask one open page every question that decides how it can be automated.
 
     Read-only from end to end. The result is a capability report: what each
     sensor can see, which identity and which proof to build steps on, and the
     honest gaps.
+
+    The caller supplies the lens rather than this creating one, because the
+    only sensible lens is the one that already belongs to something — a live
+    recording's, or the one the diagnostic command made. Diagnosis measures
+    frames without saving any, so it never writes to that lens's directory.
     """
-    lens = vision or PageVision(page_artifact_dir(page))
     sensors = [
         nexacro_sensor(page),
         accessibility_sensor(page),
         addressability_sensor(page),
-        visual_sensor(page, lens),
+        visual_sensor(page, vision),
     ]
     by_name = {sensor.name: sensor for sensor in sensors}
     observation = observe_page(page)
@@ -527,13 +531,6 @@ def probe_page(page: Any, vision: PageVision | None = None) -> dict[str, Any]:
         "observation": observation.to_dict(),
         "verdict": _capability_sentence(by_name, chosen_identity, chosen_evidence, observation),
     }
-
-
-def page_artifact_dir(page: Any) -> str:
-    """A throwaway location for probe frames when no recording owns them."""
-    import tempfile
-
-    return tempfile.mkdtemp(prefix="smartops-probe-")
 
 
 def _capability_sentence(
